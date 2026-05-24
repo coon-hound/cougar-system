@@ -6,13 +6,8 @@ function render() {
   Object.values(STATE.charts).forEach(c => c.destroy());
   STATE.charts = {};
 
-  // Reset scroll on tab switches so a long previous tab doesn't leave the
-  // next one looking pre-scrolled (and on mobile hiding the topbar).
   document.getElementById("content")?.scrollTo(0, 0);
 
-  // Keep filter dropdown options in sync with the current roster — cheap to
-  // rebuild a few <option>s and means we don't have to remember to call this
-  // from every site that mutates STATE.roster (pull, import, edit).
   if (typeof refreshFilterUI === "function") refreshFilterUI();
 
   const el = document.getElementById("content");
@@ -32,18 +27,12 @@ function render() {
     case "soc": renderSOC(el); break;
     case "polar": renderPolar(el); break;
     case "leave": renderLeave(el); break;
-    case "mskAnalytics": renderMSKAnalytics(el); break;
     case "sync": renderSync(el); break;
     default: el.innerHTML = "";
   }
 }
 
 function renderDashboard(el) {
-  // Empty-state guard. The dashboard has nothing meaningful to show until
-  // the roster loads, but the message depends on WHY it's empty: an
-  // authenticated user is mid-pull (or the pull failed); an unauthenticated
-  // visitor needs an invite link. Either way, the user should never see a
-  // "click Pull from Sheet" prompt — that's an auto-handled step now.
   if (!STATE.roster.length) {
     const body = STATE.authToken
       ? `<p style="margin-bottom:8px">Loading data from the sheet…</p>
@@ -59,12 +48,6 @@ function renderDashboard(el) {
   const scoped = filteredRoster();
   const visible = visibleD4Set();
   const today = todayISO();
-  // Derive non-active personnel from today's effective medical layer. A
-  // recruit can have multiple simultaneous statuses (e.g. MC + Excuse Heavy
-  // Load), all of which we want to surface on the dashboard. The "all"
-  // variant returns every active status; we partition into live vs recovering
-  // based on the recruit's *most-severe* tag (statuses[0]) so a recruit with
-  // an active MC plus a ghost-tagged LD still sits in the live (red) table.
   const effectiveAll = currentMedicalEffectiveAll(today).filter(e => passesFilter(e.d4, visible));
   const allByD4 = Object.fromEntries(effectiveAll.map(e => [e.d4, e]));
   const topTag = r => allByD4[r.id]?.statuses[0];
@@ -73,17 +56,11 @@ function renderDashboard(el) {
   const recoveringRows = scoped.filter(r => topTag(r) && topTag(r).ghostDay > 0)
     .sort((a, b) => topTag(a).ghostDay - topTag(b).ghostDay);
   const active = scoped.length - liveRows.length;
-  // In Camp = Total Str − ATTC. ATTC means physically away (MC or Warded);
-  // LD/RMJ/Excuse/Pending recruits are still in camp, just restricted. A
-  // recruit counts as away if *any* of their active statuses is MC/Warded.
   const awayFromCamp = liveRows.filter(r => allByD4[r.id].statuses.some(s => s.tag === "MC" || s.tag === "Warded")).length;
   const inCamp = scoped.length - awayFromCamp;
   const avgPart = STATE.attendance.length ? Math.round(STATE.attendance.reduce((a, c) => a + (c.participating / c.total * 100), 0) / STATE.attendance.length) : 0;
   const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong> — Attendance figures remain company-wide.</div>` : "";
 
-  // R/C breakdown — only shown when scope is "All". Helps reproduce the
-  // parade-state-style "PLATOON x: y/z … COMMANDERS: a/b" split in one
-  // glance without forcing a separate Commanders card.
   const isAll = !STATE.filterRole;
   const recRows = scoped.filter(r => r.role !== "Commander");
   const cmdRows = scoped.filter(r => r.role === "Commander");
@@ -95,9 +72,6 @@ function renderDashboard(el) {
   const cmdAway = cmdLive.filter(r => allByD4[r.id].statuses.some(s => s.tag === "MC" || s.tag === "Warded")).length;
   const recInCamp = recRows.length - recAway;
   const cmdInCamp = cmdRows.length - cmdAway;
-  // Inline "total/recruits/commanders" — the /R/C portion renders smaller
-  // and dimmer so the headline number stays pronounced. Hidden when scope
-  // is already narrowed to one role.
   const inlineBreakdown = (rec, cmd) => isAll
     ? `<span style="font-size:55%;color:var(--muted);font-weight:400;margin-left:1px">/${rec}/${cmd}</span>`
     : "";
@@ -111,7 +85,6 @@ function renderDashboard(el) {
           <button type="button" onclick="openReportModal('FP'); closeReportMenu()">📋 First Parade State</button>
           <button type="button" onclick="openReportModal('LP'); closeReportMenu()">📋 Last Parade State</button>
           <button type="button" onclick="openReportModal('MED'); closeReportMenu()">🏥 Medical Status List</button>
-          <button type="button" onclick="openReportModal('MSK'); closeReportMenu()">🦵 MSK Report</button>
         </div>
       </div>
     </div>
@@ -134,8 +107,6 @@ function renderDashboard(el) {
     ${liveRows.map(r => {
       const entry = allByD4[r.id];
       const multi = entry.statuses.length > 1;
-      // Stack badges, reasons, and durations vertically so each cell aligns
-      // row-by-row across the three columns when a recruit has 2+ statuses.
       const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
       const reasonsCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.reason || '<span style="color:var(--dim)">—</span>'}</div>`).join("");
       const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record)}</div>`).join("");
@@ -153,12 +124,8 @@ function renderDashboard(el) {
       return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${originalCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${clearedCell}</td></tr>`;
     }).join("")}
     </tbody></table></div>` : ""}
-    ${renderDashMSKCases(visible)}
     ${renderDashLeaveOut(visible, today)}`;
 
-  // Status Breakdown chart: tally every active status (a recruit on MC +
-  // Excuse contributes once to each slice). The "Active" slice is per-recruit
-  // so it adds up to roster size only when nobody has stacked statuses.
   const statusCounts = { Active: active };
   effectiveAll.forEach(e => e.statuses.forEach(s => { statusCounts[s.tag] = (statusCounts[s.tag] || 0) + 1; }));
   const chartColor = label => {
@@ -182,478 +149,6 @@ function renderDashboard(el) {
   });
 }
 
-// Active MSK Cases — recruits who self-reported an injury via the Google
-// Form ("Cougar MSK / Physio Log"). One card per recruit, aggregating
-// their initial injury text, any physio appointment we have on file, and
-// the timeline of exercises they've logged. Cleared cases are hidden by
-// default behind a toggle.
-function renderDashMSKCases(visible) {
-  const scoped = STATE.msk.filter(m => passesFilter(m.d4, visible));
-  if (!scoped.length) return "";
-
-  // Group by d4. Per-d4: active if ANY row is not cleared. Cleared if all
-  // are cleared.
-  const byD4 = {};
-  scoped.forEach(m => { (byD4[m.d4] = byD4[m.d4] || []).push(m); });
-
-  const cases = Object.entries(byD4).map(([d4, rows]) => {
-    const allCleared = rows.every(r => r.cleared);
-    const injuries = rows.filter(r => (r.type || "").toLowerCase().includes("report"));
-    const exercises = rows.filter(r => (r.type || "").toLowerCase().includes("log") || (r.type || "").toLowerCase().includes("exercise"));
-    // Latest injury report as the headline; sort by timestamp desc.
-    const tsOf = r => String(r.timestamp || r.Timestamp || "");
-    const latestInjury = [...injuries].sort((a, b) => tsOf(a) < tsOf(b) ? 1 : -1)[0];
-    const orderedExercises = [...exercises].sort((a, b) => tsOf(a) < tsOf(b) ? 1 : -1);
-    return { d4, rows, allCleared, latestInjury, orderedExercises };
-  });
-
-  const active = cases.filter(c => !c.allCleared);
-  const cleared = cases.filter(c => c.allCleared);
-
-  const renderCard = (c, faded) => {
-    const upcomingAppts = STATE.appointments.filter(a =>
-      a.d4 === c.d4 && !a.resolved && (displayDateToISO(a.date) || "") >= todayISO()
-    );
-    const apptLine = upcomingAppts.length
-      ? upcomingAppts.map(a => `<div style="font-size:11px;color:var(--accent)">📅 ${a.date}${a.time ? ` @ ${pad4Time(a.time)}` : ""} — ${a.reason || ""} <span style="color:var(--muted)">(${a.location || ""})</span></div>`).join("")
-      : `<div style="font-size:11px;color:var(--dim)">No physio appointment scheduled yet.</div>`;
-
-    const injuryLine = c.latestInjury
-      ? `<div style="font-size:12px"><span style="color:var(--muted)">Injury:</span> ${c.latestInjury.description || ""}</div>`
-      : `<div style="font-size:12px;color:var(--dim)">No injury description on file.</div>`;
-
-    // Body region chips — auto-classified by default, sergeant can re-tag
-    // by clicking the pencil. Stored on the latest Report Injury row.
-    const regions = c.latestInjury ? getMSKRegionsForRecruit(c.d4) : [];
-    const regionsLine = c.latestInjury ? `<div style="margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
-      ${regions.map(reg => `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}22;color:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}">${reg}</span>`).join("")}
-      <button class="btn btn-icon" onclick="event.stopPropagation(); openMSKRegionMenu('${c.d4}')" title="Re-tag body regions" style="font-size:9px;padding:1px 6px">✎ tag</button>
-    </div>` : "";
-
-    const exercises = c.orderedExercises.length
-      ? `<div style="margin-top:6px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Physio visits (${c.orderedExercises.length})</div>${c.orderedExercises.map(e => {
-          const d = e.physioDate || e.timestamp || "";
-          const exText = e.exercises ? ` — ${e.exercises}` : ` <span style="color:var(--dim)">(no new exercises)</span>`;
-          return `<div style="font-size:11px;padding:4px 6px;background:var(--bg);border-left:2px solid var(--teal);margin-bottom:3px"><span class="mono" style="color:var(--muted);font-size:10px">${d}</span>${exText}</div>`;
-        }).join("")}</div>`
-      : `<div style="font-size:11px;color:var(--dim);margin-top:6px">No physio visits logged yet.</div>`;
-
-    return `<div class="card" style="padding:12px;${faded ? 'opacity:.55;' : ''}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
-        <div onclick="openPerson('${c.d4}')" style="cursor:pointer;font-weight:700">${displayId(c.d4) ? `<span class="mono" style="color:var(--accent);margin-right:6px">${displayId(c.d4)}</span>` : ""}${displayPersonLabel(c.d4)} <span class="badge badge-pink" style="font-size:9px;margin-left:4px">🦵 MSK</span></div>
-        <div style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn" style="font-size:10px;padding:3px 8px" onclick="openAppointmentForm(null, {d4:'${c.d4}', reason:'Physio review', location:'Physio Centre'})" title="Book a physio appointment for this recruit">📅 Book</button>
-          <button class="btn ${c.allCleared ? 'btn-success' : ''}" style="font-size:10px;padding:3px 8px" onclick="toggleMSKCleared('${c.d4}')" title="${c.allCleared ? 'Reopen this case' : 'Mark this case cleared (hides from active list)'}">${c.allCleared ? '↺ Reopen' : '✓ Mark Cleared'}</button>
-        </div>
-      </div>
-      ${injuryLine}
-      ${regionsLine}
-      ${apptLine}
-      ${exercises}
-    </div>`;
-  };
-
-  // Scrollable container — caps height so the MSK section doesn't push
-  // the rest of the dashboard off-screen as cases accumulate. About 3
-  // cards visible at a time; scroll for more.
-  const activeCards = active.length
-    ? `<div style="max-height:560px;overflow-y:auto;padding-right:6px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${active.map(c => renderCard(c, false)).join("")}</div></div>`
-    : `<div class="empty-state" style="padding:12px;font-size:11px">No active MSK cases.</div>`;
-
-  const clearedSection = cleared.length
-    ? `<div style="margin-top:12px"><button class="btn" style="font-size:11px" onclick="toggleMSKShowCleared()">${_mskShowCleared ? "▾ Hide" : "▸ Show"} cleared (${cleared.length})</button>${_mskShowCleared ? `<div style="max-height:400px;overflow-y:auto;padding-right:6px;margin-top:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${cleared.map(c => renderCard(c, true)).join("")}</div></div>` : ""}</div>`
-    : "";
-
-  return `<h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px">🦵 Active MSK Cases <span style="color:var(--dim);font-weight:400">(${active.length}${cleared.length ? ` active · ${cleared.length} cleared` : ""}) <span style="font-size:10px;font-style:italic;color:var(--dim)">— scroll to see all</span></span></h3>
-    ${activeCards}
-    ${clearedSection}`;
-}
-
-// ── MSK ANALYTICS PAGE ───────────────────────────────────
-// Full-page injury aggregation: daily impact, region breakdown, most-
-// affected personnel. Answers the CO's "how many injured and what kind?"
-// at a glance. Date range pickers default to last 14 days; topbar scope
-// filter narrows the population.
-let _mskAnalyticsStart = "";
-let _mskAnalyticsEnd = "";
-const _mskAnalyticsCharts = {};
-
-function setMSKAnalyticsRange() {
-  _mskAnalyticsStart = gv("msk-an-start");
-  _mskAnalyticsEnd = gv("msk-an-end");
-  render();
-}
-
-// Drill-in: show all recruits currently classified under a body region,
-// with the underlying source text (Form report + conductDetail reasons)
-// so the sergeant can see WHY each one landed there. Especially useful
-// for the "Other" bucket — surfaces injuries the auto-classifier couldn't
-// tag, with a one-click Re-tag button to fix manually.
-function viewMSKRegion(region) {
-  const startIso = _mskAnalyticsStart;
-  const endIso = _mskAnalyticsEnd;
-  const visible = visibleD4Set();
-
-  const inWindowReport = m => {
-    if ((m.type || "").toLowerCase().indexOf("report") < 0) return false;
-    if (!passesFilter(m.d4, visible)) return false;
-    const iso = displayDateToISO(m.timestamp) || String(m.timestamp || "").slice(0, 10);
-    return iso && iso >= startIso && iso <= endIso;
-  };
-  const inWindowCD = c => {
-    if (!passesFilter(c.d4, visible)) return false;
-    const iso = displayDateToISO(c.date);
-    return iso && iso >= startIso && iso <= endIso && isMSKReason(c.reason);
-  };
-
-  // All d4s ever affected in this window
-  const affectedD4s = new Set([
-    ...STATE.msk.filter(inWindowReport).map(m => m.d4),
-    ...STATE.conductDetail.filter(inWindowCD).map(c => c.d4)
-  ]);
-
-  // Keep only those whose resolved regions include this one
-  const matching = [...affectedD4s].filter(d4 => getMSKRegionsForRecruit(d4).includes(region));
-
-  // Gather source text per recruit so sergeant can see WHY they were classified.
-  const cards = matching.map(d4 => {
-    const reports = STATE.msk.filter(m => m.d4 === d4 && (m.type || "").toLowerCase().includes("report"));
-    const cdRows = STATE.conductDetail.filter(c => c.d4 === d4 && isMSKReason(c.reason));
-    const hasManual = reports.some(r => r.manualRegions && String(r.manualRegions).trim());
-    const sources = [
-      ...reports.map(r => ({ kind: "Form report", text: r.description || "—", color: "#E97BC2" })),
-      ...cdRows.map(c => ({ kind: c.type, text: c.reason || "—", color: c.type === "PX" ? "#5B8DEF" : c.type === "Fallout" ? "#E8573A" : "#F2A93B" }))
-    ];
-    const allRegions = getMSKRegionsForRecruit(d4);
-    return { d4, sources, allRegions, hasManual };
-  });
-
-  const regionChipsHtml = regs => regs.map(reg => `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}22;color:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}">${reg}</span>`).join(" ");
-
-  const body = `
-    <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.55">
-      <strong style="color:${MSK_REGION_COLORS[region]}">${region}</strong> — ${matching.length} recruit${matching.length === 1 ? "" : "s"} classified${region === "Other" ? ". 'Other' means the keyword classifier couldn't tag them automatically — click <strong>Re-tag</strong> to fix manually." : ". Sources below show why each recruit was tagged."}
-    </div>
-    ${cards.length ? `<div style="display:flex;flex-direction:column;gap:8px;max-height:480px;overflow-y:auto;padding-right:4px">
-      ${cards.map(c => `<div style="padding:10px 12px;background:var(--surface2);border-radius:6px;border-left:3px solid ${MSK_REGION_COLORS[region]}">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-          <div style="display:flex;gap:8px;align-items:center">
-            <span class="mono" style="color:var(--accent);font-weight:700">${displayId(c.d4)}</span>
-            <span style="font-weight:600">${displayPersonLabel(c.d4)}</span>
-            ${c.hasManual ? '<span style="font-size:9px;color:var(--green);text-transform:uppercase;letter-spacing:.5px">Manual override</span>' : ""}
-          </div>
-          <button class="btn" style="font-size:10px;padding:3px 8px" onclick="openMSKRegionMenu('${c.d4}')">✎ Re-tag</button>
-        </div>
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Source text</div>
-        <div style="display:flex;flex-direction:column;gap:3px">
-          ${c.sources.length ? c.sources.map(s => `<div style="font-size:11px;padding:4px 8px;background:var(--bg);border-left:2px solid ${s.color};border-radius:3px"><span style="color:${s.color};font-weight:600;font-size:10px">[${s.kind}]</span> ${s.text}</div>`).join("") : `<div style="font-size:11px;color:var(--dim)">No source text on file.</div>`}
-        </div>
-        <div style="margin-top:6px;font-size:10px;color:var(--muted)">All regions: ${regionChipsHtml(c.allRegions)}</div>
-      </div>`).join("")}
-    </div>` : `<div class="empty-state" style="padding:12px;font-size:12px">No recruits classified under this region in the current window.</div>`}
-  `;
-
-  openModal(`Region drill-in — ${region}`, body);
-  document.querySelector(".modal")?.classList.add("wide");
-}
-
-function renderMSKAnalytics(el) {
-  const today = todayISO();
-  if (!_mskAnalyticsStart) {
-    const d = new Date(today); d.setDate(d.getDate() - 13);
-    _mskAnalyticsStart = d.toISOString().slice(0, 10);
-  }
-  if (!_mskAnalyticsEnd) _mskAnalyticsEnd = today;
-  const startIso = _mskAnalyticsStart;
-  const endIso = _mskAnalyticsEnd;
-
-  // Scope: respect topbar role/platoon filter for which d4s count.
-  const visible = visibleD4Set();
-
-  // Build the date axis (every day from start to end inclusive).
-  const dates = [];
-  {
-    const d0 = new Date(startIso), d1 = new Date(endIso);
-    for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
-      dates.push(d.toISOString().slice(0, 10));
-    }
-  }
-  const dateLabels = dates.map(iso => {
-    const d = new Date(iso);
-    return `${d.getDate()}/${d.getMonth() + 1}`;
-  });
-
-  // Filter conductDetail to MSK-only rows in scope + window.
-  const mskConductRows = STATE.conductDetail.filter(c => {
-    if (!passesFilter(c.d4, visible)) return false;
-    const iso = displayDateToISO(c.date);
-    if (!iso || iso < startIso || iso > endIso) return false;
-    return isMSKReason(c.reason);
-  });
-
-  // Daily aggregation — unique d4s per type per day.
-  const daily = dates.map(iso => {
-    const dayRows = mskConductRows.filter(c => displayDateToISO(c.date) === iso);
-    const px = new Set(dayRows.filter(c => c.type === "PX").map(c => c.d4));
-    const fo = new Set(dayRows.filter(c => c.type === "Fallout").map(c => c.d4));
-    const rsi = new Set(dayRows.filter(c => c.type === "RSI").map(c => c.d4));
-    const total = new Set([...px, ...fo, ...rsi]);
-    return { iso, px: px.size, fo: fo.size, rsi: rsi.size, total: total.size };
-  });
-
-  // Injury reports (STATE.msk type=Report Injury) in scope + window.
-  const reportRows = STATE.msk.filter(m => {
-    if ((m.type || "").toLowerCase().indexOf("report") < 0) return false;
-    if (!passesFilter(m.d4, visible)) return false;
-    const iso = displayDateToISO(m.timestamp) || String(m.timestamp || "").slice(0, 10);
-    return iso && iso >= startIso && iso <= endIso;
-  });
-  // Unique injured personnel — union of Form reporters AND recruits who
-  // appeared in MSK-classified conductDetail rows in this window. Closes
-  // the gap where someone who falls out due to MSK at PT but never fills
-  // the Form would be missing from the region breakdown.
-  const injuredD4s = new Set([
-    ...reportRows.map(r => r.d4),
-    ...mskConductRows.map(c => c.d4)
-  ]);
-
-  // Region counts — unique recruits per region. Manual override wins.
-  // getMSKRegionsForRecruit now also unions in regions derived from
-  // conductDetail reasons, so no recruit gets dropped silently.
-  const regionToRecruits = {};
-  injuredD4s.forEach(d4 => {
-    const regions = getMSKRegionsForRecruit(d4);
-    regions.forEach(reg => {
-      (regionToRecruits[reg] = regionToRecruits[reg] || new Set()).add(d4);
-    });
-  });
-  const regionCounts = Object.entries(regionToRecruits)
-    .map(([region, set]) => ({ region, count: set.size }))
-    .sort((a, b) => b.count - a.count);
-
-  // Personnel frequency from conductDetail (entries, not unique conducts).
-  const freq = {};
-  mskConductRows.forEach(c => {
-    if (!freq[c.d4]) freq[c.d4] = { d4: c.d4, count: 0, types: new Set() };
-    freq[c.d4].count++;
-    freq[c.d4].types.add(c.type);
-  });
-  const ranked = Object.values(freq).sort((a, b) => b.count - a.count).slice(0, 15);
-  const maxRanked = ranked[0]?.count || 1;
-
-  // Chronic = has Report Injury AND ≥3 MSK conductDetail entries.
-  const chronic = [...injuredD4s]
-    .filter(d4 => (freq[d4]?.count || 0) >= 3)
-    .map(d4 => ({ d4, count: freq[d4].count, regions: getMSKRegionsForRecruit(d4) }))
-    .sort((a, b) => b.count - a.count);
-
-  const regionChip = reg => `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}22;color:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other};margin-right:3px">${reg}</span>`;
-
-  el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-      <div style="min-width:0;flex:1 1 200px">
-        <h2 style="font-size:18px;font-weight:700">📊 MSK Analytics${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}]</span>` : ""}</h2>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">Musculoskeletal injuries — sourced from MSK form reports + conduct detail rows filtered by injury keywords.</div>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;font-size:11px;flex-wrap:wrap;flex:1 1 220px;justify-content:flex-end">
-        <span style="color:var(--muted)">Window:</span>
-        <input id="msk-an-start" type="date" value="${startIso}" onchange="setMSKAnalyticsRange()" class="topbar-select" style="min-width:130px;flex:1 1 130px">
-        <span style="color:var(--muted)">→</span>
-        <input id="msk-an-end" type="date" value="${endIso}" onchange="setMSKAnalyticsRange()" class="topbar-select" style="min-width:130px;flex:1 1 130px">
-      </div>
-    </div>
-
-    <div class="stats-row">
-      <div class="stat"><label>Injured personnel</label><div class="val" style="color:var(--red)">${injuredD4s.size}</div></div>
-      <div class="stat"><label>MSK log entries</label><div class="val" style="color:var(--orange)">${mskConductRows.length}</div></div>
-      <div class="stat"><label>Injury regions</label><div class="val" style="color:var(--accent)">${regionCounts.length}</div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <h3>Daily MSK Impact</h3>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.55">
-        Unique personnel affected per day, MSK cases only. Stacked by category:<br>
-        <span style="color:#5B8DEF;font-weight:600">■ PX</span> = Status personnel (excused with MO status before the conduct) ·
-        <span style="color:#E8573A;font-weight:600">■ Fallout</span> = dropped out during the conduct ·
-        <span style="color:#F2A93B;font-weight:600">■ RSI</span> = reported sick at first parade
-      </div>
-      <div class="chart-box tall"><canvas id="msk-daily-bar"></canvas></div>
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <h3>Total Affected Trend</h3>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Unique MSK cases per day across all types.</div>
-      <div class="chart-box"><canvas id="msk-trend-line"></canvas></div>
-    </div>
-
-    <div class="grid-2" style="margin-bottom:14px">
-      <div class="card">
-        <h3>Injuries by Region <span style="color:var(--dim);font-weight:400;font-size:10px">— click any slice to drill in</span></h3>
-        <div class="chart-box"><canvas id="msk-region-donut"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Personnel per Region <span style="color:var(--dim);font-weight:400;font-size:10px">— click any bar to drill in</span></h3>
-        <div class="chart-box"><canvas id="msk-region-bar"></canvas></div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <h3>Reported Injuries Detail <span style="color:var(--dim);font-weight:400;font-size:11px">(${reportRows.length})</span></h3>
-      ${reportRows.length ? `<div style="display:flex;flex-direction:column;gap:4px">
-        ${reportRows.sort((a, b) => (a.timestamp || "") < (b.timestamp || "") ? 1 : -1).map(r => {
-          const regions = getMSKRegionsForRecruit(r.d4);
-          return `<div onclick="openMSKRegionMenu('${r.d4}')" style="cursor:pointer;font-size:12px;padding:8px 10px;background:var(--surface2);border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <span class="mono" style="color:var(--accent);font-weight:700">${displayId(r.d4)}</span>
-            <span style="font-weight:600">${displayPersonLabel(r.d4)}</span>
-            <span style="flex:1 1 200px;min-width:0;color:var(--muted)">${r.description || ""}</span>
-            <span style="display:flex;flex-wrap:wrap;gap:3px">${regions.map(regionChip).join("")}</span>
-          </div>`;
-        }).join("")}
-      </div>` : `<div style="color:var(--muted);font-size:12px">No injury reports in this window.</div>`}
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <h3>Most Affected Personnel</h3>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Ranked by MSK-related conduct detail entries (PX / Fallout / RSI).</div>
-      ${ranked.length ? `<div style="display:flex;flex-direction:column;gap:4px">
-        ${ranked.map((p, i) => `<div onclick="openPerson('${p.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;background:var(--surface2);border-radius:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span style="color:var(--orange);font-weight:700;min-width:22px;text-align:right">${i + 1}</span>
-          <span class="mono" style="color:var(--accent);font-weight:700">${displayId(p.d4)}</span>
-          <span style="flex:1 1 110px;min-width:0">${displayPersonLabel(p.d4)}</span>
-          <div style="flex:2 1 140px;min-width:80px;height:14px;background:var(--bg);border-radius:3px;position:relative;overflow:hidden">
-            <div style="position:absolute;inset:0 ${100 - (p.count / maxRanked) * 100}% 0 0;background:linear-gradient(90deg, var(--accent), var(--teal));opacity:.7"></div>
-            <span style="position:absolute;left:6px;top:0;font-size:10px;font-weight:600;line-height:14px">${p.count}</span>
-          </div>
-          <span style="font-size:10px;color:var(--muted);text-align:right">${[...p.types].join(", ")}</span>
-        </div>`).join("")}
-      </div>` : `<div style="color:var(--muted);font-size:12px">No MSK log entries in this window.</div>`}
-    </div>
-
-    ${chronic.length ? `<div class="card">
-      <h3>🚨 Chronic / Recurring Cases <span style="color:var(--dim);font-weight:400;font-size:11px">(${chronic.length})</span></h3>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Recruits with a reported injury AND ≥3 MSK conduct entries — needs ongoing attention.</div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${chronic.map(c => `<div onclick="openPerson('${c.d4}')" style="cursor:pointer;font-size:12px;padding:8px 10px;background:var(--surface2);border-radius:6px;border-left:3px solid ${MSK_REGION_COLORS[c.regions[0]] || MSK_REGION_COLORS.Other};display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span class="mono" style="color:var(--accent);font-weight:700">${displayId(c.d4)}</span>
-          <span style="flex:1 1 140px;min-width:0">${displayPersonLabel(c.d4)}</span>
-          <span class="mono" style="color:var(--red);font-weight:700">${c.count}× missed</span>
-          <span style="display:flex;flex-wrap:wrap;gap:3px">${c.regions.map(regionChip).join("")}</span>
-        </div>`).join("")}
-      </div>
-    </div>` : ""}
-  `;
-
-  // Render the charts after the canvases are in the DOM.
-  setTimeout(() => {
-    Object.values(_mskAnalyticsCharts).forEach(c => { try { c.destroy(); } catch (e) {} });
-
-    // Shared axis styling — softer grid, no borders, integer ticks.
-    const axisBase = {
-      responsive: true, maintainAspectRatio: false,
-      layout: { padding: { top: 6, right: 4, bottom: 0, left: 0 } },
-      plugins: {
-        legend: { labels: { color: "#8B949E", font: { size: 11 }, padding: 12, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-        tooltip: { backgroundColor: "#161B22", borderColor: "#30363D", borderWidth: 1, padding: 10, titleColor: "#E6EDF3", bodyColor: "#E6EDF3", cornerRadius: 6, displayColors: true }
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { color: "#8B949E", font: { size: 10 }, precision: 0, padding: 6 }, grid: { color: "#30363D55", drawTicks: false }, border: { display: false } },
-        x: { ticks: { color: "#8B949E", font: { size: 10 }, maxRotation: 0, autoSkip: true, padding: 4 }, grid: { display: false }, border: { display: false } }
-      }
-    };
-
-    // Stacked bar — bigger rounded corners on the top of each stack, no
-    // borders. Tooltip shows the per-day breakdown + total.
-    _mskAnalyticsCharts.daily = new Chart(document.getElementById("msk-daily-bar"), {
-      type: "bar",
-      data: { labels: dateLabels, datasets: [
-        { label: "PX (status)",   data: daily.map(d => d.px),  backgroundColor: "#5B8DEF", stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 },
-        { label: "Fallout",       data: daily.map(d => d.fo),  backgroundColor: "#E8573A", stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 },
-        { label: "RSI",           data: daily.map(d => d.rsi), backgroundColor: "#F2A93B", stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 }
-      ] },
-      options: {
-        ...axisBase,
-        plugins: {
-          ...axisBase.plugins,
-          legend: { ...axisBase.plugins.legend, position: "bottom" },
-          tooltip: {
-            ...axisBase.plugins.tooltip,
-            callbacks: {
-              footer: (items) => {
-                const total = items.reduce((s, i) => s + (i.parsed.y || 0), 0);
-                return total ? `Total: ${total}` : "";
-              }
-            }
-          }
-        },
-        scales: { ...axisBase.scales, x: { ...axisBase.scales.x, stacked: true }, y: { ...axisBase.scales.y, stacked: true } }
-      }
-    });
-
-    _mskAnalyticsCharts.trend = new Chart(document.getElementById("msk-trend-line"), {
-      type: "line",
-      data: { labels: dateLabels, datasets: [{ label: "Total affected", data: daily.map(d => d.total), borderColor: "#43C59E", backgroundColor: "#43C59E33", tension: 0.35, fill: true, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: "#43C59E", pointBorderColor: "#0D1117", pointBorderWidth: 2, borderWidth: 2.5 }] },
-      options: { ...axisBase, plugins: { ...axisBase.plugins, legend: { display: false } } }
-    });
-
-    if (regionCounts.length) {
-      // Click handlers: drill into the region. Cursor changes on hover so
-      // it's obvious slices/bars are interactive.
-      const drillOnClick = (e, elements) => {
-        if (elements.length) viewMSKRegion(regionCounts[elements[0].index].region);
-      };
-      const cursorOnHover = (e, elements) => {
-        if (e.native) e.native.target.style.cursor = elements.length ? "pointer" : "default";
-      };
-
-      // Mobile: legend below the donut (right-side legend leaves no room
-      // for the donut itself on narrow screens). Desktop: keep on right.
-      const isMobile = window.innerWidth <= 768;
-      _mskAnalyticsCharts.donut = new Chart(document.getElementById("msk-region-donut"), {
-        type: "doughnut",
-        data: { labels: regionCounts.map(r => r.region), datasets: [{ data: regionCounts.map(r => r.count), backgroundColor: regionCounts.map(r => MSK_REGION_COLORS[r.region] || MSK_REGION_COLORS.Other), borderWidth: 3, borderColor: "#161B22", hoverOffset: 8 }] },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          cutout: "62%",
-          onClick: drillOnClick, onHover: cursorOnHover,
-          plugins: {
-            legend: { position: isMobile ? "bottom" : "right", labels: { color: "#E6EDF3", font: { size: 11 }, padding: 10, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-            tooltip: { backgroundColor: "#161B22", borderColor: "#30363D", borderWidth: 1, padding: 10, cornerRadius: 6, callbacks: { label: c => `${c.label}: ${c.parsed} recruit${c.parsed === 1 ? "" : "s"} (click to drill in)` } }
-          }
-        }
-      });
-
-      // Horizontal bar — rounded right side, bigger bars, value labels via tooltip.
-      _mskAnalyticsCharts.regionBar = new Chart(document.getElementById("msk-region-bar"), {
-        type: "bar",
-        data: { labels: regionCounts.map(r => r.region), datasets: [{ data: regionCounts.map(r => r.count), backgroundColor: regionCounts.map(r => MSK_REGION_COLORS[r.region] || MSK_REGION_COLORS.Other), borderWidth: 0, borderRadius: 6, borderSkipped: false, barPercentage: 0.7 }] },
-        options: {
-          responsive: true, maintainAspectRatio: false, indexAxis: "y",
-          layout: { padding: { top: 4, right: 16, bottom: 0, left: 0 } },
-          onClick: drillOnClick, onHover: cursorOnHover,
-          plugins: {
-            legend: { display: false },
-            tooltip: { backgroundColor: "#161B22", borderColor: "#30363D", borderWidth: 1, padding: 10, cornerRadius: 6, displayColors: false, callbacks: { label: c => `${c.parsed.x} recruit${c.parsed.x === 1 ? "" : "s"} (click to drill in)` } }
-          },
-          scales: {
-            x: { beginAtZero: true, ticks: { color: "#8B949E", font: { size: 10 }, precision: 0, padding: 4 }, grid: { color: "#30363D55", drawTicks: false }, border: { display: false } },
-            y: { ticks: { color: "#E6EDF3", font: { size: 11, weight: "600" }, padding: 6 }, grid: { display: false }, border: { display: false } }
-          }
-        }
-      });
-    }
-  }, 50);
-}
-
-// Dashboard sub-widgets — kept separate from renderDashboard to keep the main
-// function readable. Both respect the active scope filter via the `scoped`
-// roster passed in.
-// Upcoming appointments — anything dated today or later. Sheet retains the
-// full history (past entries are not deleted, just filtered out of view here)
-// so an admin can audit "did we make this appointment?" later. Sorted by
-// date+time ascending so the next one is always at the top.
-// Out today / This week widget — the dashboard equivalent of the WhatsApp
-// parade-state OTHERS block. Anyone currently inside a leave/out date range
-// shows up here; near-future entries are grouped under "This week".
 function renderDashLeaveOut(visible, todayIso) {
   const sevenDaysOut = (() => {
     const d = new Date(todayIso); d.setDate(d.getDate() + 7);
@@ -668,7 +163,7 @@ function renderDashLeaveOut(visible, todayIso) {
   const onToday = scoped.filter(l => l.startIso <= todayIso && todayIso <= l.endIso);
   const upcoming = scoped.filter(l => l.startIso > todayIso && l.startIso <= sevenDaysOut);
 
-  const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Leave" ? "teal" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
+  const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Leave" ? "teal" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
   const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
     <h3 style="font-size:13px;color:var(--muted);margin:0">🪖 Out today / This week <span style="color:var(--dim);font-weight:400">(${onToday.length} now · ${upcoming.length} upcoming)</span></h3>
@@ -708,8 +203,7 @@ function renderLeave(el) {
 
   const onTodayCount = scoped.filter(l => l.startIso <= today && today <= l.endIso).length;
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.leave.length}]</span>` : ` (${STATE.leave.length})`;
-
-  const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Leave" ? "teal" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
+  const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Leave" ? "teal" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -729,10 +223,6 @@ function renderLeave(el) {
     </tbody></table></div>` : `<div class="empty-state">${STATE.leave.length ? `No leave records in ${filterLabel()}.` : "No leave records yet. Tap + Log to add one."}</div>`}`;
 }
 
-// Gantt-style 21-day timeline: each row a person with at least one leave
-// overlapping the window, cells filled per-day with the leave type's color.
-// Answers "who is taking off when" at a glance — much more useful than a
-// running total of off-in-lieu days.
 function renderLeaveTimeline(scoped, todayIso) {
   const TIMELINE_DAYS = 21;
   const start = new Date(todayIso);
@@ -748,7 +238,6 @@ function renderLeaveTimeline(scoped, todayIso) {
     return `<div class="card" style="margin-bottom:12px"><h3>Leave Timeline <span style="color:var(--dim);font-weight:400;font-size:11px">(next ${TIMELINE_DAYS} days)</span></h3><div style="color:var(--muted);font-size:12px;padding:8px 0">No upcoming leave in the next ${TIMELINE_DAYS} days.</div></div>`;
   }
 
-  // Group by person; sort people by earliest upcoming entry.
   const byPerson = {};
   overlapping.forEach(l => { (byPerson[l.d4] = byPerson[l.d4] || []).push(l); });
   const people = Object.keys(byPerson).sort((a, b) => {
@@ -758,13 +247,12 @@ function renderLeaveTimeline(scoped, todayIso) {
   });
 
   const typeBg = t => ({
-    "Off-in-Lieu": "#58A6FF", "Leave": "#39D2C0", "Weekend": "#3FB950", "Night's Out": "#F778BA",
+    "Off-in-Lieu": "#58A6FF", "Leave": "#39D2C0", "Night's Out": "#F778BA",
     "Course": "#BC8CFF", "Guard Duty": "#D29922", "NDP": "#E3B341", "Other": "#8B949E"
   })[t] || "#8B949E";
 
-  // Header: show the day-of-month for week boundaries + today marker.
   const headerCells = days.map((d, i) => {
-    const isWeekStart = i === 0 || d.getDay() === 1;  // Monday
+    const isWeekStart = i === 0 || d.getDay() === 1;
     const isToday = dayIso[i] === todayIso;
     const label = isWeekStart || i === 0 ? `${d.getDate()}/${d.getMonth() + 1}` : "";
     return `<th style="padding:2px 0;font-size:9px;color:${isToday ? 'var(--red)' : 'var(--muted)'};font-weight:${isToday ? 700 : 400};width:18px;text-align:center;border-left:${isWeekStart ? '1px solid var(--border)' : 'none'}">${label}</th>`;
@@ -789,8 +277,7 @@ function renderLeaveTimeline(scoped, todayIso) {
     return `<tr onclick="openPerson('${d4}')" style="cursor:pointer"><td style="padding:3px 8px;white-space:nowrap;font-size:11px;font-weight:600;background:var(--surface);border-right:2px solid var(--border);position:sticky;left:0;z-index:1">${displayPersonLabel(d4)}</td>${cells}</tr>`;
   }).join("");
 
-  // Legend mirrors the type-color palette so users can decode the bars.
-  const legend = ["Off-in-Lieu", "Leave", "Weekend", "Night's Out", "Course", "Guard Duty", "NDP", "Other"]
+  const legend = ["Off-in-Lieu", "Leave", "Night's Out", "Course", "Guard Duty", "NDP", "Other"]
     .map(t => `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><span style="width:10px;height:10px;background:${typeBg(t)};border-radius:2px;opacity:.85"></span>${t}</span>`)
     .join(" ");
 
@@ -827,7 +314,6 @@ function renderDashAppointments(visible, todayIso) {
     return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">No upcoming appointments.</div>`;
   }
 
-  // Highlight today's appointments so they don't get lost in a long list.
   const rows = upcoming.map(a => {
     const iso = displayDateToISO(a.date);
     const isToday = iso === todayIso;
@@ -839,7 +325,7 @@ function renderDashAppointments(visible, todayIso) {
       <td style="white-space:nowrap">${a.date || ""} ${dayLabel}</td>
       <td class="mono" style="white-space:nowrap">${pad4Time(a.time) || ""}</td>
       <td style="text-align:left;font-size:11px;color:var(--muted)">${a.location || ""}</td>
-      <td style="white-space:nowrap"><button class="btn btn-icon" style="color:var(--green)" onclick="event.stopPropagation(); toggleAppointmentResolved(${a.id})" title="Mark as resolved (hides from dashboard + parade state)">✓</button> <button class="btn btn-icon" onclick="event.stopPropagation(); openAppointmentForm(${a.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('appointments', ${a.id}, 'appointment')" title="Delete">✕</button></td>
+      <td style="white-space:nowrap"><button class="btn btn-icon" style="color:var(--green)" onclick="event.stopPropagation(); toggleAppointmentResolved(${a.id})" title="Mark as resolved">✓</button> <button class="btn btn-icon" onclick="event.stopPropagation(); openAppointmentForm(${a.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('appointments', ${a.id}, 'appointment')" title="Delete">✕</button></td>
     </tr>`;
   }).join("");
 
@@ -847,15 +333,11 @@ function renderDashAppointments(visible, todayIso) {
 }
 
 function renderDashProfileCards(scoped) {
-  // Ration: count distinct values. Unknowns get grouped under "Unspecified"
-  // so they show up but don't disappear silently.
   const rationCounts = {};
   scoped.forEach(r => { const k = (r.ration || "").trim() || "Unspecified"; rationCounts[k] = (rationCounts[k] || 0) + 1; });
   const rationRows = Object.entries(rationCounts).sort((a, b) => b[1] - a[1]);
   const rationColor = k => k === "Muslim" ? "var(--green)" : k === "Non-Muslim" ? "var(--accent)" : "var(--muted)";
 
-  // Allergies: each recruit's `allergies` is free text — split on comma so a
-  // single "Peanuts, Dairy" entry counts toward two distinct allergens.
   const allergenCounts = {};
   const allergic = [];
   scoped.forEach(r => {
@@ -890,8 +372,6 @@ function renderRoster(el) {
   const rsiCount = {};
   STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
   const scoped = filteredRoster();
-  // Push/Export operate on the FULL roster — scoping is a view concern; we
-  // don't want the user to silently overwrite the sheet with only their slice.
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -926,10 +406,7 @@ function renderAttendance(el) {
     ${STATE.attendance.map(a => {
       const r = pct(a.participating, a.total);
       const lms = +a.lms || 0;
-      // LMS rate = LMS participation / total participating (per user spec).
-      // Falls back to 0 when no one participated to avoid div-by-zero.
       const lmsRate = pct(lms, a.participating);
-      // Color thresholds: green ≥95% (excellent), orange 70-94% (watch), red <70% (concern).
       const rateColor = r >= 95 ? 'var(--green)' : r >= 70 ? 'var(--orange)' : 'var(--red)';
       const lmsRateColor = a.participating ? (lmsRate >= 95 ? 'var(--green)' : lmsRate >= 70 ? 'var(--orange)' : 'var(--red)') : 'var(--muted)';
       return `<tr><td>${a.date}</td><td style="text-align:left">${a.conduct}</td><td>${a.total}</td><td>${a.participating}</td><td style="color:${lms > 0 ? 'var(--accent)' : 'var(--muted)'}">${lms}</td><td style="color:${a.px > 0 ? 'var(--orange)' : 'var(--muted)'}">${a.px}</td><td style="color:${a.fallout > 0 ? 'var(--red)' : 'var(--muted)'}">${a.fallout}</td><td style="font-weight:700;color:${rateColor}">${r}%</td><td style="font-weight:700;color:${lmsRateColor}">${a.participating ? lmsRate + '%' : '—'}</td><td style="text-align:left;color:${a.remarks ? 'var(--yellow)' : 'var(--muted)'};max-width:200px;white-space:normal;font-size:11px">${a.remarks || ''}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="openAttendanceForm(${a.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('attendance', ${a.id}, 'attendance entry')" title="Delete">✕</button></td></tr>`;
@@ -937,9 +414,6 @@ function renderAttendance(el) {
     </tbody></table></div>` : `<div class="empty-state">No attendance records yet.</div>`}`;
 }
 
-// ── Conduct Detail tab ────────────────────────────────────
-// Filters are module-scope rather than persisted — they reset on reload so a
-// returning user sees the whole picture instead of yesterday's filter state.
 let _detailFilterConduct = "";
 let _detailFilterType = "";
 let _showParticipants = false;
@@ -948,9 +422,6 @@ function setDetailFilterType(v) { _detailFilterType = v; render(); }
 function clearDetailFilters() { _detailFilterConduct = ""; _detailFilterType = ""; _showParticipants = false; render(); }
 function toggleParticipants() { _showParticipants = !_showParticipants; render(); }
 
-// When a single conduct is selected, derive who participated from
-// `roster - absent` (the user's insight: detail rows enumerate absentees, so
-// the inverse gives us the participants for free, no extra data needed).
 function renderDetailParticipantsSummary(scopedAll) {
   if (!_detailFilterConduct) return "";
   const conductRecords = scopedAll.filter(d => `${d.date}|${d.time || ""}|${d.conduct}` === _detailFilterConduct);
@@ -983,7 +454,6 @@ function renderConductDetail(el) {
   if (_detailFilterConduct) scoped = scoped.filter(d => `${d.date}|${d.time || ""}|${d.conduct}` === _detailFilterConduct);
   if (_detailFilterType) scoped = scoped.filter(d => d.type === _detailFilterType);
 
-  // Unique conduct keys for the dropdown — newest first by parsed date.
   const conductKeys = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conduct}`))]
     .filter(Boolean)
     .sort((a, b) => {
@@ -994,8 +464,6 @@ function renderConductDetail(el) {
       return (at || "") < (bt || "") ? 1 : -1;
     });
 
-  // Sort the visible records the same way — newest-first feels right when
-  // scanning for "what happened today / yesterday."
   const rows = [...scoped].sort((a, b) => {
     const ai = displayDateToISO(a.date) || a.date || "";
     const bi = displayDateToISO(b.date) || b.date || "";
@@ -1005,8 +473,6 @@ function renderConductDetail(el) {
 
   const cnt = t => scoped.filter(d => d.type === t).length;
 
-  // "Most conducts missed" ignores the conduct/type sub-filter so the ranking
-  // remains a stable view of overall absence within the platoon scope.
   const missed = {};
   scopedAll.forEach(d => {
     const k = `${d.date}|${d.time || ""}|${d.conduct}`;
@@ -1070,10 +536,7 @@ function renderMedical(el) {
   const visible = visibleD4Set();
   const scoped = STATE.medical.filter(m => passesFilter(m.d4, visible));
   const today = todayISO();
-  // Per-row "tag today" reflects whether the status is currently active, in
-  // its +1/+2 ghost window, or fully cleared.
   const rowsWithTag = scoped.map(m => ({ m, tagInfo: medStatusTag(m, today) }));
-  // Sort newest first by startDate (fallback to date logged).
   rowsWithTag.sort((a, b) => {
     const ai = displayDateToISO(a.m.startDate || a.m.date) || "";
     const bi = displayDateToISO(b.m.startDate || b.m.date) || "";
@@ -1083,9 +546,6 @@ function renderMedical(el) {
   const ghostCount = rowsWithTag.filter(r => r.tagInfo && r.tagInfo.ghostDay > 0).length;
   const pendingCount = scoped.filter(m => m.status === "Pending").length;
 
-  // R/C breakdown — same logic as the dashboard: only shown when "All" is
-  // the active role scope, so the stat is double-clickable for "is this a
-  // recruit-side problem or a commander problem?"
   const isAll = !STATE.filterRole;
   const splitC = pred => ({
     rec: scoped.filter(m => pred(m) && !isCommander(m.d4)).length,
@@ -1107,8 +567,6 @@ function renderMedical(el) {
     ? `<span style="font-size:55%;color:var(--muted);font-weight:400;margin-left:1px">/${rec}/${cmd}</span>`
     : "";
 
-  // Leaderboard: count report-sick events per recruit within the scope.
-  // Each medical row IS a report-sick event, so this is a straight tally.
   const rsCounts = {};
   scoped.forEach(m => { rsCounts[m.d4] = (rsCounts[m.d4] || 0) + 1; });
   const topReporters = Object.entries(rsCounts)
@@ -1208,12 +666,40 @@ function renderPolar(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Polar Flow Data${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.polar.length}]</span>` : ""}</h2>
       <div style="display:flex;gap:8px">
-        <label class="btn btn-primary" style="cursor:pointer">Import Polar CSV<input type="file" accept=".csv" onchange="importPolar(this)" style="display:none"></label>
         <button class="btn btn-success" onclick="pushTab('PolarFlow',STATE.polar)">Push to Sheet</button>
+        <label class="btn btn-primary" style="cursor:pointer">Import Polar CSV<input type="file" accept=".csv" onchange="importPolar(this)" style="display:none"></label>
       </div>
     </div>
     <div class="card"><h3>Expected CSV Columns</h3><code class="mono" style="font-size:11px;color:var(--accent)">4D, Conduct, Date, Avg HR, Max HR, Min HR, Calories, Training Load, Recovery, Duration, Distance</code></div>
     ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th>Name</th><th>Conduct</th><th>Date</th><th>Avg HR</th><th>Max HR</th><th>Cal</th><th>Load</th><th>Dur</th></tr></thead><tbody>
     ${scoped.map(p => `<tr><td class="mono">${displayId(p.d4)}</td><td style="text-align:left">${displayPersonLabel(p.d4)}</td><td style="text-align:left">${p.conduct}</td><td>${p.date}</td><td style="color:${+p.avgHr > 160 ? 'var(--red)' : +p.avgHr > 140 ? 'var(--orange)' : 'var(--green)'}">${p.avgHr}</td><td>${p.maxHr}</td><td>${p.calories}</td><td>${p.trainingLoad}</td><td>${p.duration}m</td></tr>`).join("")}
-    </tbody></table></div>` : `<div class="empty-state">${STATE.polar.length ? `No Polar sessions in ${filterLabel()}.` : "No Polar data. Import a CSV."}</div>`}`;
+    </tbody></table></div>` : `<div class="empty-state">${STATE.polar.length ? `No Polar sessions in ${filterLabel()}.` : "No Polar data. Import a CSV."}</div>`}
+
+    <div id="polar-photo-panel" style="margin-top:1.5rem;">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;">📸 Class Photo Analysis</h3>
+          <span id="pp-counter" style="font-size:12px;color:var(--muted);">No pages analysed yet</span>
+        </div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:1rem;">
+          Upload each page of the Polar summary screen one at a time. Results accumulate across pages automatically.
+        </p>
+        <div id="pp-drop" onclick="document.getElementById('pp-file').click()" style="border:1.5px dashed var(--border);border-radius:8px;padding:1.5rem 1rem;text-align:center;cursor:pointer;margin-bottom:1rem;">
+          <div style="font-size:24px;margin-bottom:.3rem;">📷</div>
+          <div style="font-size:14px;color:var(--muted);">Drop photo here or <strong style="color:var(--accent);">click to browse</strong></div>
+          <div style="font-size:11px;color:var(--dim);margin-top:.2rem;">JPG, PNG, WEBP — max 10 MB</div>
+          <input type="file" id="pp-file" accept="image/jpeg,image/png,image/webp" onchange="ppSelectFile(this)" style="display:none;">
+        </div>
+        <div id="pp-preview" style="display:none;margin-bottom:1rem;">
+          <img id="pp-img" style="max-width:100%;max-height:320px;border-radius:8px;border:1px solid var(--border);display:block;">
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="ppAnalyse()">Analyse this page</button>
+            <button class="btn" onclick="ppDiscard()">Discard</button>
+            <span id="pp-fname" style="font-size:12px;color:var(--muted);"></span>
+          </div>
+        </div>
+        <div id="pp-status" style="display:none;font-size:13px;color:var(--muted);padding:6px 0;"></div>
+        <button id="pp-view-btn" class="btn" style="display:none;margin-top:.5rem;" onclick="ppViewResults()">View results</button>
+      </div>
+    </div>`;
 }
