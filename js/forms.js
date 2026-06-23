@@ -1583,17 +1583,10 @@ function outOfCampApptsForParade(dateIso, paradeTime) {
 
 function buildAppointmentSection(dateIso, paradeTime) {
   const upcoming = upcomingParadeAppointments(dateIso, paradeTime);
-  if (!upcoming.length) return `MEDICAL APPT:\n\nS/N:\nR/N:\nReason:\nLocation:\nDate:\nTime:\nCamp:`;
+  if (!upcoming.length) return `MEDICAL APPT:\n\nS/N:\nR/N:\nReason:\nLocation:\nDate:\nTime:`;
   const blocks = upcoming.map((a, idx) => {
     const sn = String(idx + 1).padStart(2, "0");
-    // For an in-camp appt: always "In camp". For an outside appt: on the parade
-    // day reflect the live tick (left vs not), else just note it's outside.
-    const isToday = displayDateToISO(a.date) === dateIso;
-    let camp;
-    if (!a.outOfCamp) camp = "In camp";
-    else if (isToday) camp = apptCurrentlyOut(a) ? "Out of camp (left)" : "In camp (not left / returned)";
-    else camp = "Outside camp";
-    return `S/N: ${sn}\nR/N: ${paradeRN(a.d4)}\nReason: ${a.reason || ""}\nLocation: ${a.location || ""}\nDate: ${toDDMMYY(displayDateToISO(a.date))}\nTime: ${fmtHrs(a.time)}\nCamp: ${camp}`;
+    return `S/N: ${sn}\nR/N: ${paradeRN(a.d4)}\nReason: ${a.reason || ""}\nLocation: ${a.location || ""}\nDate: ${toDDMMYY(displayDateToISO(a.date))}\nTime: ${fmtHrs(a.time)}`;
   });
   return `MEDICAL APPT: ${String(upcoming.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
 }
@@ -2820,6 +2813,68 @@ function createConduct(name) {
   return id;
 }
 
+// Groups of conducts that share the same id (data corruption from the old
+// max+1 id scheme). Returns [{ id, conducts: [refs…] }] for ids used >1 time.
+function duplicateConductIdGroups() {
+  const byId = {};
+  (STATE.conducts || []).forEach(c => { (byId[c.id] = byId[c.id] || []).push(c); });
+  return Object.keys(byId)
+    .filter(id => byId[id].length > 1)
+    .map(id => ({ id, conducts: byId[id] }));
+}
+
+// Repair modal: for each shared id, the user picks which conduct KEEPS the id
+// (and therefore the records logged under it — they're ambiguous, so only the
+// owner the user knows about can claim them). The other conducts in the group
+// get fresh unique ids and start empty.
+function openFixConductIdsModal() {
+  const groups = duplicateConductIdGroups();
+  if (!groups.length) { alert("No duplicate conduct ids — nothing to fix."); return; }
+  const blocks = groups.map((g, gi) => {
+    const u = countConductUsage(g.id);
+    const usage = `${u.attendance} attendance · ${u.polar} polar · ${u.detail} detail (${u.total} record${u.total === 1 ? "" : "s"})`;
+    const opts = g.conducts.map((c, ci) => `
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px;cursor:pointer;background:var(--surface2);margin-bottom:4px">
+        <input type="radio" name="dup-${gi}" value="${ci}" ${ci === 0 ? "checked" : ""} style="width:14px;height:14px">
+        <span style="font-weight:600">${escapeAttr(c.name)}</span>
+      </label>`).join("");
+    return `<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:2px">Shared id <span class="mono" style="color:var(--accent)">${g.id}</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${usage} — these stay with the conduct you pick:</div>
+      ${opts}
+    </div>`;
+  }).join("");
+  openModal("Fix duplicate conduct ids", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.55">
+        ${groups.length} id${groups.length === 1 ? " is" : "s are"} shared by multiple conducts, so their records resolve to the wrong name. Pick which conduct keeps each id (and its existing records); the others get fresh, empty ids. Records can't be auto-split — if some belong to a renamed conduct, re-point them after via <strong>Merge</strong> or by editing.
+      </div>
+      ${blocks}
+      <button type="button" class="btn btn-primary" onclick="applyConductIdFixes()">Fix ids</button>
+    </div>`);
+}
+
+function applyConductIdFixes() {
+  const groups = duplicateConductIdGroups();
+  let reassigned = 0;
+  groups.forEach((g, gi) => {
+    const sel = document.querySelector(`input[name="dup-${gi}"]:checked`);
+    const keepIdx = sel ? +sel.value : 0;
+    g.conducts.forEach((c, ci) => {
+      if (ci === keepIdx) return;   // this one keeps the original id + records
+      c.id = nextConductId();        // others get a fresh, unique, empty id
+      reassigned++;
+    });
+  });
+  saveLocal();
+  closeModal();
+  render();
+  // Ids changed on existing rows, so a full rewrite (not per-row upsert) is the
+  // safe way to persist — upsert would append new rows and orphan the old ones.
+  if (STATE.apiUrl) pushTab("Conducts", STATE.conducts);
+  alert(`Reassigned ${reassigned} conduct id${reassigned === 1 ? "" : "s"}.\nRecords stayed with the conduct you chose; the rest now have fresh, empty ids.`);
+}
+
 function renameConduct(id, newName) {
   const c = STATE.conducts.find(x => x.id === id);
   if (!c) return;
@@ -3115,6 +3170,56 @@ function openLogConductWizard(attendanceId) {
   renderLogConductWizard();
 }
 
+// Pull orphaned conductDetail rows into the wizard when logging a conduct that
+// already has detail rows for the chosen (date, time, conduct) but NO attendance
+// summary row — e.g. after a duplicate-id split left detail behind. Without this,
+// saving would wipe those rows; with it, they're loaded so the save reconstructs
+// them and just adds the missing summary. Re-evaluated whenever the tuple changes.
+function maybeLoadOrphanDetail() {
+  const w = _logConduct;
+  if (!w || w.attendanceId) return;            // edit mode loads its own detail
+  if (!w.conductId || !w.date) return;
+  const displayDate = isoToDisplayDate(w.date);
+  const time = pad4Time(w.time || "");
+  const key = `${displayDate}|${time}|${w.conductId}`;
+  if (key === w._orphanKey) return;            // already evaluated this exact tuple
+
+  // Don't clobber rows the user typed by hand. Safe to replace only when the
+  // lists are empty, or were themselves auto-loaded (we own them — _orphanKey set).
+  const userTyped = (w.fallout.length || w.reportSick.length) && w._orphanKey == null;
+  if (userTyped) { w._orphanKey = key; return; }
+
+  w.fallout = [];
+  w.reportSick = [];
+  w.originalDetailIds = [];
+  w._orphanKey = key;
+  w._recoveredCount = 0;
+
+  // Only recover when there's no attendance summary for this tuple — that's the
+  // orphan case. If a summary exists, the user should be editing it instead.
+  const hasAttendance = STATE.attendance.some(a =>
+    a.date === displayDate && (a.time || "") === time && a.conductId === w.conductId
+  );
+  if (hasAttendance) return;
+
+  STATE.conductDetail
+    .filter(d => d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId)
+    .forEach(d => {
+      if (d.type === "RSI") return;            // wizard doesn't manage RSI
+      w.originalDetailIds.push(d.id);
+      if (d.type === "Fallout") w.fallout.push({ d4: d.d4, reason: d.reason || "" });
+      else if (d.type === "ReportSick") w.reportSick.push({ d4: d.d4, reason: d.reason || "" });
+      w._recoveredCount++;                     // counts PX too (reflected via status checklist)
+    });
+}
+
+// Re-evaluate the wizard against its current (date, time, conduct): recover any
+// orphaned detail, then rebuild the medical-status checklist.
+function wizRefreshFromTuple() {
+  maybeLoadOrphanDetail();
+  rebuildLogConductStatus();
+}
+
 // Rebuilds the Status Personnel checklist from STATE.medical for the current
 // date. Preserves any user edits (notParticipating + reason) when possible:
 // if a d4 was already in the previous state list, carry over the flags.
@@ -3122,17 +3227,22 @@ function rebuildLogConductStatus() {
   if (!_logConduct) return;
   const prevByD4 = {};
   (_logConduct.status || []).forEach(s => { prevByD4[s.d4] = s; });
-  // For edit mode, also seed "notParticipating" from existing PX conductDetail
-  // rows matching this attendance — so re-opening shows the correct ticks.
+  // Seed "notParticipating" + reasons from existing PX conductDetail rows for
+  // the current (date, time, conduct). Covers BOTH edit mode AND orphan recovery
+  // (detail rows present but no attendance summary row yet), so re-opening shows
+  // the correct ticks either way.
   let existingPxByD4 = {};
-  if (_logConduct.attendanceId) {
-    const a = STATE.attendance.find(x => x.id === _logConduct.attendanceId);
-    if (a) {
-      STATE.conductDetail
-        .filter(d => d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && d.type === "PX")
-        .forEach(d => { existingPxByD4[d.d4] = d.reason || ""; });
-    }
+  if (_logConduct.conductId) {
+    const dDate = isoToDisplayDate(_logConduct.date);
+    const dTime = pad4Time(_logConduct.time || "");
+    STATE.conductDetail
+      .filter(d => d.date === dDate && (d.time || "") === dTime && d.conductId === _logConduct.conductId && d.type === "PX")
+      .forEach(d => { existingPxByD4[d.d4] = d.reason || ""; });
   }
+  // True when there are existing detail rows backing this wizard (edit mode, or
+  // orphaned detail loaded for recovery) — then PX ticks come from those rows
+  // rather than the per-status default.
+  const hasExistingDetail = !!_logConduct.attendanceId || (_logConduct.originalDetailIds || []).length > 0;
   const dateIso = _logConduct.date;
   // Commanders are not tracked in conduct attendance — exclude them from the
   // status checklist entirely.
@@ -3151,10 +3261,10 @@ function rebuildLogConductStatus() {
       // Concatenate every active status so the user sees "MC + Excuse Heavy Load"
       statusTag: statuses.map(s => s.tag).join(" + "),
       reason: prev ? prev.reason : (existingPxByD4[d4] ?? top.record.reason ?? ""),
-      // First-time defaults from the per-status participation flag. Edit-mode
-      // honors whether there's an existing PX row.
+      // First-time defaults from the per-status participation flag. When backed
+      // by existing detail rows (edit or recovery), honor whether a PX row exists.
       notParticipating: prev ? prev.notParticipating
-        : (_logConduct.attendanceId ? (d4 in existingPxByD4) : defaultNP)
+        : (hasExistingDetail ? (d4 in existingPxByD4) : defaultNP)
     };
   }).sort((a, b) => a.d4.localeCompare(b.d4));
 }
@@ -3171,7 +3281,9 @@ function renderLogConductWizard() {
 
   const editNotice = w.attendanceId
     ? `<div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px">Editing existing conduct. Saving replaces all child rows for this (date, time, conduct) tuple.</div>`
-    : "";
+    : (w._recoveredCount
+      ? `<div style="font-size:11px;color:var(--accent);background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:6px 10px;margin-bottom:4px">↩ Recovered ${w._recoveredCount} existing detail row${w._recoveredCount === 1 ? "" : "s"} for this conduct/date that had no attendance summary. Saving keeps them and adds the missing summary.</div>`
+      : "");
 
   const statusRows = w.status.length ? w.status.map(s => `
     <div class="lc-wiz-status-row" style="display:grid;grid-template-columns:18px 48px minmax(0,1.4fr) minmax(80px,auto) minmax(0,1fr);gap:8px;align-items:center;padding:6px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);box-sizing:border-box">
@@ -3274,10 +3386,13 @@ function renderLogConductWizard() {
 
 function wizSetDate(v) {
   _logConduct.date = v;
-  rebuildLogConductStatus();
+  wizRefreshFromTuple();
   renderLogConductWizard();
 }
 function wizSetTime(v) {
+  // oninput (per keystroke) — don't re-render here or the field loses focus.
+  // Recovery still triggers via the conduct pick (which infers the time) and
+  // the date change; an explicit time edit is reconciled on the next of those.
   _logConduct.time = v;
 }
 function wizSetConductId(v) {
@@ -3286,6 +3401,7 @@ function wizSetConductId(v) {
     const inferred = inferTimeForConduct(v);
     if (inferred) _logConduct.time = inferred;
   }
+  wizRefreshFromTuple();
   renderLogConductWizard();
 }
 function wizSetTotalOverride(v) {

@@ -174,15 +174,18 @@ function conductIdByName(name) {
   return hit ? hit.id : "";
 }
 
-// Next available conduct id, formatted as "c" + 3-digit counter. Counter is
-// max-of-existing + 1 so deleting an id doesn't recycle it (avoids accidental
-// re-attachment of stale references on import).
+// Next conduct id — "c" + the shared random-seeded counter (nextId). The old
+// scheme was max-of-existing + 1, which COLLIDES across devices: two commanders
+// each adding a conduct before syncing both compute the same max+1 and produce
+// duplicate ids (e.g. three conducts all "c048"), which then mislabels every
+// record keyed to that id. nextId() is seeded from a per-session random base, so
+// concurrent creators land on different ids. New ids (c1000+) never clash with
+// the legacy c001–c050 range. Guarded against any local collision just in case.
 function nextConductId() {
-  const max = (STATE.conducts || []).reduce((m, c) => {
-    const n = parseInt(String(c.id || "").replace(/^c/i, ""), 10);
-    return Number.isFinite(n) && n > m ? n : m;
-  }, 0);
-  return "c" + String(max + 1).padStart(3, "0");
+  const taken = new Set((STATE.conducts || []).map(c => c.id));
+  let id;
+  do { id = "c" + nextId(); } while (taken.has(id));
+  return id;
 }
 
 // Best-guess time for a conduct based on existing data. Returns the most
