@@ -23,10 +23,6 @@ const PULL_ASSIGN = {
   msk:           d => STATE.msk = normalizeMSK(d),
   conducts:      d => STATE.conducts = d
 };
-// STATE-array-key → sheet-tab name (inverse of TAB_TO_STATE from state.js).
-const STATE_TO_TAB = Object.fromEntries(
-  Object.entries(TAB_TO_STATE).map(([sheet, key]) => [key, sheet])
-);
 
 const API = {
   async get(action, tab) {
