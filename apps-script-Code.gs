@@ -137,10 +137,14 @@ function doGet(e) {
       output = { error: "Unauthorized — invite required", code: 401 };
     } else if (action === "readAll") {
       output = readAllTabs();
+    } else if (action === "revCheck") {
+      // Cheap "what changed?" poll — just the per-tab revisions, no row data.
+      output = { ok: true, revs: getAllRevs(), timestamp: new Date().toISOString() };
     } else if (action === "read" && tab) {
-      output = readTab(tab);
+      // Single-tab read for partial pulls; carries the tab's current revision.
+      output = { rows: readTab(tab), rev: getRev(tab) };
     } else {
-      output = { error: "Unknown action. Use: readAll, read&tab=TabName, or ping" };
+      output = { error: "Unknown action. Use: readAll, revCheck, read&tab=TabName, or ping" };
     }
   } catch (err) {
     output = { error: err.message };
@@ -172,29 +176,30 @@ function doPost(e) {
     } else if (!isValidAuth(auth)) {
       output = { error: "Unauthorized — invite required", code: 401 };
     } else if (action === "write" && tab && body.data) {
-      output = writeTab(tab, body.data);
+      // Full-tab replace — the catastrophe vector. ENFORCE: reject if the
+      // client's baseRev is stale so a stale tab can't clobber newer rows.
+      output = withRevLock(tab, body.baseRev, true, function () { return writeTab(tab, body.data); });
     } else if (action === "append" && tab && body.row) {
-      output = appendRow(tab, body.row);
+      // Additive — no lost-update risk, so don't reject; still bump the rev.
+      output = withRevLock(tab, body.baseRev, false, function () { return appendRow(tab, body.row); });
     } else if (action === "appendMany" && tab && body.rows) {
-      output = appendMany(tab, body.rows);
+      output = withRevLock(tab, body.baseRev, false, function () { return appendMany(tab, body.rows); });
     } else if (action === "upsertRow" && tab && body.row) {
       // ID-based upsert — finds by `id` column, updates in place, appends if missing.
-      // Designed to be the default write path so two devices editing different
-      // rows of the same tab don't clobber each other (no full-table replace).
-      output = upsertRow(tab, body.row);
+      // ENFORCE: a stale row edit is still a silent loss, so reject on mismatch.
+      output = withRevLock(tab, body.baseRev, true, function () { return upsertRow(tab, body.row); });
     } else if (action === "deleteRowById" && tab && body.id !== undefined) {
-      // ID-based row delete — finds by `id` column. Safer than the legacy
-      // rowIndex-based deleteRow (frontend doesn't track sheet indices).
-      output = deleteRowById(tab, body.id);
+      // ID-based row delete — finds by `id` column. ENFORCE on mismatch.
+      output = withRevLock(tab, body.baseRev, true, function () { return deleteRowById(tab, body.id); });
     } else if (action === "rowCount" && tab) {
       // Lightweight pre-write staleness check. Returns the sheet's current
       // data-row count so the frontend can warn before a bulk pushTab if
       // another device added rows since the last pull.
       output = rowCount(tab);
     } else if (action === "deleteRow" && tab && body.rowIndex !== undefined) {
-      output = deleteRow(tab, body.rowIndex);
+      output = withRevLock(tab, body.baseRev, true, function () { return deleteRow(tab, body.rowIndex); });
     } else if (action === "updateRow" && tab && body.rowIndex !== undefined && body.row) {
-      output = updateRow(tab, body.rowIndex, body.row);
+      output = withRevLock(tab, body.baseRev, true, function () { return updateRow(tab, body.rowIndex, body.row); });
     } else if (action === "sendEmail") {
       output = sendEmailHelper(body);
     } else if (action === "getEmailInfo") {
@@ -240,6 +245,72 @@ function jsonResponse(obj) {
 function isValidAuth(token) {
   if (!token) return false;
   return PropertiesService.getScriptProperties().getProperty("auth:" + token) !== null;
+}
+
+// ─── REVISION TRACKING / OPTIMISTIC CONCURRENCY ─────────
+// Each data tab carries a monotonic revision counter in ScriptProperties
+// (key "rev:<TabName>"), bumped on every successful write. Clients send the
+// revision they last saw as `baseRev`; a write whose baseRev no longer matches
+// the server is REJECTED (conflict) instead of being allowed to clobber newer
+// data. A single script lock makes the check → write → bump sequence atomic,
+// since Apps Script web apps do NOT serialize concurrent requests.
+var REV_TABS = ["Roster", "Medical", "Attendance", "IPPT", "RouteMarch", "SOC",
+  "PolarFlow", "ConductDetail", "Appointments", "Leave", "MSK", "Conducts"];
+
+function getRev(tabName) {
+  var p = PropertiesService.getScriptProperties();
+  var v = p.getProperty("rev:" + tabName);
+  if (v === null) { p.setProperty("rev:" + tabName, "1"); return 1; }  // lazily seed
+  return Number(v) || 1;
+}
+
+function bumpRev(tabName) {
+  var p = PropertiesService.getScriptProperties();
+  var next = (Number(p.getProperty("rev:" + tabName)) || 1) + 1;
+  p.setProperty("rev:" + tabName, String(next));
+  return next;
+}
+
+function getAllRevs() {
+  var p = PropertiesService.getScriptProperties();
+  var out = {};
+  for (var i = 0; i < REV_TABS.length; i++) {
+    var v = p.getProperty("rev:" + REV_TABS[i]);
+    out[REV_TABS[i]] = v === null ? 1 : (Number(v) || 1);
+  }
+  return out;
+}
+
+// Optional one-time editor run; getRev also seeds lazily so this isn't required.
+function initAllRevs() {
+  for (var i = 0; i < REV_TABS.length; i++) getRev(REV_TABS[i]);
+  return getAllRevs();
+}
+
+// Atomic write wrapper. `enforce` true → reject when the client's `baseRev` no
+// longer matches the server (lost-update prevention). Runs fn() (the actual
+// sheet mutation) under a script lock, then bumps the tab's revision on success
+// and returns it as `result.rev` so the client can advance its baseline.
+// Backward-compat: a missing baseRev (old cached client) skips the check but
+// still bumps, so newer clients immediately see the change.
+function withRevLock(tabName, baseRev, enforce, fn) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); }
+  catch (e) { return { error: "Server busy, please retry", code: 503 }; }
+  try {
+    var serverRev = getRev(tabName);
+    if (enforce && baseRev !== undefined && baseRev !== null && baseRev !== "" &&
+        Number(baseRev) !== serverRev) {
+      return { conflict: true, tab: tabName, serverRev: serverRev };
+    }
+    var result = fn();
+    if (result && result.error) return result;          // don't bump on failure
+    if (!result) result = { ok: true };
+    result.rev = bumpRev(tabName);
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // One-time admin: store the Anthropic API key in script properties so
@@ -632,6 +703,7 @@ function readAllTabs() {
 
   result.timestamp = new Date().toISOString();
   result.sheetName = ss.getName();
+  result.revs = getAllRevs();   // per-tab revisions so the client can baseline
   return result;
 }
 

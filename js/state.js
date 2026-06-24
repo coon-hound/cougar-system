@@ -151,6 +151,13 @@ const STATE = {
   // User-created medical statuses (see loadCustomStatuses). Reusable in the
   // Report Sick form's status dropdown alongside the built-in vocabulary.
   customStatuses: loadCustomStatuses(),
+  // Per-tab server revision last seen by this device, keyed by SHEET name
+  // ("Roster", "Medical", …). Sent as `baseRev` on every write so the server
+  // can reject a stale overwrite, and compared against the lightweight revCheck
+  // poll to decide which tabs to auto-refresh. Persisted WITH the data (not a
+  // separate key) so a reloaded stale tab pushes with the rev it actually last
+  // saw — a desynced rev would defeat the staleness check.
+  rev: {},
   charts: {}
 };
 
@@ -282,7 +289,8 @@ function saveLocal() {
     roster: STATE.roster, medical: STATE.medical, attendance: STATE.attendance,
     ippt: STATE.ippt, rm: STATE.rm, soc: STATE.soc, polar: STATE.polar,
     conductDetail: STATE.conductDetail, appointments: STATE.appointments,
-    leave: STATE.leave, msk: STATE.msk, conducts: STATE.conducts
+    leave: STATE.leave, msk: STATE.msk, conducts: STATE.conducts,
+    rev: STATE.rev || {}
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
 }
@@ -307,6 +315,7 @@ function loadLocal() {
     STATE.leave = normalizeLeave(d.leave);
     STATE.msk = normalizeMSK(d.msk);
     STATE.conducts = Array.isArray(d.conducts) ? d.conducts : [];
+    STATE.rev = (d.rev && typeof d.rev === "object") ? d.rev : {};
   } catch { /* fall through to empty state */ }
 }
 

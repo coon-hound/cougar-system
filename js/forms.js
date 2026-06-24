@@ -2891,12 +2891,25 @@ function renameConduct(id, newName) {
 // Merges one conduct into another: every record pointing to fromId is
 // repointed to toId, then fromId is removed from the registry. Used both
 // from the admin tab and indirectly from migration edits.
-function mergeConductInto(fromId, toId) {
+async function mergeConductInto(fromId, toId) {
   if (fromId === toId) return;
-  const from = STATE.conducts.find(x => x.id === fromId);
-  const to = STATE.conducts.find(x => x.id === toId);
+  let from = STATE.conducts.find(x => x.id === fromId);
+  let to = STATE.conducts.find(x => x.id === toId);
   if (!from || !to) return;
   if (!confirm(`Merge "${from.name}" → "${to.name}"?\n\nAll records currently using "${from.name}" will be repointed to "${to.name}", and "${from.name}" will be removed from the registry.\n\nThis touches every record across Attendance, ConductDetail, and PolarFlow — those tabs will be re-pushed.`)) return;
+  // Refresh the tabs this rewrites so the bulk replaces carry a current baseRev
+  // (won't be rejected as stale) and repoint the very latest rows.
+  if (STATE.apiUrl && STATE.authToken && API.pullTabs) {
+    try {
+      const pull = API.pullTabs(["Conducts", "Attendance", "ConductDetail", "PolarFlow"]);
+      if (typeof setPullInFlight === "function") setPullInFlight(pull);
+      await pull;
+    } catch (e) { /* proceed on local data; the server OCC still guards */ }
+  }
+  // Re-resolve after the pull — another device may have merged/renamed already.
+  from = STATE.conducts.find(x => x.id === fromId);
+  to = STATE.conducts.find(x => x.id === toId);
+  if (!from || !to) { render(); return; }
   const repoint = (arr) => (arr || []).forEach(r => { if (r.conductId === fromId) r.conductId = toId; });
   repoint(STATE.attendance);
   repoint(STATE.polar);

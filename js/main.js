@@ -222,6 +222,12 @@ async function tryRedeemInviteFromURL() {
     maybeRunConductMigration();
     maybeRestoreDirty();
   }
+
+  // Keep this tab fresh: poll the cheap revCheck endpoint (~20s while visible +
+  // on focus/visibility/online) and pull only changed tabs. STATE.rev was just
+  // baselined by the launch pull (awaited above, or in autoSyncOnLaunch's
+  // background pull). See js/sync.js.
+  if (STATE.authToken && typeof initAutoRefresh === "function") initAutoRefresh();
 })();
 
 // On launch, if previous session(s) left dirty tabs (pushes failed offline
