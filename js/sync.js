@@ -98,7 +98,25 @@ function syncTimingSummary() {
   return out;
 }
 
+// The always-visible topbar pill (#sync-status). kind ∈ ok | syncing | error.
+// `onTap` makes it a tap-to-retry button (used for the unsaved/error state).
+function updateSyncPill(kind, text, onTap) {
+  const el = document.getElementById("sync-status");
+  if (!el) return;
+  el.className = kind === "error" ? "s-error" : kind === "syncing" ? "s-syncing" : "s-ok";
+  el.textContent = text;
+  el.onclick = onTap || null;
+  el.title = onTap ? "Tap to retry syncing" : "Sync status";
+}
+
 function setSyncIndicator(text, color) {
+  // Mirror to the always-visible topbar pill so push status is obvious on mobile
+  // (the sidebar indicator below is hidden behind ☰). Color encodes the state.
+  const c = String(color || "");
+  if (/red/.test(c)) updateSyncPill("error", /auth/i.test(text) ? "⚠ Sign in" : "⚠ Sync error", retryAllDirty);
+  else if (/orange/.test(c)) updateSyncPill("syncing", "⟳ Saving…");
+  else updateSyncPill("ok", "✓ Saved");
+
   const el = document.getElementById("sync-indicator");
   if (!el) return;
   el.textContent = text;
@@ -129,6 +147,8 @@ function refreshSyncIndicator() {
   }
   const dirtyCount = (STATE.dirty && STATE.dirty.size) || 0;
   if (dirtyCount > 0) {
+    // Loud, tappable "not saved" state — both in the sidebar and the topbar pill.
+    updateSyncPill("error", `⚠ ${dirtyCount} unsaved · Retry`, retryAllDirty);
     el.textContent = `⚠ ${dirtyCount} tab${dirtyCount === 1 ? "" : "s"} need retry · Retry now`;
     el.style.color = "var(--red)";
     el.style.cursor = "pointer";
@@ -248,7 +268,16 @@ function dispatchWrite(tabName, mode) {
 //   { rev }           → success; advance our baseline for this tab.
 async function runWrite(tabName, mode) {
   let res = await timed("write", `write ${tabName} (${mode.type})`, () => dispatchWrite(tabName, mode));
-  if (res && res.conflict) res = await resolveConflict(tabName, mode);
+  // A stale write is rejected with { conflict }. Resolve by pulling fresh,
+  // re-applying this edit, and retrying. Bounded loop (not a single retry) so a
+  // BUSY tab whose revision keeps moving while we resolve still settles in-line
+  // instead of bouncing to the dirty "needs retry" list. replace returns a
+  // non-conflict result, so it never loops.
+  let attempts = 0;
+  while (res && res.conflict && attempts < 6) {
+    attempts++;
+    res = await resolveConflict(tabName, mode, res.serverRev);
+  }
   if (res && res.conflict) throw new Error("Still out of date after refresh — will retry");
   if (res && res.error) throw new Error(res.error);
   if (res && res.rev != null) { STATE.rev[tabName] = res.rev; saveLocal(); }
@@ -261,20 +290,26 @@ async function runWrite(tabName, mode) {
 //    matches) → the user's change lands alongside everyone else's.
 //  • replace (full re-push): never auto-clobber. Pull fresh and surface a
 //    banner asking the user to redo their bulk change on the refreshed data.
-async function resolveConflict(tabName, mode) {
+async function resolveConflict(tabName, mode, serverRev) {
   const arrKey = TAB_TO_STATE[tabName];
   if (mode.type === "replace") {
     try { await API.pullTabs([tabName]); } catch (e) { /* keep going */ }
+    if (serverRev != null) STATE.rev[tabName] = serverRev;
     if (typeof render === "function") render();
     showSyncBanner(`"${tabName}" was changed on another device. Refreshed to the latest — please redo your bulk change, then Re-push.`);
     return { ok: true, refreshed: true };   // tab now matches server; not dirty
   }
   try { await API.pullTabs([tabName]); }
-  catch (e) { return { conflict: true }; }            // couldn't refresh → bubble up
+  catch (e) { return { conflict: true, serverRev }; }   // couldn't refresh → bubble up
+  // Belt-and-suspenders: make baseRev reflect the server even if the partial
+  // read didn't carry a rev, so the retry isn't guaranteed to re-conflict.
+  if (serverRev != null && (STATE.rev[tabName] == null || Number(STATE.rev[tabName]) < Number(serverRev))) {
+    STATE.rev[tabName] = serverRev;
+  }
   if (arrKey && Array.isArray(STATE[arrKey])) reapplyMode(arrKey, mode);
   saveLocal();
   if (typeof render === "function") render();
-  return dispatchWrite(tabName, mode);                 // retry once with fresh baseRev
+  return dispatchWrite(tabName, mode);                 // retry with fresh baseRev
 }
 
 // Re-apply a granular op to a freshly-pulled local array so the UI keeps the

@@ -23,6 +23,14 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
 #topbar input{flex:1;max-width:350px;padding:7px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;font-size:12px;outline:none}
 #topbar-filters{margin-left:auto;display:flex;gap:6px;align-items:center}
 #topbar-filters .filter-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600}
+
+/* Always-visible push/sync status pill (mirrors the sidebar indicator, which is
+   hidden behind ☰ on mobile). Green=saved, orange=saving, red=NOT saved. */
+#sync-status{flex-shrink:0;border:1px solid transparent;border-radius:14px;padding:5px 11px;font:inherit;font-size:11px;font-weight:700;line-height:1;white-space:nowrap;background:none;color:var(--muted)}
+#sync-status.s-ok{color:var(--green);background:#3FB95018;border-color:#3FB95033}
+#sync-status.s-syncing{color:var(--orange);background:#D2992218;border-color:#D2992233}
+#sync-status.s-error{color:#fff;background:var(--red);border-color:var(--red);cursor:pointer;animation:sync-pulse 1.3s ease-in-out infinite}
+@keyframes sync-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 .topbar-select{padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;font-size:12px;outline:none;min-width:78px}
 .topbar-select:disabled{opacity:.4;cursor:not-allowed}
 /* Highlight selectors when a filter is active so the global scope is obvious. */
@@ -148,6 +156,9 @@ tr:hover{background:var(--surface2)}
   /* The "Scope" toggle — shows current filter state ("All", "P1", "P1S2"). */
   #mobile-filter-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:54px;min-height:36px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.5px;flex-shrink:0}
   #mobile-filter-toggle.active{color:var(--accent);border-color:var(--accent);background:#58A6FF11}
+
+  /* Sync pill: a proper tap target on mobile and impossible to miss when red. */
+  #sync-status{min-height:36px;display:inline-flex;align-items:center;font-size:12px;padding:6px 12px}
 
   /* Filter panel: dropdown anchored to the bottom edge of the topbar.
      Hidden by default; .open reveals it. Topbar is the positioning context

@@ -1061,18 +1061,19 @@ function finalizePolarImport(keyResolutions) {
     insertedRows.push(entry);
   });
   _polarImportPending = null;
-  const lmsChanged = recomputeAttendanceLmsFromPolar();
+  const lmsChangedRows = recomputeAttendanceLmsFromPolar();
   saveLocal(); render();
   // Auto-push the new rows. Previously the user had to navigate to PolarFlow
   // tab and click Push to Sheet manually — exactly the kind of tab-switching
   // this redesign eliminates.
   if (STATE.apiUrl && insertedRows.length) {
     autoSync("PolarFlow", { type: "appendMany", rows: insertedRows });
-    // If LMS counts on attendance changed, re-push those rows too (full
-    // replace because individual upserts would be N round-trips).
-    if (lmsChanged) autoSync("Attendance", { type: "replace", data: STATE.attendance });
+    // Push each attendance row whose LMS changed as a granular upsert. (Was a
+    // full-tab replace — but a stale replace conflicts and silently drops the
+    // backfill; per-row upserts merge under OCC and never clobber other edits.)
+    lmsChangedRows.forEach(row => autoSync("Attendance", { type: "upsert", row }));
   }
-  alert(`Imported ${insertedRows.length} Polar rows${lmsChanged ? `\nUpdated LMS on ${lmsChanged} attendance row${lmsChanged === 1 ? "" : "s"}.` : ""}\n\nSyncing to sheet — check the sidebar indicator for status.`);
+  alert(`Imported ${insertedRows.length} Polar rows${lmsChangedRows.length ? `\nUpdated LMS on ${lmsChangedRows.length} attendance row${lmsChangedRows.length === 1 ? "" : "s"}.` : ""}\n\nSyncing to sheet — check the sidebar indicator for status.`);
 }
 function openConductDetailForm(id) {
   const e = id ? STATE.conductDetail.find(x => x.id === id) : null;
@@ -2773,7 +2774,7 @@ async function commitConductMigration() {
   // Backfill LMS counts now that polar/attendance can finally join on
   // conductId. Before this migration the LMS column was likely stale on rows
   // where the conduct string had any drift between the two layers.
-  const lmsChanged = recomputeAttendanceLmsFromPolar();
+  const lmsChanged = recomputeAttendanceLmsFromPolar().length;
   saveLocal();
   closeModal();
   render();
@@ -3051,7 +3052,7 @@ function recomputeAttendanceLmsFromPolar() {
     const k = `${dateJoinKey(p.date)}|${ck}`;
     (polarByConduct[k] = polarByConduct[k] || new Set()).add(padD4(p.d4));
   });
-  let changed = 0;
+  const changedRows = [];
   STATE.attendance.forEach(a => {
     if ("polar" in a) delete a.polar;
     const ck = conductJoinKey(a);
@@ -3060,11 +3061,14 @@ function recomputeAttendanceLmsFromPolar() {
     if (count == null) return;
     if ((+a.lms || 0) !== count) {
       a.lms = count;
-      changed++;
+      changedRows.push(a);
     }
   });
-  if (changed) saveLocal();
-  return changed;
+  if (changedRows.length) saveLocal();
+  // Returns the attendance rows whose LMS changed (truthy .length lets callers
+  // also use it as a count). Pull callers ignore the return; the polar-import
+  // caller upserts these rows individually (merge-safe) rather than a full replace.
+  return changedRows;
 }
 
 // Human label for a polar/attendance key — used in the diagnostic alert
@@ -3100,7 +3104,7 @@ function refreshLmsFromPolar() {
   });
   const unmatched = [...polarKeys].filter(k => !attendanceKeys.has(k));
   const matched = [...polarKeys].filter(k => attendanceKeys.has(k));
-  const changed = recomputeAttendanceLmsFromPolar();
+  const changed = recomputeAttendanceLmsFromPolar().length;
   render();
 
   let msg = changed

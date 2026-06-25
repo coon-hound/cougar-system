@@ -60,6 +60,33 @@ module.exports = async function run() {
     eq(A.sb.STATE.dirty.size, 0, "not dirty");
   });
 
+  // 1b) Conflict against a MOVING target (server rev keeps advancing while we
+  // resolve) must still settle in-line, not bounce to the dirty "retry" list.
+  await test("conflict vs a moving target resolves without going dirty", async () => {
+    const backend = loadBackend();
+    backend.db.seed("Medical", MED_HEADERS, [["1", "1101", "", "old", "", "", "", ""]]);
+    const A = makeClient(backend), B = makeClient(backend);
+    await A.sb.API.pullAll();
+    await B.sb.API.pullAll();
+
+    // Make the server move on A's first two write attempts: B writes a fresh row
+    // right before A's upsert reaches the server, so A keeps seeing a newer rev.
+    const realUpsert = A.sb.API.upsertRow.bind(A.sb.API);
+    let moves = 0;
+    A.sb.API.upsertRow = async (tab, row) => {
+      if (tab === "Medical" && moves < 2) { moves++; await B.sb.autoSync("Medical", { type: "upsert", row: med(100 + moves, "B" + moves) }); }
+      return realUpsert(tab, row);
+    };
+
+    A.sb.STATE.medical[0].reason = "A-edited";
+    await A.sb.autoSync("Medical", { type: "upsert", row: med(1, "A-edited") });
+
+    eq(A.sb.STATE.dirty.size, 0, "settled in-line, not left dirty");
+    const rows = backend.db.rowsOf("Medical");
+    eq(rows.find(r => String(r.id) === "1").reason, "A-edited", "A's edit landed");
+    ok(rows.length >= 3, "B's interleaved rows also survived");
+  });
+
   suite("sync: auto-refresh");
 
   // 4) Auto-refresh pulls ONLY the changed tab (not readAll).
