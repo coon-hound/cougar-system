@@ -313,6 +313,46 @@ function withRevLock(tabName, baseRev, enforce, fn) {
   }
 }
 
+// ── Manual-edit propagation (installable onEdit trigger) ─────
+// App/bot writes bump the revision through withRevLock, but typing directly into
+// the Google Sheet bypasses all of that — so dashboards' revCheck poll would
+// never notice a hand edit. This trigger bumps the edited tab's revision on any
+// human edit in the Sheets UI, so manual edits auto-refresh into open tabs too.
+// NOTE: programmatic writes (the web app's setValues) do NOT fire onEdit, so
+// this never double-counts app writes. Run installEditTrigger() ONCE from the
+// editor to enable it (an installable trigger is required — simple onEdit can't
+// reliably use ScriptProperties/LockService).
+function onEditBumpRev(e) {
+  try {
+    var sheet = e && e.range && e.range.getSheet();
+    if (!sheet) return;
+    var name = sheet.getName();
+    if (REV_TABS.indexOf(name) === -1) return;   // only tracked data tabs
+    // Lock so the bump can't race a concurrent app write to the same tab — both
+    // must land as distinct revisions or a client could miss one.
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(10000); } catch (le) { bumpRev(name); return; }  // best-effort
+    try { bumpRev(name); } finally { lock.releaseLock(); }
+  } catch (err) {
+    // Triggers must fail quietly — never block the user's edit.
+    try { Logger.log("onEditBumpRev error: " + err); } catch (e2) {}
+  }
+}
+
+// One-time setup: run this ONCE from the Apps Script editor (it asks for the
+// ScriptApp authorization). Idempotent — removes any prior copy first.
+function installEditTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "onEditBumpRev") ScriptApp.deleteTrigger(triggers[i]);
+  }
+  ScriptApp.newTrigger("onEditBumpRev")
+    .forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet())
+    .onEdit()
+    .create();
+  return "Installed onEdit rev-bump trigger for: " + REV_TABS.join(", ");
+}
+
 // One-time admin: store the Anthropic API key in script properties so
 // analyzePhotoHelper can read it without exposing the key to the public
 // web app URL. Run from the editor:  setAnthropicKey("sk-ant-…")
@@ -1834,6 +1874,11 @@ function tgCompleteMC(chatId, state, url, fileId) {
       location: state.clinic || (rs && rs.clinic) || "",
       status: "", startDate: "", endDate: ""
     });
+    // This write bypasses doPost/withRevLock (it's a server-side bot action), so
+    // bump the Medical revision manually — otherwise dashboards' revCheck poll
+    // would never see the change and would silently miss the bot-reported sick
+    // record until a manual full pull.
+    bumpRev("Medical");
   } catch (e) {
     Logger.log("tgCompleteMC sheet error: " + e);
   }

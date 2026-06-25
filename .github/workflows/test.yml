@@ -1,0 +1,18 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Zero dependencies — nothing to install. This runs the sync test suite:
+      # backend OCC/rev units, end-to-end multi-tab scenarios, and the static
+      # load-time guards (duplicate-declaration parse + cache-version + rev-bump).
+      - run: node test/run.js
