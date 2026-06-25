@@ -199,7 +199,9 @@ async function tryRedeemInviteFromURL() {
     try {
       // Mark the pull in-flight so any writes triggered during render
       // (e.g. a migration auto-push) wait until STATE is fresh.
-      const pullPromise = API.pullAll();
+      const pullPromise = (typeof timed === "function")
+        ? timed("pull", "pull ALL (first launch)", () => API.pullAll(), true)
+        : API.pullAll();
       if (typeof setPullInFlight === "function") setPullInFlight(pullPromise);
       const data = await pullPromise;
       if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();

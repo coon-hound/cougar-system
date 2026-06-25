@@ -64,6 +64,40 @@ function syncLog(msg, color) {
   el.innerHTML = `<div style="color:${color || 'var(--muted)'}">${t} — ${msg}</div>` + el.innerHTML;
 }
 
+// ── Sync timing instrumentation ──────────────────────────
+// Times every network round-trip and keeps the last ~30 per category so you can
+// see how long syncs actually take. Each call logs "[sync] <label>: <ms>ms" to
+// the console; run syncTimingSummary() in the console for min/avg/max/last per
+// category. Categories: "revCheck" (the cheap poll), "pull" (full + partial
+// data fetches), "write" (each upsert/append/delete/replace round-trip).
+const _now = () => (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+const _syncTimings = { revCheck: [], pull: [], write: [] };
+async function timed(category, label, fn, alsoSyncLog) {
+  const t0 = _now();
+  try {
+    return await fn();
+  } finally {
+    const ms = Math.round(_now() - t0);
+    const buf = _syncTimings[category] || (_syncTimings[category] = []);
+    buf.push(ms);
+    if (buf.length > 30) buf.shift();
+    console.log(`[sync] ${label}: ${ms}ms`);
+    if (alsoSyncLog) syncLog(`${label}: ${ms}ms`, "var(--dim)");
+  }
+}
+// Console helper: print a per-category summary of recent sync durations.
+function syncTimingSummary() {
+  const out = {};
+  for (const cat in _syncTimings) {
+    const a = _syncTimings[cat];
+    if (!a.length) { out[cat] = "(no samples)"; continue; }
+    const sum = a.reduce((s, x) => s + x, 0);
+    out[cat] = { samples: a.length, last: a[a.length - 1] + "ms", avg: Math.round(sum / a.length) + "ms", min: Math.min(...a) + "ms", max: Math.max(...a) + "ms" };
+  }
+  console.table(out);
+  return out;
+}
+
 function setSyncIndicator(text, color) {
   const el = document.getElementById("sync-indicator");
   if (!el) return;
@@ -213,7 +247,7 @@ function dispatchWrite(tabName, mode) {
 //   { error }         → real failure; throw so the tab is marked dirty.
 //   { rev }           → success; advance our baseline for this tab.
 async function runWrite(tabName, mode) {
-  let res = await dispatchWrite(tabName, mode);
+  let res = await timed("write", `write ${tabName} (${mode.type})`, () => dispatchWrite(tabName, mode));
   if (res && res.conflict) res = await resolveConflict(tabName, mode);
   if (res && res.conflict) throw new Error("Still out of date after refresh — will retry");
   if (res && res.error) throw new Error(res.error);
@@ -322,7 +356,7 @@ async function doPull() {
   try {
     syncLog("Pulling all data...");
     document.getElementById("pull-btn").disabled = true;
-    const pullPromise = API.pullAll();
+    const pullPromise = timed("pull", "pull ALL (readAll)", () => API.pullAll(), true);
     setPullInFlight(pullPromise);
     const data = await pullPromise;
     syncLog(`Pull complete! Sheet: ${data.sheetName}`, "var(--green)");
@@ -395,7 +429,7 @@ async function autoRefreshTick(reason) {
   if (_lastCheckedAt && (Date.now() - _lastCheckedAt) < AUTO_REFRESH_MIN_GAP_MS && reason !== "interval") return;
   _autoRefreshing = true;
   try {
-    const res = await API.revCheck();
+    const res = await timed("revCheck", "revCheck", () => API.revCheck());
     if (!res || res.error || !res.revs) return;
     _lastCheckedAt = Date.now();
     refreshSyncIndicator();
@@ -436,7 +470,7 @@ async function autoRefreshTick(reason) {
 // Pull the given sheet tabs, advance revs, re-render, flash a confirmation.
 async function applyAutoPull(sheetNames) {
   if (!sheetNames || !sheetNames.length) return;
-  const pullPromise = API.pullTabs(sheetNames);
+  const pullPromise = timed("pull", `pull ${sheetNames.join(",")}`, () => API.pullTabs(sheetNames), true);
   setPullInFlight(pullPromise);
   try { await pullPromise; } catch (e) { return; }
   _lastSyncedAt = Date.now();
@@ -541,12 +575,34 @@ async function autoSyncOnLaunch() {
   }
   setSyncIndicator("● Syncing…", "var(--orange)");
   try {
-    const pullPromise = API.pullAll();
+    // INCREMENTAL launch sync: if we have a revision baseline from the cache,
+    // do a cheap revCheck and pull ONLY changed tabs (in parallel) instead of a
+    // full readAll — which was costing ~10s+. Falls back to a full pull when
+    // there's no baseline (first run / old cache) or the backend lacks revCheck.
+    const hasBaseline = STATE.rev && Object.keys(STATE.rev).length > 0;
+    if (hasBaseline) {
+      const res = await timed("revCheck", "revCheck (launch)", () => API.revCheck());
+      _lastCheckedAt = Date.now();
+      if (res && !res.error && res.revs) {
+        const changed = Object.keys(res.revs).filter(s => Number(res.revs[s]) > Number(STATE.rev[s] || 0));
+        if (changed.length) {
+          await applyAutoPull(changed);   // parallel partial pulls + render + timing
+          syncLog(`Launch: refreshed ${changed.length} changed tab${changed.length === 1 ? "" : "s"} (${changed.join(", ")})`, "var(--green)");
+        } else {
+          _lastSyncedAt = Date.now();
+          refreshSyncIndicator();
+          syncLog("Launch: already up to date ✓", "var(--green)");
+        }
+        return;
+      }
+      // else: revCheck unsupported/failed → fall through to a full pull.
+    }
+    const pullPromise = timed("pull", "pull ALL (launch)", () => API.pullAll(), true);
     setPullInFlight(pullPromise);
     const data = await pullPromise;
     _lastSyncedAt = Date.now();
     refreshSyncIndicator();
-    syncLog(`Auto-sync on launch: pulled from ${data.sheetName}`, "var(--green)");
+    syncLog(`Auto-sync on launch: full pull from ${data.sheetName}`, "var(--green)");
     render();
   } catch (e) {
     if (e.name === "AuthError") {

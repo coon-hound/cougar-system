@@ -640,8 +640,21 @@ function readTab(tabName) {
 
   var range = sheet.getDataRange();
   var data = range.getValues();
-  var display = range.getDisplayValues();
   if (data.length < 2) return [];
+
+  // getDisplayValues() is a SECOND full read of the sheet — only fetch it when
+  // the tab actually contains time-only Date cells (epoch year < 1900), whose
+  // user-chosen display format (mm:ss / hh:mm) we must preserve. Most tabs have
+  // none, so this skips the second read and roughly halves the per-tab cost.
+  var needDisplay = false;
+  for (var di = 1; di < data.length && !needDisplay; di++) {
+    var drow = data[di];
+    for (var dj = 0; dj < drow.length; dj++) {
+      if (drow[dj] instanceof Date && drow[dj].getFullYear() < 1900) { needDisplay = true; break; }
+    }
+  }
+  var display = needDisplay ? range.getDisplayValues() : null;
+  var tz = Session.getScriptTimeZone();
 
   var headers = data[0].map(function (h) { return String(h).trim(); });
   var rows = [];
@@ -653,15 +666,13 @@ function readTab(tabName) {
       if (headers[j]) {
         var val = data[i][j];
         // For Date-typed cells:
-        //   • Time-only values (cells on the spreadsheet epoch 1899-12-30) →
-        //     use whatever the sheet *displays*, so the user's chosen format
-        //     (mm:ss, hh:mm, etc.) flows through as-is to the app.
-        //   • Real calendar dates → force "dd MMM yyyy" so locale-quirks in
-        //     the sheet don't change what the app shows.
+        //   • Time-only values (spreadsheet epoch 1899-12-30) → use the sheet's
+        //     display string so the user's chosen format flows through as-is.
+        //   • Real calendar dates → force "dd MMM yyyy" for locale stability.
         if (val instanceof Date) {
           val = val.getFullYear() < 1900
-            ? display[i][j]
-            : Utilities.formatDate(val, Session.getScriptTimeZone(), "dd MMM yyyy");
+            ? (display ? display[i][j] : Utilities.formatDate(val, tz, "HH:mm"))
+            : Utilities.formatDate(val, tz, "dd MMM yyyy");
         }
         row[headers[j]] = val;
         if (val !== "" && val !== null && val !== undefined) hasData = true;
