@@ -10,24 +10,32 @@ const med = (id, reason, extra) => Object.assign({ id, d4: "11" + id, date: "", 
 module.exports = async function run() {
   suite("sync: concurrency (real frontend ↔ real backend)");
 
-  // 1) Stale edit auto-merges — the core catastrophe, now prevented.
-  await test("stale edit to row A while B added row B → BOTH survive", async () => {
+  // 1) Two devices editing DIFFERENT recruits in the same tab → both save with
+  // NO conflict (row-scoped upsert), and each converges via auto-refresh. This
+  // is the exact field scenario that was wrongly conflicting before.
+  await test("two devices edit different rows → both save, no conflict", async () => {
     const backend = loadBackend();
     backend.db.seed("Medical", MED_HEADERS, [["1", "1101", "", "old", "", "", "", ""]]);
     const A = makeClient(backend), B = makeClient(backend);
     await A.sb.API.pullAll();
     await B.sb.API.pullAll();
 
-    await B.sb.autoSync("Medical", { type: "upsert", row: med(2, "B-new") });        // server rev → 2
-    A.sb.STATE.medical[0].reason = "A-edited";                                         // A edits locally (stale)
-    await A.sb.autoSync("Medical", { type: "upsert", row: med(1, "A-edited") });       // baseRev 1 → conflict → merge
+    await B.sb.autoSync("Medical", { type: "upsert", row: med(2, "B-new") });          // recruit 2 (rev↑)
+    A.sb.STATE.medical[0].reason = "A-edited";
+    await A.sb.autoSync("Medical", { type: "upsert", row: med(1, "A-edited") });        // recruit 1, stale rev — still fine
 
     const rows = backend.db.rowsOf("Medical");
     eq(rows.map(r => String(r.id)).sort(), ["1", "2"], "both rows on the sheet");
     eq(rows.find(r => String(r.id) === "1").reason, "A-edited", "A's edit landed");
-    eq(rows.find(r => String(r.id) === "2").reason, "B-new", "B's row not clobbered");
-    ok(A.sb.STATE.medical.find(r => String(r.id) === "2"), "A picked up B's row via the conflict pull");
-    eq(A.sb.STATE.dirty.size, 0, "tab not left dirty");
+    eq(rows.find(r => String(r.id) === "2").reason, "B-new", "B's edit landed");
+    eq(A.sb.STATE.dirty.size, 0, "no conflict, A not dirty");
+    eq(B.sb.STATE.dirty.size, 0, "no conflict, B not dirty");
+
+    // A's own write advanced its rev to current, so it won't auto-pull until the
+    // tab rev moves again. After any further change, A converges to B's row.
+    await B.sb.autoSync("Medical", { type: "upsert", row: med(2, "B-new2") });
+    await A.sb.autoRefreshTick("interval");
+    ok(A.sb.STATE.medical.find(r => String(r.id) === "2"), "A converges to B's row once the rev advances");
   });
 
   // 2) Stale full replace is rejected — never clobbers.
@@ -60,31 +68,25 @@ module.exports = async function run() {
     eq(A.sb.STATE.dirty.size, 0, "not dirty");
   });
 
-  // 1b) Conflict against a MOVING target (server rev keeps advancing while we
-  // resolve) must still settle in-line, not bounce to the dirty "retry" list.
-  await test("conflict vs a moving target resolves without going dirty", async () => {
+  // 1b) Many interleaved writes to DIFFERENT rows from two devices must all land
+  // and leave nobody dirty — no false-conflict storm.
+  await test("interleaved different-row writes from two devices never go dirty", async () => {
     const backend = loadBackend();
-    backend.db.seed("Medical", MED_HEADERS, [["1", "1101", "", "old", "", "", "", ""]]);
+    backend.db.seed("Medical", MED_HEADERS, []);
     const A = makeClient(backend), B = makeClient(backend);
     await A.sb.API.pullAll();
     await B.sb.API.pullAll();
 
-    // Make the server move on A's first two write attempts: B writes a fresh row
-    // right before A's upsert reaches the server, so A keeps seeing a newer rev.
-    const realUpsert = A.sb.API.upsertRow.bind(A.sb.API);
-    let moves = 0;
-    A.sb.API.upsertRow = async (tab, row) => {
-      if (tab === "Medical" && moves < 2) { moves++; await B.sb.autoSync("Medical", { type: "upsert", row: med(100 + moves, "B" + moves) }); }
-      return realUpsert(tab, row);
-    };
+    await Promise.all([
+      A.sb.autoSync("Medical", { type: "upsert", row: med(1, "a1") }),
+      B.sb.autoSync("Medical", { type: "upsert", row: med(2, "b1") }),
+      A.sb.autoSync("Medical", { type: "upsert", row: med(3, "a2") }),
+      B.sb.autoSync("Medical", { type: "upsert", row: med(4, "b2") })
+    ]);
 
-    A.sb.STATE.medical[0].reason = "A-edited";
-    await A.sb.autoSync("Medical", { type: "upsert", row: med(1, "A-edited") });
-
-    eq(A.sb.STATE.dirty.size, 0, "settled in-line, not left dirty");
-    const rows = backend.db.rowsOf("Medical");
-    eq(rows.find(r => String(r.id) === "1").reason, "A-edited", "A's edit landed");
-    ok(rows.length >= 3, "B's interleaved rows also survived");
+    eq(A.sb.STATE.dirty.size, 0, "A clean (no false conflict)");
+    eq(B.sb.STATE.dirty.size, 0, "B clean (no false conflict)");
+    eq(backend.db.rowsOf("Medical").length, 4, "all four distinct rows saved");
   });
 
   suite("sync: auto-refresh");

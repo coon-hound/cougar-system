@@ -74,10 +74,15 @@ function renderDashboard(el) {
   const recoveringRows = scoped.filter(r => topTag(r) && topTag(r).ghostDay > 0)
     .sort((a, b) => topTag(a).ghostDay - topTag(b).ghostDay);
   const active = scoped.length - liveRows.length;
-  // In Camp = Total Str − ATTC. ATTC means physically away (MC or Warded);
-  // LD/RMJ/Excuse/Pending recruits are still in camp, just restricted. A
-  // recruit counts as away if *any* of their active statuses is MC/Warded.
-  const awayFromCamp = liveRows.filter(r => allByD4[r.id].statuses.some(s => s.tag === "MC" || s.tag === "Warded")).length;
+  // Out of Camp / In Camp use the SHARED computation (outOfCampMap): active
+  // MC/Warded + active leave + manual book-outs. This is the SAME source the
+  // parade state uses, so the dashboard "In Camp" and parade CURRENT STRENGTH
+  // always agree. (Note: "Non-Active" above is medical-only — a recruit on LD/
+  // Excuse is non-active/restricted but still IN camp; only MC/Warded/leave/
+  // booked-out count as out of camp.)
+  const outMap = outOfCampMap(today);
+  const outScoped = scoped.filter(r => outMap.has(r.id));
+  const awayFromCamp = outScoped.length;
   const inCamp = scoped.length - awayFromCamp;
   const avgPart = STATE.attendance.length ? Math.round(STATE.attendance.reduce((a, c) => a + (c.participating / c.total * 100), 0) / STATE.attendance.length) : 0;
   const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong> — Attendance figures remain company-wide.</div>` : "";
@@ -92,8 +97,8 @@ function renderDashboard(el) {
   const cmdLive = liveRows.filter(r => r.role === "Commander");
   const recActive = recRows.length - recLive.length;
   const cmdActive = cmdRows.length - cmdLive.length;
-  const recAway = recLive.filter(r => allByD4[r.id].statuses.some(s => s.tag === "MC" || s.tag === "Warded")).length;
-  const cmdAway = cmdLive.filter(r => allByD4[r.id].statuses.some(s => s.tag === "MC" || s.tag === "Warded")).length;
+  const recAway = outScoped.filter(r => r.role !== "Commander").length;
+  const cmdAway = outScoped.filter(r => r.role === "Commander").length;
   const recInCamp = recRows.length - recAway;
   const cmdInCamp = cmdRows.length - cmdAway;
   // Inline "total/recruits/commanders" — the /R/C portion renders smaller
@@ -123,8 +128,10 @@ function renderDashboard(el) {
       <div class="stat"><label>Active today</label><div class="val" style="color:var(--green)">${active}${inlineBreakdown(recActive, cmdActive)}</div></div>
       <div class="stat"><label>Non-Active</label><div class="val" style="color:var(--red)">${liveRows.length}${inlineBreakdown(recLive.length, cmdLive.length)}</div></div>
       <div class="stat"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCamp}${inlineBreakdown(recInCamp, cmdInCamp)}</div></div>
+      <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
       <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
     </div>
+    ${renderDashOutOfCamp(scoped, outMap)}
     ${renderDashAppointments(visible, today)}
     <div class="grid-2">
       <div class="card"><h3>Status Breakdown (today)</h3><canvas id="chart-status" height="200"></canvas></div>
@@ -835,6 +842,35 @@ function renderLeaveTimeline(scoped, todayIso) {
   </div>`;
 }
 
+// "Currently Out of Camp" panel — everyone counted out today (the same shared
+// set that drives the strength tiles + parade). Booked-out rows get a one-tap
+// Book In; medical/leave rows are managed by their own records. A "+ Book Out"
+// button opens the ad-hoc picker.
+function renderDashOutOfCamp(scoped, outMap) {
+  const rows = scoped.filter(r => outMap.has(r.id));
+  const color = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
+  const label = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
+  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+    <h3 style="font-size:13px;color:var(--muted);margin:0">🚪 Currently Out of Camp <span style="color:var(--dim);font-weight:400">(${rows.length})</span></h3>
+    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutPicker()">+ Book Out</button>
+  </div>`;
+  if (!rows.length) return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">Everyone in scope is in camp.</div>`;
+  const body = rows.map(r => {
+    const info = outMap.get(r.id);
+    const c = color[info.kind] || "#8B949E";
+    return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">
+      <td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td>
+      <td style="text-align:left">${displayPersonLabel(r.id)}</td>
+      <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${c}22;color:${c}">${label[info.kind] || info.kind}</span></td>
+      <td style="text-align:left;font-size:11px;color:var(--muted)">${escapeAttr(info.reason || "")}</td>
+      <td style="white-space:nowrap">${info.kind === "bookedout"
+        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book back in">↩ Book In</button>`
+        : `<span style="font-size:10px;color:var(--dim)">via ${info.kind}</span>`}</td>
+    </tr>`;
+  }).join("");
+  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Why</th><th style="text-align:left">Detail</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 function renderDashAppointments(visible, todayIso) {
   const upcoming = STATE.appointments
     .filter(a => !a.resolved)
@@ -864,14 +900,23 @@ function renderDashAppointments(visible, todayIso) {
     const iso = displayDateToISO(a.date);
     const isToday = iso === todayIso;
     const dayLabel = isToday ? `<span class="badge badge-red" style="font-size:9px">TODAY</span>` : "";
+    // Out-of-camp appointments today get a one-tap Book Out / Book In that drives
+    // the shared booked-out flag (so the strength board + parade update live).
+    const r = STATE.roster.find(x => x.id === a.d4);
+    const bookedOut = r && isBookedOut(r, todayIso);
+    const bookBtn = (a.outOfCamp && isToday)
+      ? (bookedOut
+        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', false)" title="Book back in">↩ In</button> `
+        : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', true, ${JSON.stringify('Appt: ' + (a.reason || 'appointment'))})" title="Book out of camp">🚪 Out</button> `)
+      : "";
     return `<tr onclick="openPerson('${a.d4}')" style="cursor:pointer${isToday ? ';background:#F8514911' : ''}">
       <td class="mono" style="font-weight:700;color:var(--accent)">${displayId(a.d4)}</td>
       <td style="text-align:left">${displayPersonLabel(a.d4)}</td>
       <td style="text-align:left">${a.reason || ""}</td>
       <td style="white-space:nowrap">${a.date || ""} ${dayLabel}</td>
       <td class="mono" style="white-space:nowrap">${fmtHrs(a.time)}</td>
-      <td style="text-align:left;font-size:11px;color:var(--muted)">${a.location || ""}${a.outOfCamp ? ` <span class="badge badge-pink" style="font-size:9px">OUTSIDE</span>` : ""}</td>
-      <td style="white-space:nowrap"><button class="btn btn-icon" style="color:var(--green)" onclick="event.stopPropagation(); toggleAppointmentResolved(${a.id})" title="Mark as resolved (hides from dashboard + parade state)">✓</button> <button class="btn btn-icon" onclick="event.stopPropagation(); openAppointmentForm(${a.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('appointments', ${a.id}, 'appointment')" title="Delete">✕</button></td>
+      <td style="text-align:left;font-size:11px;color:var(--muted)">${a.location || ""}${a.outOfCamp ? ` <span class="badge badge-pink" style="font-size:9px">${bookedOut ? "OUT NOW" : "OUTSIDE"}</span>` : ""}</td>
+      <td style="white-space:nowrap">${bookBtn}<button class="btn btn-icon" style="color:var(--green)" onclick="event.stopPropagation(); toggleAppointmentResolved(${a.id})" title="Mark as resolved (hides from dashboard + parade state)">✓</button> <button class="btn btn-icon" onclick="event.stopPropagation(); openAppointmentForm(${a.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('appointments', ${a.id}, 'appointment')" title="Delete">✕</button></td>
     </tr>`;
   }).join("");
 
@@ -922,6 +967,7 @@ function renderRoster(el) {
   const rsiCount = {};
   STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
   const scoped = filteredRoster();
+  const rosterToday = todayISO();
   // Push/Export operate on the FULL roster — scoping is a view concern; we
   // don't want the user to silently overwrite the sheet with only their slice.
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
@@ -933,14 +979,19 @@ function renderRoster(el) {
         <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
       </div>
     </div>
-    ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th><th>Status</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
+    ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th><th>Status</th><th>Camp</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
     ${scoped.map(r => {
       const bmi = calcBMI(r);
       const isCmd = r.role === "Commander";
       const nameCell = isCmd ? `${r.rank ? r.rank + " " : ""}${r.name}` : r.name;
       const idCell = isCmd ? "" : r.id;
-      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `<span style="color:var(--muted);font-size:11px">Recruit</span>`;
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusBadge(r.status)}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
+      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `<span style="color:var(--muted)">Recruit</span>`;
+      // Book Out / Book In toggle reflecting the shared booked-out flag.
+      const bookedOut = isBookedOut(r, rosterToday);
+      const campCell = bookedOut
+        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book back in">↩ In</button>`
+        : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', true, 'Out of camp')" title="Book out of camp">🚪 Out</button>`;
+      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusBadge(r.status)}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No personnel in ${filterLabel()}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
 }

@@ -185,21 +185,24 @@ function doPost(e) {
     } else if (action === "appendMany" && tab && body.rows) {
       output = withRevLock(tab, body.baseRev, false, function () { return appendMany(tab, body.rows); });
     } else if (action === "upsertRow" && tab && body.row) {
-      // ID-based upsert — finds by `id` column, updates in place, appends if missing.
-      // ENFORCE: a stale row edit is still a silent loss, so reject on mismatch.
-      output = withRevLock(tab, body.baseRev, true, function () { return upsertRow(tab, body.row); });
+      // ID-based upsert — updates one row in place (or appends). It is ROW-SCOPED:
+      // it never touches other rows, so two devices editing DIFFERENT rows of the
+      // same tab can't clobber each other. Therefore do NOT enforce the tab
+      // revision (that caused false conflicts + a retry storm) — just apply and
+      // bump. Same-row simultaneous edits remain last-write-wins (acceptable).
+      output = withRevLock(tab, body.baseRev, false, function () { return upsertRow(tab, body.row); });
     } else if (action === "deleteRowById" && tab && body.id !== undefined) {
-      // ID-based row delete — finds by `id` column. ENFORCE on mismatch.
-      output = withRevLock(tab, body.baseRev, true, function () { return deleteRowById(tab, body.id); });
+      // ID-based delete — also row-scoped; no enforce (can't clobber other rows).
+      output = withRevLock(tab, body.baseRev, false, function () { return deleteRowById(tab, body.id); });
     } else if (action === "rowCount" && tab) {
       // Lightweight pre-write staleness check. Returns the sheet's current
       // data-row count so the frontend can warn before a bulk pushTab if
       // another device added rows since the last pull.
       output = rowCount(tab);
     } else if (action === "deleteRow" && tab && body.rowIndex !== undefined) {
-      output = withRevLock(tab, body.baseRev, true, function () { return deleteRow(tab, body.rowIndex); });
+      output = withRevLock(tab, body.baseRev, false, function () { return deleteRow(tab, body.rowIndex); });
     } else if (action === "updateRow" && tab && body.rowIndex !== undefined && body.row) {
-      output = withRevLock(tab, body.baseRev, true, function () { return updateRow(tab, body.rowIndex, body.row); });
+      output = withRevLock(tab, body.baseRev, false, function () { return updateRow(tab, body.rowIndex, body.row); });
     } else if (action === "sendEmail") {
       output = sendEmailHelper(body);
     } else if (action === "getEmailInfo") {
@@ -287,15 +290,25 @@ function initAllRevs() {
   return getAllRevs();
 }
 
+// Lock used for DATA writes. Deliberately the DOCUMENT lock, NOT the script
+// lock — the Telegram poller (tgPoll) holds the *script* lock for up to 5
+// minutes while long-polling, which would otherwise block every web-app write
+// until its waitLock timeout. The document lock scopes contention to actual
+// sheet writers. Falls back to the script lock for a standalone (unbound) script.
+function getDataLock() {
+  try { var l = LockService.getDocumentLock(); if (l) return l; } catch (e) {}
+  return LockService.getScriptLock();
+}
+
 // Atomic write wrapper. `enforce` true → reject when the client's `baseRev` no
 // longer matches the server (lost-update prevention). Runs fn() (the actual
-// sheet mutation) under a script lock, then bumps the tab's revision on success
+// sheet mutation) under the data lock, then bumps the tab's revision on success
 // and returns it as `result.rev` so the client can advance its baseline.
 // Backward-compat: a missing baseRev (old cached client) skips the check but
 // still bumps, so newer clients immediately see the change.
 function withRevLock(tabName, baseRev, enforce, fn) {
-  var lock = LockService.getScriptLock();
-  try { lock.waitLock(20000); }
+  var lock = getDataLock();
+  try { lock.waitLock(15000); }
   catch (e) { return { error: "Server busy, please retry", code: 503 }; }
   try {
     var serverRev = getRev(tabName);
@@ -329,8 +342,9 @@ function onEditBumpRev(e) {
     var name = sheet.getName();
     if (REV_TABS.indexOf(name) === -1) return;   // only tracked data tabs
     // Lock so the bump can't race a concurrent app write to the same tab — both
-    // must land as distinct revisions or a client could miss one.
-    var lock = LockService.getScriptLock();
+    // must land as distinct revisions or a client could miss one. Use the DATA
+    // (document) lock, not the script lock the Telegram poller holds for minutes.
+    var lock = getDataLock();
     try { lock.waitLock(10000); } catch (le) { bumpRev(name); return; }  // best-effort
     try { bumpRev(name); } finally { lock.releaseLock(); }
   } catch (err) {

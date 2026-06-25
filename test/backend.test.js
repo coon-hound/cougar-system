@@ -28,14 +28,24 @@ module.exports = async function run() {
     eq(b.db.rowsOf("Medical").length, 1, "row written");
   });
 
-  await test("upsert with stale baseRev is REJECTED (conflict, no mutation)", () => {
+  await test("upsert with stale baseRev APPLIES (row-scoped, not rejected)", () => {
     const b = loadBackend();
     b.db.seed("Medical", ["id", "reason"], []);
     post(b, { action: "upsertRow", tab: "Medical", row: { id: 1, reason: "a" }, baseRev: 1 }); // -> rev 2
-    const r = post(b, { action: "upsertRow", tab: "Medical", row: { id: 2, reason: "b" }, baseRev: 1 }); // stale
-    ok(r.conflict, "conflict flagged");
-    eq(r.serverRev, 2, "reports current server rev");
-    eq(b.db.rowsOf("Medical").length, 1, "second (stale) write did NOT apply");
+    // A DIFFERENT row with a now-stale baseRev must still apply — upsert is
+    // row-scoped, so two devices on different recruits never conflict.
+    const r = post(b, { action: "upsertRow", tab: "Medical", row: { id: 2, reason: "b" }, baseRev: 1 });
+    ok(r.ok && !r.conflict, "row-scoped upsert applies despite stale baseRev");
+    eq(b.db.rowsOf("Medical").length, 2, "both rows present");
+  });
+
+  await test("full write (replace) with stale baseRev IS rejected (catastrophe path)", () => {
+    const b = loadBackend();
+    b.db.seed("Medical", ["id", "reason"], [["1", "a"]]);
+    post(b, { action: "upsertRow", tab: "Medical", row: { id: 2, reason: "b" }, baseRev: b.getRev("Medical") }); // rev↑
+    const r = post(b, { action: "write", tab: "Medical", data: [{ id: 1, reason: "bulk" }], baseRev: 1 }); // stale replace
+    ok(r.conflict, "stale full-tab replace is rejected");
+    eq(b.db.rowsOf("Medical").length, 2, "rows NOT clobbered");
   });
 
   await test("missing baseRev applies (backward-compat) + still bumps", () => {

@@ -353,11 +353,11 @@ async function retryAllDirty() {
     }
   }
   // If a tab is STILL dirty after a full retry pass, the push is genuinely
-  // failing (auth expired, offline, or a row the server keeps rejecting) — a
-  // plain retry won't fix it. Surface the reason + the escape hatch loudly.
-  if (STATE.dirty && STATE.dirty.size > 0) {
-    const why = _lastSyncError ? ` — ${_lastSyncError}` : "";
-    showSyncBanner(`Still can't save ${[...STATE.dirty].join(", ")}${why}.`, "Force resync", forceResync);
+  // failing (auth expired, offline, a row the server keeps rejecting). Don't pop
+  // anything up — the topbar pill already shows the red "unsaved" state, and the
+  // Sync tab has a "Force Resync" button. The last error is logged for diagnosis.
+  if (STATE.dirty && STATE.dirty.size > 0 && _lastSyncError) {
+    syncLog(`Still unsaved (${[...STATE.dirty].join(", ")}): ${_lastSyncError}`, "var(--red)");
   }
 }
 

@@ -357,6 +357,45 @@ function medStatusActive(record, todayIso) {
   return todayIso >= start && todayIso <= end;
 }
 
+// ── In / out of camp (single source of truth) ────────────
+// A recruit is OUT OF CAMP on a date if ANY of: an active MC/Warded medical
+// record (physically away), an active leave covering the date, or a manual
+// Book-Out set for that day. BOTH the dashboard strength board and the parade
+// state read outOfCampMap() so their "in camp" numbers can never diverge.
+//
+// Manual book-outs AUTO-CLEAR daily by construction — they only count on the day
+// they were set (outSince === dateIso). A book-out from a previous day is simply
+// ignored (recruit counted in camp again); genuine multi-day absences are Leave.
+function isBookedOut(r, dateIso) {
+  if (!r) return false;
+  const out = r.outOfCamp === true || String(r.outOfCamp).toUpperCase() === "TRUE";
+  return out && r.outSince === (dateIso || todayISO());
+}
+
+// d4 → { kind: "medical" | "leave" | "bookedout", reason } for everyone out of
+// camp on `dateIso`. Precedence: medical > leave > manual book-out.
+function outOfCampMap(dateIso) {
+  dateIso = dateIso || todayISO();
+  const map = new Map();
+  STATE.medical.forEach(m => {
+    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !map.has(m.d4)) {
+      map.set(m.d4, { kind: "medical", reason: m.status + (m.reason ? " — " + m.reason : "") });
+    }
+  });
+  STATE.leave.forEach(l => {
+    const s = displayDateToISO(l.startDate), e = displayDateToISO(l.endDate);
+    if (s && e && s <= dateIso && dateIso <= e && !map.has(l.d4)) {
+      map.set(l.d4, { kind: "leave", reason: [l.type, l.reason].filter(Boolean).join(" — ") || "Leave" });
+    }
+  });
+  (STATE.roster || []).forEach(r => {
+    if (isBookedOut(r, dateIso) && !map.has(r.id)) {
+      map.set(r.id, { kind: "bookedout", reason: r.outReason || "Out of camp" });
+    }
+  });
+  return map;
+}
+
 // Returns { tag, ghostDay } for the record on the given date, or null if the
 // record doesn't apply at all. ghostDay is 0 for active, 1 or 2 for the post-
 // expiry tag period. Only MC and LD get ghost-tagged; everything else just

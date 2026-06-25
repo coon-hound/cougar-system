@@ -196,7 +196,11 @@ function normalizeRoster(roster) {
       id,
       role,
       rank: rest.rank || "",
-      leaveQuota: rest.leaveQuota !== undefined && rest.leaveQuota !== "" ? +rest.leaveQuota : ""
+      leaveQuota: rest.leaveQuota !== undefined && rest.leaveQuota !== "" ? +rest.leaveQuota : "",
+      // Out-of-camp ("booked out") persists per recruit. Sheets may return the
+      // boolean as a real boolean or the text "TRUE"; coerce to a real boolean.
+      // outReason / outSince (the local YYYY-MM-DD it was set) pass through ...rest.
+      outOfCamp: rest.outOfCamp === true || String(rest.outOfCamp).toUpperCase() === "TRUE"
     };
   });
 }

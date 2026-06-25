@@ -45,6 +45,20 @@ function openPerson(d4) {
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`
     : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}</div>`;
 
+  // ── In/out-of-camp status + Book Out / Book In ───────
+  // Reflects the shared out-of-camp computation. Medical/leave are managed by
+  // their own records (no toggle); only the manual book-out is toggled here.
+  const campInfo = outOfCampMap(todayISO()).get(d4);
+  const booked = isBookedOut(p, todayISO());
+  const pill = (txt, bg) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:${bg}22;color:${bg}">${txt}</span>`;
+  html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    ${campInfo ? pill("OUT OF CAMP", "#F85149") : pill("IN CAMP", "#3FB950")}
+    ${campInfo ? `<span style="font-size:11px;color:var(--muted)">${escapeAttr(campInfo.reason || "")}</span>` : ""}
+    ${campInfo && campInfo.kind !== "bookedout"
+      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
+      : `<button class="btn ${booked ? "btn-success" : "btn-danger"}" style="font-size:11px;padding:4px 10px" onclick="bookOutToggle('${d4}', ${booked ? "false" : "true"}, 'Out of camp'); openPerson('${d4}')">${booked ? "↩ Book In" : "🚪 Book Out"}</button>`}
+  </div>`;
+
   // ── Profile section ──────────────────────────────────
   const bmi = calcBMI(p);
   // 8-digit local numbers display nicer with a space in the middle.
@@ -1254,6 +1268,48 @@ function toggleAppointmentResolved(id) {
   saveLocal(); render();
 }
 
+// Book a recruit out of / back into camp. The persistent, synced source of truth
+// for "physically out of camp now" — drives BOTH the dashboard strength board
+// and the parade state (via outOfCampMap). `on` omitted = toggle. `outSince` is
+// today's local day so it auto-clears at the start of the next day. MUST sync
+// (unlike toggleMSKCleared) so every device + the parade reflect it.
+function bookOutToggle(d4, on, reason) {
+  const r = STATE.roster.find(x => x.id === d4);
+  if (!r) return;
+  if (on === undefined) on = !isBookedOut(r, todayISO());
+  if (on) {
+    r.outOfCamp = true;
+    r.outReason = reason || r.outReason || "Out of camp";
+    r.outSince = todayISO();
+  } else {
+    r.outOfCamp = false;
+    r.outReason = "";
+    r.outSince = "";
+  }
+  saveLocal(); render();
+  if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
+}
+
+// Ad-hoc "book out" picker (dashboard "+ Book Out"): choose any in-camp recruit
+// + a reason, then mark them booked out for today.
+function openBookOutPicker() {
+  openModal("Book Out of Camp", `
+    <form onsubmit="event.preventDefault(); submitBookOut(); return false">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:11px;color:var(--muted)">Marks the recruit out of camp for today (auto-clears tomorrow). For multi-day absences, log a Leave instead.</div>
+        <div class="form-group"><label>Recruit</label>${rosterSelect("f-bo-d4", true, "")}</div>
+        ${formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`)}
+        <button type="submit" class="btn btn-danger">🚪 Book Out</button>
+      </div>
+    </form>`);
+}
+function submitBookOut() {
+  const d4 = gv("f-bo-d4");
+  if (!d4) { alert("Pick a recruit first."); return; }
+  bookOutToggle(d4, true, gv("f-bo-reason") || "Out of camp");
+  closeModal();
+}
+
 // Lightweight roster-add form scoped to commanders. Recruits are added via
 // the Google Sheet directly (their data is sourced from pre-enlistment
 // nominal rolls); commanders are added ad-hoc in-app so the user doesn't
@@ -1432,12 +1488,6 @@ function paradeStatusLabel(record) {
 // medical record having ended". Cleared on modal open and on date change.
 let _paradeOverrides = {};
 
-// Per-parade in/out-of-camp overrides for appointments, keyed by appointment id.
-// A present key wins over the appointment's stored outOfCamp flag, letting the
-// PDS flip an appointment in/out for THIS parade without editing the record.
-// Cleared on modal open and on date change.
-let _apptCampOverrides = {};
-
 function findBorderlineReturnees(dateIso) {
   if (!dateIso) return [];
   const y = new Date(dateIso); y.setDate(y.getDate() - 1);
@@ -1559,27 +1609,14 @@ function upcomingParadeAppointments(dateIso, paradeTime) {
     });
 }
 
-// Outside-camp appointments (a.outOfCamp) on the parade date — the WHOLE day,
-// regardless of parade time. Presence (has the recruit LEFT for / RETURNED from
-// the appointment) is tracked via ticks in the report modal, so an early appt
-// must still show at last parade to confirm they've come back. paradeTime is
-// kept for signature parity with the other parade builders.
-function outsideApptsForParade(dateIso, paradeTime) {
+// Today's out-of-camp appointments — the candidates for the parade modal's
+// Book Out / Book In checklist. Whether each recruit is actually out of camp is
+// now the PERSISTENT booked-out flag (isBookedOut), shared with the dashboard —
+// not a per-parade tick.
+function outsideApptsForParade(dateIso) {
   return STATE.appointments.filter(a =>
-    !a.resolved && a.outOfCamp &&
-    displayDateToISO(a.date) === dateIso
+    !a.resolved && a.outOfCamp && displayDateToISO(a.date) === dateIso
   );
-}
-
-// Whether a recruit on an outside appt is currently OUT of camp at this parade.
-// Tracked per-parade via a tick; default (no tick) = in camp / not yet left or
-// already returned.
-function apptCurrentlyOut(a) { return _apptCampOverrides[a.id] === true; }
-
-// Outside appts whose recruit is currently out of camp — folded into the OTHERS
-// roll and removed from CURRENT STRENGTH.
-function outOfCampApptsForParade(dateIso, paradeTime) {
-  return outsideApptsForParade(dateIso, paradeTime).filter(apptCurrentlyOut);
 }
 
 function buildAppointmentSection(dateIso, paradeTime) {
@@ -1592,34 +1629,25 @@ function buildAppointmentSection(dateIso, paradeTime) {
   return `MEDICAL APPT: ${String(upcoming.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
 }
 
-function buildOthersSection(dateIso, paradeTime) {
-  const active = STATE.leave.filter(l => {
-    const s = displayDateToISO(l.startDate);
-    const e = displayDateToISO(l.endDate);
-    return s && e && s <= dateIso && dateIso <= e;
-  });
-  // Reason = leave type + optional free text, so the section reads like the
-  // chat's "Guard Duty" / "APSC in Gedong till 24th April" entries. `extra` is
-  // the trailing line(s): leave shows a Duration range; appts show Date + Time.
-  const entries = active.map(l => {
-    const dur = paradeDuration(l);
-    return {
-      d4: l.d4,
-      reason: [l.type, l.reason].filter(Boolean).join(" — "),
-      extra: dur ? `\nDuration: ${dur}` : ""
-    };
-  });
-  // Recruits currently out of camp for an outside appointment count as away too
-  // — list them on the OTHERS roll, labelled so they're distinct from leave,
-  // with the appointment's Date + Time.
-  outOfCampApptsForParade(dateIso, paradeTime).forEach(a => {
-    const locLine = a.location ? `\nLocation: ${a.location}` : "";
-    entries.push({
-      d4: a.d4,
-      reason: "Medical Appointment" + (a.reason ? ` — ${a.reason}` : ""),
-      extra: `${locLine}\nDate: ${toDDMMYY(displayDateToISO(a.date))}\nTime: ${fmtHrs(a.time)}`
-    });
-  });
+function buildOthersSection(dateIso) {
+  // Single source of truth — same map the dashboard uses. OTHERS lists leave +
+  // manual book-outs; medical (MC/Warded) lives in the ATTC/MEDICAL STATUS
+  // sections, so it's excluded here.
+  const map = outOfCampMap(dateIso);
+  const entries = [];
+  for (const [d4, info] of map) {
+    if (info.kind === "medical") continue;
+    if (info.kind === "leave") {
+      const l = STATE.leave.find(x => x.d4 === d4 && (() => {
+        const s = displayDateToISO(x.startDate), e = displayDateToISO(x.endDate);
+        return s && e && s <= dateIso && dateIso <= e;
+      })());
+      const dur = l ? paradeDuration(l) : "";
+      entries.push({ d4, reason: info.reason, extra: dur ? `\nDuration: ${dur}` : "" });
+    } else {  // bookedout (appointments-in-progress, ad-hoc out of camp)
+      entries.push({ d4, reason: info.reason, extra: "" });
+    }
+  }
   if (!entries.length) return `OTHERS:\n\nS/N:\nR/N:\nReason:\nDuration:`;
   const blocks = entries.map((e, idx) => {
     const sn = String(idx + 1).padStart(2, "0");
@@ -1628,35 +1656,21 @@ function buildOthersSection(dateIso, paradeTime) {
   return `OTHERS: ${String(entries.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
 }
 
-// Strength block — TOTAL is the entire roster (recruits + commanders);
-// CURRENT is TOTAL minus anyone away today (active MC/Warded + any leave
-// covering the date + out-of-camp medical appts today). Per-platoon and
-// commander lines break the count out.
-function buildStrengthBlock(dateIso, paradeTime) {
+// Strength block — TOTAL is the entire roster (recruits + commanders); CURRENT
+// is TOTAL minus everyone OUT OF CAMP today. "Out of camp" is the single shared
+// computation (outOfCampMap: active MC/Warded + active leave + manual book-outs)
+// so this ALWAYS matches the dashboard "In Camp" number for the same date.
+function buildStrengthBlock(dateIso) {
   const all = STATE.roster;
   const recruits = all.filter(r => r.role !== "Commander");
   const commanders = all.filter(r => r.role === "Commander");
 
-  // Anyone away from camp today — physically not present. Union in any
-  // borderline returnees the PDS confirmed still-out so CURRENT STRENGTH
-  // matches what the ATTC section shows.
-  const attcD4s = new Set(STATE.medical
-    .filter(m => medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded"))
-    .map(m => m.d4));
+  const awaySet = new Set(outOfCampMap(dateIso).keys());
+  // Union in borderline MC returnees the PDS confirmed still-out for this parade.
   findBorderlineReturnees(dateIso)
     .filter(m => _paradeOverrides[m.d4])
-    .forEach(m => attcD4s.add(m.d4));
-  const othersD4s = new Set(STATE.leave
-    .filter(l => {
-      const s = displayDateToISO(l.startDate);
-      const e = displayDateToISO(l.endDate);
-      return s && e && s <= dateIso && dateIso <= e;
-    })
-    .map(l => l.d4));
-  // Out-of-camp medical appts today put the recruit away too — keep this in sync
-  // with what the OTHERS section lists so CURRENT STRENGTH reconciles.
-  outOfCampApptsForParade(dateIso, paradeTime).forEach(a => othersD4s.add(a.d4));
-  const isAway = r => attcD4s.has(r.id) || othersD4s.has(r.id);
+    .forEach(m => awaySet.add(m.d4));
+  const isAway = r => awaySet.has(r.id);
 
   // Per-platoon recruit breakdown.
   const recruitPlatoons = {};
@@ -1686,12 +1700,12 @@ function generateParadeStateText(type, dateIso, time) {
   const dateStr = toDDMMYY(dateIso);
   const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
   const sections = [
-    buildStrengthBlock(dateIso, time),
+    buildStrengthBlock(dateIso),
     buildMedicalSection("ATTC", dateIso, ["MC", "Warded"]),
     buildMedicalSection("REPORT SICK", dateIso, ["Pending"]),
     buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusCatchAll),
     buildAppointmentSection(dateIso, time),
-    buildOthersSection(dateIso, time)
+    buildOthersSection(dateIso)
   ];
   return `COUGAR COMPANY\n${header}\nDATE: ${dateStr} @ ${fmtHrs(time)}\n\n${SEP}\n\n${sections.join(`\n\n${SEP}\n\n`)}\n\n${SEP}`;
 }
@@ -1760,10 +1774,10 @@ function openReportModal(type) {
     : type === "CONDUCT" ? "Per-Conduct Chat Format"
     : "Medical Status List";
 
-  // Borderline + appointment-camp overrides are scoped to a single modal
-  // session — clearing here avoids stale ticks leaking from a previous open.
+  // Borderline overrides are scoped to a single modal session — clearing here
+  // avoids stale ticks leaking from a previous open. (Out-of-camp is now the
+  // persistent booked-out flag, shared with the dashboard — no session state.)
   _paradeOverrides = {};
-  _apptCampOverrides = {};
 
   // The borderline checklist is only meaningful for FP/LP. MED/MSK/CONDUCT
   // reports skip the section + date onchange wiring entirely.
@@ -1805,7 +1819,7 @@ function openReportModal(type) {
   // which composer to call.
   document.getElementById("rep-text").dataset.type = type;
   if (isParade) renderBorderlineSection(defaultDate, type);
-  if (isParade) renderApptCampSection(defaultDate, defaultTime, type);
+  if (isParade) renderApptCampSection(defaultDate, type);
   if (isConduct) renderConductPicker();
   regenerateReport(type);
 }
@@ -1840,48 +1854,49 @@ function renderConductPicker() {
   `;
 }
 
-// Wipes overrides when the date input changes, re-renders the checklist
-// for the new date, then regenerates the textarea.
+// Date change → re-render the date-scoped checklists + regenerate the textarea.
 function onParadeDateChange(type) {
   _paradeOverrides = {};
-  _apptCampOverrides = {};
   renderBorderlineSection(gv("rep-date"), type);
-  renderApptCampSection(gv("rep-date"), gv("rep-time") || "0700", type);
+  renderApptCampSection(gv("rep-date"), type);
   regenerateReport(type);
 }
 
-// Time change only affects the appointment checklist's parade-time cutoff — the
-// borderline list is date-only. Ticks are KEPT (overrides not cleared) so a
-// time tweak doesn't wipe who's already marked out.
+// Time change only affects the MEDICAL APPT section's parade-time cutoff.
 function onParadeTimeChange(type) {
-  renderApptCampSection(gv("rep-date"), gv("rep-time") || "0700", type);
   regenerateReport(type);
 }
 
-function toggleApptCamp(id, checked, type) {
-  _apptCampOverrides[id] = checked;   // checked = currently OUT of camp (has left)
+// Book-out checklist toggle (parade modal). Writes the PERSISTENT booked-out
+// flag (shared with the dashboard) rather than a session-only tick, so finalising
+// who's out at parade time also corrects the live strength board everywhere.
+function toggleApptCamp(d4, checked, reason, type) {
+  bookOutToggle(d4, checked, reason);   // bookOutToggle already re-renders + syncs
+  renderApptCampSection(gv("rep-date"), type);
   regenerateReport(type);
 }
 
-// Renders the presence checklist for today's OUTSIDE appointments. Tick a recruit
-// once they've LEFT camp for the appointment; untick when they're back. Ticked
-// recruits drop to the OTHERS roll and out of current strength. Empty section
-// when there are no outside appointments today (no noise).
-function renderApptCampSection(dateIso, paradeTime, type) {
+// Book Out / Book In checklist for today's OUTSIDE appointments. Each checkbox
+// reflects and toggles the recruit's PERSISTENT booked-out flag — ticking marks
+// them out of camp (drops from current strength + the dashboard), unticking
+// books them back in. Empty when there are no outside appointments today.
+function renderApptCampSection(dateIso, type) {
   const section = document.getElementById("appt-camp-section");
   if (!section) return;
-  const appts = outsideApptsForParade(dateIso, paradeTime);
+  const appts = outsideApptsForParade(dateIso);
   if (!appts.length) { section.innerHTML = ""; return; }
   const rows = appts.map(a => {
-    const checked = apptCurrentlyOut(a) ? "checked" : "";
+    const r = STATE.roster.find(x => x.id === a.d4);
+    const checked = r && isBookedOut(r, dateIso) ? "checked" : "";
+    const reason = "Appt: " + (a.reason || "appointment");
     return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 6px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
-      <input type="checkbox" ${checked} onchange="toggleApptCamp(${a.id}, this.checked, '${type}')" style="width:14px;height:14px;cursor:pointer">
+      <input type="checkbox" ${checked} onchange="toggleApptCamp('${a.d4}', this.checked, ${JSON.stringify(reason)}, '${type}')" style="width:14px;height:14px;cursor:pointer">
       <span>${paradeRN(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
     </label>`;
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:8px 10px">
-    <div style="color:var(--accent);font-weight:600;margin-bottom:4px">📅 Outside appointments today (${appts.length}) — tick if OUT of camp now</div>
-    <div style="color:var(--muted);margin-bottom:6px">Tick once the recruit has LEFT camp for the appointment; untick when they return. Out = added to OTHERS + removed from current strength.</div>
+    <div style="color:var(--accent);font-weight:600;margin-bottom:4px">📅 Outside appointments today (${appts.length}) — tick = booked OUT of camp</div>
+    <div style="color:var(--muted);margin-bottom:6px">Tick once the recruit has LEFT camp; untick when they book back in. This updates the live strength board for everyone.</div>
     ${rows}
   </div>`;
 }
