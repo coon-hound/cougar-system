@@ -174,6 +174,36 @@ module.exports = async function run() {
     ok(!A.sb.STATE.medical.find(r => String(r.id) === "78"), "unbumped write is NOT seen by revCheck");
   });
 
+  suite("sync: recovery from a stuck 'unsaved' state");
+
+  // A post-reload stuck device (dirty marker, stale rev, no in-memory stashed
+  // ops) must self-clear on retry — not stay permanently in the error state.
+  await test("retryAllDirty self-clears a stale dirty tab", async () => {
+    const backend = loadBackend();
+    backend.db.seed("Medical", MED_HEADERS, [["1", "1101", "", "srv", "", "", "", ""]]);
+    const A = makeClient(backend), B = makeClient(backend);
+    await A.sb.API.pullAll();
+    await B.sb.API.pullAll();
+    await B.sb.autoSync("Medical", { type: "upsert", row: med(2, "B") });  // server moves ahead
+    A.sb.STATE.dirty = new Set(["Medical"]);   // simulate leftover dirty marker
+    A.sb.STATE.medical[0].reason = "A-local";
+    await A.sb.retryAllDirty();
+    eq(A.sb.STATE.dirty.size, 0, "dirty cleared after retry (replace→conflict→pull→clear)");
+  });
+
+  // The escape hatch: discard local unsynced changes and reload from the sheet.
+  await test("forceResync discards dirty + reloads authoritative state", async () => {
+    const backend = loadBackend();
+    backend.db.seed("Medical", MED_HEADERS, [["1", "1101", "", "server-row", "", "", "", ""]]);
+    const A = makeClient(backend);
+    await A.sb.API.pullAll();
+    A.sb.STATE.dirty = new Set(["Medical", "Roster"]);
+    A.sb.STATE.medical = [{ id: 1, reason: "local-unsynced" }];   // never reached the server
+    await A.sb.forceResync();   // mock confirm() returns true
+    eq(A.sb.STATE.dirty.size, 0, "dirty cleared");
+    eq(A.sb.STATE.medical.find(r => String(r.id) === "1").reason, "server-row", "reloaded authoritative data");
+  });
+
   suite("sync: queue + launch");
 
   // 8) Per-tab queue serializes rapid edits.

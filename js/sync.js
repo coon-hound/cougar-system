@@ -23,6 +23,7 @@ function renderSync(el) {
         <button class="btn btn-primary" onclick="doPull()" id="pull-btn" ${authed ? "" : "disabled"}>⬇ Pull from Sheet</button>
         <button class="btn btn-success" onclick="doPushAll()" id="push-btn" ${authed ? "" : "disabled"}>⬆ Push All to Sheet</button>
         <button class="btn" onclick="doPing()">🏓 Test Connection</button>
+        <button class="btn btn-danger" onclick="forceResync()" ${authed ? "" : "disabled"} title="Discard this device's unsynced changes and reload from the sheet. Use if stuck on 'unsaved'.">⟳ Force Resync</button>
       </div>
       <div id="sync-log" class="sync-log card" style="padding:10px"></div>
     </div>
@@ -134,6 +135,7 @@ function setSyncIndicator(text, color) {
 // dirty tabs that need retrying. Called after every autoSync attempt.
 let _lastSyncedAt = null;
 let _lastCheckedAt = null;   // last time the lightweight revCheck poll ran
+let _lastSyncError = null;   // last write failure message (for the pill/banner)
 function refreshSyncIndicator() {
   const el = document.getElementById("sync-indicator");
   if (!el) return;
@@ -225,6 +227,7 @@ async function drainTab(tabName) {
         clearDirty(tabName);
       } catch (e) {
         markDirty(tabName);
+        _lastSyncError = (e && e.message) || String(e);   // surfaced in the pill/banner
         // Stash the failed granular op so retryAllDirty can replay it (and
         // OCC-merge) rather than a stale full replace. Replace failures aren't
         // stashed — they re-derive from STATE on retry.
@@ -347,6 +350,47 @@ async function retryAllDirty() {
       // No stashed ops (e.g. after a reload) → full replace, OCC-guarded.
       const arrKey = TAB_TO_STATE[tab];
       if (arrKey && STATE[arrKey]) await autoSync(tab, { type: "replace", data: STATE[arrKey] });
+    }
+  }
+  // If a tab is STILL dirty after a full retry pass, the push is genuinely
+  // failing (auth expired, offline, or a row the server keeps rejecting) — a
+  // plain retry won't fix it. Surface the reason + the escape hatch loudly.
+  if (STATE.dirty && STATE.dirty.size > 0) {
+    const why = _lastSyncError ? ` — ${_lastSyncError}` : "";
+    showSyncBanner(`Still can't save ${[...STATE.dirty].join(", ")}${why}.`, "Force resync", forceResync);
+  }
+}
+
+// Escape hatch for a device stuck showing "unsaved" that a normal retry can't
+// clear (expired invite, a poison local row, or stale cached code). Discards
+// this device's unsynced local changes and reloads the authoritative sheet
+// state, returning the device to a clean, synced baseline.
+async function forceResync() {
+  if (!confirm(
+    "Discard any unsynced changes on THIS device and reload everything from the sheet?\n\n" +
+    "Use this if the device is stuck on \"unsaved\". Local edits that never reached the sheet will be lost."
+  )) return;
+  STATE.dirty = new Set();
+  _dirtyOps.clear();
+  saveDirty();
+  STATE.rev = {};                 // drop a possibly-stale baseline → full authoritative pull
+  _lastSyncError = null;
+  setSyncIndicator("● Syncing…", "var(--orange)");
+  try {
+    const p = timed("pull", "pull ALL (force resync)", () => API.pullAll(), true);
+    setPullInFlight(p);
+    await p;
+    _lastSyncedAt = Date.now();
+    refreshSyncIndicator();
+    if (typeof render === "function") render();
+    syncLog("Force resync complete — device is back in sync.", "var(--green)");
+  } catch (e) {
+    if (e.name === "AuthError") {
+      setSyncIndicator("● Not authenticated", "var(--red)");
+      syncLog("Force resync failed: not authorized — this device needs a new invite link.", "var(--red)");
+    } else {
+      setSyncIndicator("● Sync failed", "var(--red)");
+      syncLog("Force resync failed: " + (e.message || e), "var(--red)");
     }
   }
 }
