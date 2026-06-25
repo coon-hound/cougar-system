@@ -1644,8 +1644,22 @@ function buildOthersSection(dateIso) {
       })());
       const dur = l ? paradeDuration(l) : "";
       entries.push({ d4, reason: info.reason, extra: dur ? `\nDuration: ${dur}` : "" });
-    } else {  // bookedout (appointments-in-progress, ad-hoc out of camp)
-      entries.push({ d4, reason: info.reason, extra: "" });
+    } else {  // bookedout — appointment-driven, or ad-hoc out of camp
+      // If they're booked out for an out-of-camp appointment today, render the
+      // full appointment format: "<reason> (MA)" + Location / Date / Time.
+      const appt = STATE.appointments.find(a =>
+        a.d4 === d4 && !a.resolved && a.outOfCamp && displayDateToISO(a.date) === dateIso
+      );
+      if (appt) {
+        const locLine = appt.location ? `\nLocation: ${appt.location}` : "";
+        entries.push({
+          d4,
+          reason: (appt.reason || "Appointment") + " (MA)",
+          extra: `${locLine}\nDate: ${toDDMMYY(displayDateToISO(appt.date))}\nTime: ${fmtHrs(appt.time)}`
+        });
+      } else {
+        entries.push({ d4, reason: info.reason, extra: "" });
+      }
     }
   }
   if (!entries.length) return `OTHERS:\n\nS/N:\nR/N:\nReason:\nDuration:`;
