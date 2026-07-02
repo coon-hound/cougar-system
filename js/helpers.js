@@ -27,7 +27,51 @@ function getSect(r) {
   return m ? m[1] : "";
 }
 
-const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole);
+// ── Training programs (PTP / BMT / Combined) ─────────────
+// The company can split into parallel training programs, each owning a set of
+// platoons (e.g. PTP = Plt 1+4, BMT = Plt 2+3). A conduct is logged per program
+// so the two never collide; "Combined" means both programs together (everyone).
+// The plt→program mapping lives in STATE.programs (editable), but the resolved
+// label is STORED on each conduct record so it's authoritative and never drifts.
+const PROGRAM_COMBINED = "Combined";
+
+// Single choke point for legacy rows: any conduct record written before programs
+// existed (no `program` field) reads as "Combined" so history keeps working.
+const progKey = x => (x && x.program) ? String(x.program) : PROGRAM_COMBINED;
+
+// Program key owning a given platoon string, or "" if unmapped.
+function programOfPlt(plt) {
+  if (plt === "" || plt == null) return "";
+  const p = String(plt);
+  const hit = (STATE.programs || []).find(pr => (pr.platoons || []).map(String).includes(p));
+  return hit ? hit.key : "";
+}
+const programOf = r => programOfPlt(getPlt(r));
+
+// Roster (recruits only — commanders aren't tracked in conduct attendance) for a
+// program. Combined / "" / unknown key → all recruits (both programs together).
+function recruitsInProgram(key) {
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  if (!key || key === PROGRAM_COMBINED) return recruits;
+  return recruits.filter(r => programOf(r) === key);
+}
+
+const programLabel = key => {
+  const k = key || PROGRAM_COMBINED;
+  if (k === PROGRAM_COMBINED) return PROGRAM_COMBINED;
+  const hit = (STATE.programs || []).find(pr => pr.key === k);
+  return hit ? (hit.name || hit.key) : k;
+};
+// Distinct CSS-var colour per program for the table badges / pills.
+function programColor(key) {
+  const k = key || PROGRAM_COMBINED;
+  if (k === PROGRAM_COMBINED) return "var(--muted)";
+  const idx = (STATE.programs || []).findIndex(pr => pr.key === k);
+  const palette = ["var(--accent)", "var(--green)", "var(--purple)", "var(--orange)", "var(--yellow)"];
+  return idx >= 0 ? palette[idx % palette.length] : "var(--accent)";
+}
+
+const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram);
 
 function filteredRoster() {
   if (!isFilterActive()) return STATE.roster;
@@ -35,6 +79,7 @@ function filteredRoster() {
     if (STATE.filterRole && r.role !== STATE.filterRole) return false;
     if (STATE.filterPlt && getPlt(r) !== String(STATE.filterPlt)) return false;
     if (STATE.filterSect && getSect(r) !== String(STATE.filterSect)) return false;
+    if (STATE.filterProgram && programOf(r) !== STATE.filterProgram) return false;
     return true;
   });
 }
@@ -55,6 +100,7 @@ function filterLabel() {
   else if (STATE.filterRole === "Recruit") parts.push("Recs");
   if (STATE.filterPlt) parts.push("P" + STATE.filterPlt);
   if (STATE.filterSect) parts.push("S" + STATE.filterSect);
+  if (STATE.filterProgram) parts.push(programLabel(STATE.filterProgram));
   return parts.join(" ");
 }
 
@@ -378,7 +424,9 @@ function outOfCampMap(dateIso) {
   dateIso = dateIso || todayISO();
   const map = new Map();
   STATE.medical.forEach(m => {
-    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !map.has(m.d4)) {
+    // inCamp MC/Warded is consumed IN camp — counted present, so it never joins
+    // the out-of-camp set (nor the dashboard "Out of Camp" tile / parade CURRENT).
+    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp && !map.has(m.d4)) {
       map.set(m.d4, { kind: "medical", reason: m.status + (m.reason ? " — " + m.reason : "") });
     }
   });
@@ -514,6 +562,12 @@ function medDurationLabel(record) {
   return `${record.startDate} – ${record.endDate}${days ? ` (${days}D)` : ""}`;
 }
 const badge = (text, cls) => `<span class="badge badge-${cls}">${text}</span>`;
+// Program pill — inline-styled (colour is dynamic per program, so it can't use
+// the static badge-<name> classes). Used in the conduct tables.
+const programBadge = key => {
+  const col = programColor(key);
+  return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${programLabel(key)}</span>`;
+};
 const statusBadge = s => badge(s, s === "Active" ? "green" : s === "Warded" ? "red" : "orange");
 const typeBadge = t => badge(t, t === "RSI" ? "orange" : t === "Injury" ? "red" : "yellow");
 const awardBadge = s => { const a = getAward(s); const c = { "Gold★": "purple", Gold: "yellow", Silver: "accent", Pass: "green", Fail: "red", "N/A": "accent" }; return badge(a, c[a] || "accent"); };

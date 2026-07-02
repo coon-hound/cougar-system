@@ -230,6 +230,11 @@ async function tryRedeemInviteFromURL() {
   // baselined by the launch pull (awaited above, or in autoSyncOnLaunch's
   // background pull). See js/sync.js.
   if (STATE.authToken && typeof initAutoRefresh === "function") initAutoRefresh();
+
+  // Last: if this device hasn't seen the current version's patch notes, show
+  // them over the freshly-rendered app. Runs after the invite/auth + first
+  // render above so it never fights the redemption flow or an empty-state flash.
+  if (typeof maybeShowPatchNotes === "function") maybeShowPatchNotes();
 })();
 
 // On launch, if previous session(s) left dirty tabs (pushes failed offline

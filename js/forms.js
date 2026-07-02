@@ -572,6 +572,7 @@ function openMedicalForm(id) {
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-custom-save" checked style="width:15px;height:15px"> Save for reuse <span style="color:var(--dim)">(adds it to this dropdown)</span></label>
           <div style="font-size:10px;color:var(--muted)">Custom statuses are in-camp/restricted and don't get +1/+2 recovery tags.</div>
         </div>
+        <label id="f-incamp-wrap" style="display:${(selectedStatus === "MC" || selectedStatus === "Warded") ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, listed under MEDICAL STATUS not ATTC)</span></label>
         <div class="form-row">
           ${formField("f-start", "Start (inclusive)", "date", "", `value="${startVal}" min="2020-01-01" max="2099-12-31"`)}
           ${formField("f-end", "End (inclusive)", "date", "", `value="${endVal}" min="2020-01-01" max="2099-12-31"`)}
@@ -588,6 +589,13 @@ function openMedicalForm(id) {
 function medStatusSelChanged(v) {
   const wrap = document.getElementById("f-custom-wrap");
   if (wrap) wrap.style.display = v === "__new__" ? "flex" : "none";
+  // "Consume in camp" is only meaningful for the away statuses (MC/Warded) —
+  // everything else is already in camp. Hide + clear it otherwise.
+  const inCampWrap = document.getElementById("f-incamp-wrap");
+  const inCampBox = document.getElementById("f-incamp");
+  const showInCamp = v === "MC" || v === "Warded";
+  if (inCampWrap) inCampWrap.style.display = showInCamp ? "flex" : "none";
+  if (inCampBox && !showInCamp) inCampBox.checked = false;
 }
 
 function submitMedical() {
@@ -634,6 +642,11 @@ function submitMedical() {
   const date = isoToDisplayDate(gv("f-date"));
   const reason = gv("f-reason");
   const location = gv("f-location").trim();
+  // Consume-in-camp applies to the PRIMARY status only (an additional LD/Excuse
+  // row is already in camp). The checkbox only shows for MC/Warded, so guard on
+  // the resolved primary status too in case a stale checked box lingers.
+  const inCamp = !!document.getElementById("f-incamp")?.checked
+    && (status === "MC" || status === "Warded");
 
   // First status reuses the edited row's id; each extra status becomes a new
   // sibling row. Siblings group automatically per-recruit in the reports.
@@ -642,7 +655,8 @@ function submitMedical() {
     d4, date, reason, location,
     status: st.status,
     startDate: isoToDisplayDate(st.startIso),
-    endDate: st.endIso ? isoToDisplayDate(st.endIso) : ""
+    endDate: st.endIso ? isoToDisplayDate(st.endIso) : "",
+    inCamp: i === 0 ? inCamp : false
   }));
 
   records.forEach((rec, i) => {
@@ -684,6 +698,12 @@ function openAttendanceForm(id) {
           <label>Conduct</label>
           ${conductPicker({ inputId: "f-conductId", selectedId: e?.conductId || "" })}
         </div>
+        <div class="form-group">
+          <label>Program</label>
+          <select id="f-program" class="topbar-select" style="width:100%">
+            ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => `<option value="${escapeAttr(key)}" ${progKey(e || {}) === key ? "selected" : ""}>${escapeAttr(programLabel(key))}</option>`).join("")}
+          </select>
+        </div>
         <div class="form-row">
           ${formField("f-total", "Total Str", "number", "", `required min="0" max="999" step="1"${numVal(e?.total)}`)}
           ${formField("f-part", "Participating", "number", "", `required min="0" max="999" step="1"${numVal(e?.participating)}`)}
@@ -710,6 +730,7 @@ function submitAttendance() {
     id: editId || nextId(),
     date: isoToDisplayDate(gv("f-date")),
     conductId,
+    program: gv("f-program") || PROGRAM_COMBINED,
     total, participating: part, lms, px, fallout,
     remarks: gv("f-remarks")
   };
@@ -1103,6 +1124,12 @@ function openConductDetailForm(id) {
           <label>Conduct</label>
           ${conductPicker({ inputId: "f-conductId", selectedId: e?.conductId || "" })}
         </div>
+        <div class="form-group">
+          <label>Program</label>
+          <select id="f-program" class="topbar-select" style="width:100%">
+            ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => `<option value="${escapeAttr(key)}" ${progKey(e || {}) === key ? "selected" : ""}>${escapeAttr(programLabel(key))}</option>`).join("")}
+          </select>
+        </div>
         <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
         ${formSelect("f-type", "Type", [["PX", "Status (pre-existing medical status)"], ["Fallout", "Fallout (dropped out, no MO visit)"], ["RSI", "RSI (reported sick at first parade)"], ["ReportSick", "Report Sick (fallout → went to MO)"]], true, e?.type || "")}
         ${formField("f-reason", "Reason", "text", "Sprained ankle / Fever / Shin splint...", `required maxlength="200" value="${escapeAttr(e?.reason)}"`)}
@@ -1119,6 +1146,7 @@ function submitConductDetail() {
     date: isoToDisplayDate(gv("f-date")),
     time: pad4Time(gv("f-time")),
     conductId,
+    program: gv("f-program") || PROGRAM_COMBINED,
     d4: gv("f-d4"),
     type: gv("f-type"),
     reason: gv("f-reason")
@@ -1433,6 +1461,12 @@ const SEP = "----------------------------------------------------------------";
 // custom status can never silently fall through the cracks of the report.
 const PARADE_SECTIONED_STATUSES = ["MC", "Warded", "Pending", "NIL"];
 const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(s);
+// A record belongs in MEDICAL STATUS if its status is a catch-all restriction
+// (LD/Excuse/custom) OR it's a consume-in-camp MC/Warded (pulled out of ATTC but
+// still needing to show its status). Shared by the parade state and the
+// standalone Medical Status List so the two never diverge.
+const isMedicalStatusRecord = m =>
+  isMedicalStatusCatchAll(m.status) || (m.inCamp && (m.status === "MC" || m.status === "Warded"));
 
 // "2026-05-20" → "200526" — battalion uses DDMMYY everywhere.
 function toDDMMYY(iso) {
@@ -1472,9 +1506,12 @@ function paradeStatusLabel(record) {
   const s = displayDateToISO(record.startDate || "");
   const e = displayDateToISO(record.endDate || "");
   if (!record.status) return "";
-  if (!s || !e) return record.status;
+  // A consume-in-camp MC/Warded reads "2D MC (consume in camp)" — the suffix is
+  // derived from the inCamp flag, the underlying status stays "MC".
+  const suffix = record.inCamp ? " (consume in camp)" : "";
+  if (!s || !e) return record.status + suffix;
   const days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
-  return days > 0 ? `${days}D ${record.status}` : record.status;
+  return (days > 0 ? `${days}D ${record.status}` : record.status) + suffix;
 }
 
 // Group medical entries by d4 so a person with multiple active statuses
@@ -1493,7 +1530,7 @@ function findBorderlineReturnees(dateIso) {
   const y = new Date(dateIso); y.setDate(y.getDate() - 1);
   const yIso = y.toISOString().slice(0, 10);
   return STATE.medical.filter(m =>
-    (m.status === "MC" || m.status === "Warded") &&
+    (m.status === "MC" || m.status === "Warded") && !m.inCamp &&
     displayDateToISO(m.endDate || "") === yIso
   );
 }
@@ -1504,14 +1541,16 @@ function toggleBorderline(d4, checked, type) {
   regenerateReport(type);
 }
 
-// statusFilter is either an allowlist array (status ∈ list) or a predicate
-// (status => boolean) — the latter lets MEDICAL STATUS act as a catch-all.
-function buildMedicalSection(label, dateIso, statusFilter) {
-  const matchStatus = typeof statusFilter === "function"
-    ? statusFilter
-    : s => statusFilter.includes(s);
+// recordFilter is either an allowlist array (status ∈ list) or a predicate
+// receiving the whole record (m => boolean) — the record form lets a section
+// key off flags like inCamp, not just the status string (MEDICAL STATUS folds
+// in consume-in-camp MCs, ATTC excludes them).
+function buildMedicalSection(label, dateIso, recordFilter) {
+  const matchRecord = typeof recordFilter === "function"
+    ? recordFilter
+    : m => recordFilter.includes(m.status);
   let matches = STATE.medical.filter(m =>
-    medStatusActive(m, dateIso) && matchStatus(m.status)
+    medStatusActive(m, dateIso) && matchRecord(m)
   );
 
   // ATTC gets the PDS-confirmed borderline returnees folded in so they
@@ -1528,7 +1567,11 @@ function buildMedicalSection(label, dateIso, statusFilter) {
   // Collapse same-status duplicates per recruit (a re-issued MC) to the most
   // recent record so it prints once, with the newest dates.
   Object.keys(byD4).forEach(d4 => { byD4[d4] = dedupeActiveRecordsByFamily(byD4[d4]); });
-  const peopleIds = Object.keys(byD4);
+  // Order recruits by their most-severe status (MC/Warded > LD > Excuse > …) so
+  // MEDICAL STATUS lists a consume-in-camp MC above LD/Excuse entries. Stable for
+  // ties; harmless for ATTC/REPORT SICK where every entry shares one severity.
+  const groupRank = d4 => Math.max(...byD4[d4].map(m => medSeverityRank(m.status)));
+  const peopleIds = Object.keys(byD4).sort((a, b) => groupRank(b) - groupRank(a));
 
   if (!peopleIds.length) {
     return `${label}:\n\nS/N:\nR/N:\nReason:`;
@@ -1715,9 +1758,11 @@ function generateParadeStateText(type, dateIso, time) {
   const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
   const sections = [
     buildStrengthBlock(dateIso),
-    buildMedicalSection("ATTC", dateIso, ["MC", "Warded"]),
-    buildMedicalSection("REPORT SICK", dateIso, ["Pending"]),
-    buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusCatchAll),
+    // ATTC = MC/Warded physically AWAY (consume-in-camp MCs are excluded here and
+    // fall through to MEDICAL STATUS below).
+    buildMedicalSection("ATTC", dateIso, m => (m.status === "MC" || m.status === "Warded") && !m.inCamp),
+    buildMedicalSection("REPORT SICK", dateIso, m => m.status === "Pending"),
+    buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord),
     buildAppointmentSection(dateIso, time),
     buildOthersSection(dateIso)
   ];
@@ -1727,7 +1772,7 @@ function generateParadeStateText(type, dateIso, time) {
 function generateMedicalStatusText(dateIso, time) {
   const dateStr = toDDMMYY(dateIso);
   const heading = `${dateStr}(latest version as of ${dateStr} @${fmtHrs(time)})`;
-  const body = buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusCatchAll);
+  const body = buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord);
   return `${heading}\n\n${body}`;
 }
 
@@ -3166,6 +3211,7 @@ function refreshLmsFromPolar() {
 //     date,                    // ISO "2026-05-29"
 //     time,                    // "0730" — empty until conduct picked
 //     conductId,               // c001 etc.
+//     program,                 // "PTP" / "BMT" / "Combined" — part of the key
 //     totalOverride,           // null = derive from roster, else explicit number
 //     remarks,                 // free text
 //     status: [                // pre-existing-status checklist
@@ -3177,6 +3223,13 @@ function refreshLmsFromPolar() {
 //   }
 let _logConduct = null;
 
+// Default program for a NEW conduct: honour the active topbar program scope if
+// one is set, else "Combined". Editing an existing conduct loads the row's own
+// program instead (see openLogConductWizard).
+function defaultWizardProgram() {
+  return STATE.filterProgram || PROGRAM_COMBINED;
+}
+
 // Open the wizard. Pass an attendance row id to load it in edit mode.
 function openLogConductWizard(attendanceId) {
   const a = attendanceId ? STATE.attendance.find(x => x.id === attendanceId) : null;
@@ -3185,6 +3238,7 @@ function openLogConductWizard(attendanceId) {
     date: a ? displayDateToISO(a.date) || todayISO() : todayISO(),
     time: a?.time || "",
     conductId: a?.conductId || "",
+    program: a ? progKey(a) : defaultWizardProgram(),
     totalOverride: a ? a.total : null,
     remarks: a?.remarks || "",
     status: [],
@@ -3198,11 +3252,11 @@ function openLogConductWizard(attendanceId) {
     originalDetailIds: []
   };
   // Edit mode: pre-load every conductDetail row matching this attendance's
-  // (date, time, conductId). Status personnel auto-rebuild already handles
-  // marking PX rows correctly via the existing-PX lookup.
+  // (date, time, conductId, program). Status personnel auto-rebuild already
+  // handles marking PX rows correctly via the existing-PX lookup.
   if (a) {
     const matchDetails = STATE.conductDetail.filter(d =>
-      d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId
+      d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && progKey(d) === progKey(a)
     );
     matchDetails.forEach(d => {
       // RSI is intentionally skipped — the wizard doesn't manage RSI anymore.
@@ -3227,7 +3281,8 @@ function maybeLoadOrphanDetail() {
   if (!w.conductId || !w.date) return;
   const displayDate = isoToDisplayDate(w.date);
   const time = pad4Time(w.time || "");
-  const key = `${displayDate}|${time}|${w.conductId}`;
+  const program = w.program || PROGRAM_COMBINED;
+  const key = `${displayDate}|${time}|${w.conductId}|${program}`;
   if (key === w._orphanKey) return;            // already evaluated this exact tuple
 
   // Don't clobber rows the user typed by hand. Safe to replace only when the
@@ -3244,12 +3299,12 @@ function maybeLoadOrphanDetail() {
   // Only recover when there's no attendance summary for this tuple — that's the
   // orphan case. If a summary exists, the user should be editing it instead.
   const hasAttendance = STATE.attendance.some(a =>
-    a.date === displayDate && (a.time || "") === time && a.conductId === w.conductId
+    a.date === displayDate && (a.time || "") === time && a.conductId === w.conductId && progKey(a) === program
   );
   if (hasAttendance) return;
 
   STATE.conductDetail
-    .filter(d => d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId)
+    .filter(d => d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && progKey(d) === program)
     .forEach(d => {
       if (d.type === "RSI") return;            // wizard doesn't manage RSI
       w.originalDetailIds.push(d.id);
@@ -3277,12 +3332,13 @@ function rebuildLogConductStatus() {
   // the current (date, time, conduct). Covers BOTH edit mode AND orphan recovery
   // (detail rows present but no attendance summary row yet), so re-opening shows
   // the correct ticks either way.
+  const program = _logConduct.program || PROGRAM_COMBINED;
   let existingPxByD4 = {};
   if (_logConduct.conductId) {
     const dDate = isoToDisplayDate(_logConduct.date);
     const dTime = pad4Time(_logConduct.time || "");
     STATE.conductDetail
-      .filter(d => d.date === dDate && (d.time || "") === dTime && d.conductId === _logConduct.conductId && d.type === "PX")
+      .filter(d => d.date === dDate && (d.time || "") === dTime && d.conductId === _logConduct.conductId && progKey(d) === program && d.type === "PX")
       .forEach(d => { existingPxByD4[d.d4] = d.reason || ""; });
   }
   // True when there are existing detail rows backing this wizard (edit mode, or
@@ -3290,9 +3346,12 @@ function rebuildLogConductStatus() {
   // rather than the per-status default.
   const hasExistingDetail = !!_logConduct.attendanceId || (_logConduct.originalDetailIds || []).length > 0;
   const dateIso = _logConduct.date;
-  // Commanders are not tracked in conduct attendance — exclude them from the
-  // status checklist entirely.
-  const effective = currentMedicalEffectiveAll(dateIso).filter(({ d4 }) => !isCommander(d4));
+  // Commanders are not tracked in conduct attendance — exclude them. Also scope
+  // to the selected program's platoons so a PTP conduct only lists PTP recruits
+  // on status (Combined lists everyone).
+  const programD4s = new Set(recruitsInProgram(program).map(r => r.id));
+  const effective = currentMedicalEffectiveAll(dateIso)
+    .filter(({ d4 }) => !isCommander(d4) && programD4s.has(d4));
   _logConduct.status = effective.map(({ d4, statuses }) => {
     // Pick the most-severe active status as the canonical tag/reason.
     const top = statuses[0];
@@ -3381,6 +3440,17 @@ function renderLogConductWizard() {
             ${conductPicker({ inputId: "wiz-conductId", selectedId: w.conductId, onChange: `wizSetConductId(document.getElementById('wiz-conductId').value)` })}
           </div>
         </div>
+        <div class="form-group" style="margin-top:8px;margin-bottom:0">
+          <label>Program</label>
+          <div class="lc-wiz-program" style="display:flex;gap:6px;flex-wrap:wrap">
+            ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => {
+              const active = (w.program || PROGRAM_COMBINED) === key;
+              const col = programColor(key);
+              return `<button type="button" onclick="wizSetProgram('${escapeAttr(key)}')" style="flex:1;min-width:90px;padding:8px 10px;border-radius:6px;border:1px solid ${active ? col : "var(--border)"};background:${active ? col + "22" : "var(--surface)"};color:${active ? col : "var(--muted)"};font-weight:${active ? 700 : 500};font-size:12px;cursor:pointer">${escapeAttr(programLabel(key))}</button>`;
+            }).join("")}
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px;line-height:1.45">Which training program this conduct is for. PTP/BMT scope the status list + total strength to that program's platoons; Combined = both programs together.</div>
+        </div>
       </div>
 
       <div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
@@ -3450,6 +3520,16 @@ function wizSetConductId(v) {
   wizRefreshFromTuple();
   renderLogConductWizard();
 }
+function wizSetProgram(v) {
+  _logConduct.program = v || PROGRAM_COMBINED;
+  // Different program → different roster scope, so the derived Total Str changes.
+  // Drop any manual override so it re-derives from the new program's headcount.
+  _logConduct.totalOverride = null;
+  // Force orphan-recovery to re-evaluate against the new program key.
+  _logConduct._orphanKey = null;
+  wizRefreshFromTuple();
+  renderLogConductWizard();
+}
 function wizSetTotalOverride(v) {
   const n = +v;
   _logConduct.totalOverride = Number.isFinite(n) && n >= 0 ? n : null;
@@ -3490,9 +3570,10 @@ function computeLogConductTotals() {
   const rsiCount = w.rsi.length;
   const falloutCount = w.fallout.length;
   const reportSickCount = w.reportSick.length;
-  // Default total: count of recruits in roster (commanders excluded — they
-  // don't typically appear in conduct attendance numbers).
-  const defaultTotal = STATE.roster.filter(r => r.role !== "Commander").length;
+  // Default total: recruits in this conduct's program (commanders excluded —
+  // they don't typically appear in conduct attendance numbers). Combined =
+  // every recruit; PTP/BMT = only that program's platoons.
+  const defaultTotal = recruitsInProgram(w.program).length;
   const total = w.totalOverride != null ? w.totalOverride : defaultTotal;
   const participating = Math.max(0, total - statusCount - rsiCount - falloutCount - reportSickCount);
   return { total, statusCount, rsiCount, falloutCount, reportSickCount, participating };
@@ -3546,12 +3627,15 @@ async function saveLogConductWizard() {
   const displayDate = isoToDisplayDate(w.date);
   const time = pad4Time(w.time || "");
 
+  const program = w.program || PROGRAM_COMBINED;
+
   // Build the attendance row.
   const attendanceEntry = {
     id: w.attendanceId || nextId(),
     date: displayDate,
     time,
     conductId: w.conductId,
+    program,
     total: totals.total,
     participating: totals.participating,
     lms: 0,  // recomputed from polar below
@@ -3564,10 +3648,10 @@ async function saveLogConductWizard() {
   // "notParticipating" (the rest are participating despite their status).
   const detailRows = [];
   w.status.filter(s => s.notParticipating).forEach(s => {
-    detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, d4: s.d4, type: "PX", reason: s.reason || "" });
+    detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: s.d4, type: "PX", reason: s.reason || "" });
   });
-  w.fallout.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, d4: r.d4, type: "Fallout", reason: r.reason || "" }));
-  w.reportSick.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, d4: r.d4, type: "ReportSick", reason: r.reason || "" }));
+  w.fallout.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: r.d4, type: "Fallout", reason: r.reason || "" }));
+  w.reportSick.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: r.d4, type: "ReportSick", reason: r.reason || "" }));
 
   // Auto-create a "Pending" Medical row for each Report Sick that doesn't
   // already have a medical entry on this date. Pending = waiting for MO
@@ -3593,9 +3677,11 @@ async function saveLogConductWizard() {
   STATE.medical.push(...newMedicalRows);
 
   // Commit: replace the attendance row + every PX/Fallout/ReportSick
-  // conductDetail row for this (date, time, conductId). Legacy RSI rows are
-  // preserved untouched — the wizard no longer manages RSI (the chat workflow
-  // moved away from it), but historical rows shouldn't be silently deleted.
+  // conductDetail row for this (date, time, conductId, program). Scoping the
+  // delete to program is what keeps two programs' sessions of the SAME conduct
+  // at the SAME time from wiping each other. Legacy RSI rows are preserved
+  // untouched — the wizard no longer manages RSI (the chat workflow moved away
+  // from it), but historical rows shouldn't be silently deleted.
   if (w.attendanceId) {
     const idx = STATE.attendance.findIndex(a => a.id === w.attendanceId);
     if (idx >= 0) STATE.attendance[idx] = attendanceEntry;
@@ -3604,7 +3690,7 @@ async function saveLogConductWizard() {
     STATE.attendance.push(attendanceEntry);
   }
   STATE.conductDetail = STATE.conductDetail.filter(d =>
-    !(d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && d.type !== "RSI")
+    !(d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && progKey(d) === program && d.type !== "RSI")
   );
   STATE.conductDetail.push(...detailRows);
 
@@ -3668,8 +3754,9 @@ function buildConductChatFormat(attendanceId) {
   const ddmmyy = toDDMMYY(date);
   const time = pad4Time(a.time || "") || "0000";
   const conductLabel = conductName(a.conductId) || "(unknown conduct)";
+  const program = progKey(a);
   const details = STATE.conductDetail.filter(d =>
-    d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId
+    d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && progKey(d) === program
   );
   const byType = {
     PX: details.filter(d => d.type === "PX"),
@@ -3702,7 +3789,7 @@ function buildConductChatFormat(attendanceId) {
     return `${label}: ${String(rows.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
   };
 
-  const header = `${ddmmyy} ${fmtHrs(time)} ${conductLabel}\nTotal strength: ${a.total}\nParticipating: ${a.participating}\nStatus: ${String(byType.PX.length).padStart(2, "0")}\nReport sick: ${String(byType.ReportSick.length).padStart(2, "0")}\nFallout: ${String(byType.Fallout.length).padStart(2, "0")}`;
+  const header = `${ddmmyy} ${fmtHrs(time)} ${conductLabel} (${programLabel(program)})\nTotal strength: ${a.total}\nParticipating: ${a.participating}\nStatus: ${String(byType.PX.length).padStart(2, "0")}\nReport sick: ${String(byType.ReportSick.length).padStart(2, "0")}\nFallout: ${String(byType.Fallout.length).padStart(2, "0")}`;
 
   const parts = [header];
   parts.push(section("STATUS", byType.PX, /*includeStatusBlock*/ true));

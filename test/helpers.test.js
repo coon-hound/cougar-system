@@ -43,6 +43,17 @@ module.exports = async function run() {
     eq(m.get("1101").kind, "medical");
   });
 
+  await test("consume-in-camp MC does NOT count as out of camp", () => {
+    const s = baseState();
+    s.medical = [
+      { d4: "1101", status: "MC", startDate: "20 Jun 2026", endDate: "27 Jun 2026", inCamp: true },
+      { d4: "1102", status: "MC", startDate: "20 Jun 2026", endDate: "27 Jun 2026", inCamp: false }
+    ];
+    const m = loadHelpers(s).outOfCampMap(DATE);
+    ok(!m.has("1101"), "inCamp MC is counted present");
+    ok(m.has("1102"), "normal MC still out of camp");
+  });
+
   await test("LD does NOT count as out of camp (restricted but in camp)", () => {
     const s = baseState();
     s.medical = [{ d4: "1102", status: "LD", startDate: "20 Jun 2026", endDate: "27 Jun 2026" }];

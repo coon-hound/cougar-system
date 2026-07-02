@@ -16,6 +16,7 @@ const IPPT_AGG_KEY = "cougar-ippt-agg";
 const FITNESS_SENT_KEY = "cougar-fitness-sent";
 const DIRTY_KEY = "cougar-dirty-tabs";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
+const PROGRAMS_KEY = "cougar-programs";
 
 // Sheet-tab-name → STATE-array-key lookup. The autoSync coalesce path uses
 // this when flushing a queued replace push: by the time the flush runs the
@@ -66,6 +67,30 @@ function loadCustomStatuses() {
 }
 function saveCustomStatuses() {
   localStorage.setItem(CUSTOM_STATUS_KEY, JSON.stringify(STATE.customStatuses || []));
+}
+
+// Training-program config, persisted per-device. Shape:
+//   [{ key: "PTP", name: "PTP", platoons: ["1","4"] }, ...]
+// Maps platoons → parallel training programs (see helpers.js). Defaults reflect
+// the current intake (PTP = Plt 1+4, BMT = Plt 2+3). Editable in the Conducts
+// tab. Lives in its own localStorage key so a data-cache reset doesn't wipe it;
+// the resolved program label is also stored on each conduct record, so the
+// mapping only needs to be consistent at log time (defaults ensure that).
+const DEFAULT_PROGRAMS = [
+  { key: "PTP", name: "PTP", platoons: ["1", "4"] },
+  { key: "BMT", name: "BMT", platoons: ["2", "3"] }
+];
+function loadPrograms() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(PROGRAMS_KEY) || "null");
+    if (!Array.isArray(arr)) return DEFAULT_PROGRAMS.map(p => ({ ...p, platoons: [...p.platoons] }));
+    return arr
+      .filter(p => p && p.key)
+      .map(p => ({ key: String(p.key), name: String(p.name || p.key), platoons: (Array.isArray(p.platoons) ? p.platoons : []).map(String) }));
+  } catch { return DEFAULT_PROGRAMS.map(p => ({ ...p, platoons: [...p.platoons] })); }
+}
+function savePrograms() {
+  localStorage.setItem(PROGRAMS_KEY, JSON.stringify(STATE.programs || []));
 }
 
 // Reads the persisted "who got a fitness report and when" map.
@@ -134,6 +159,13 @@ const STATE = {
   filterRole: "",
   filterPlt: "",
   filterSect: "",
+  // Training-program scope: "" = all programs. Filters conduct views by the
+  // program stored on each record, and per-recruit views by the recruit's
+  // platoon→program mapping. See helpers.js (programOf, recruitsInProgram).
+  filterProgram: "",
+  // Editable platoon→program map (see loadPrograms). Drives the conduct
+  // wizard's program scoping and the program badges/filters.
+  programs: loadPrograms(),
   // IPPT stats aggregation: "latest" (most recent attempt per recruit) or
   // "best" (highest-scoring attempt). Drives the IPPT tab's stats row, charts,
   // and leaderboard. Does NOT affect the underlying table — that always
@@ -227,7 +259,12 @@ function normalizeMedical(records) {
       location: r.location || "",
       status,
       startDate: r.startDate || "",
-      endDate: r.endDate || ""
+      endDate: r.endDate || "",
+      // COS-set flag: an MC/Warded the recruit consumes IN camp. Keeps them
+      // counted in strength (excluded from outOfCampMap) and out of ATTC, while
+      // still showing under MEDICAL STATUS as "<N>D MC (consume in camp)".
+      // Sheets round-trips booleans as the text "TRUE"/"FALSE", so coerce here.
+      inCamp: r.inCamp === true || r.inCamp === "TRUE" || r.inCamp === "true"
     };
   });
 }
@@ -249,6 +286,17 @@ function normalizeLeave(records) {
 // stay 4 digits regardless of how Sheets mangles them on round-trip.
 function padD4OnLayer(records) {
   return (records || []).map(r => r && r.d4 != null ? { ...r, d4: padD4(r.d4) } : r);
+}
+
+// Conduct records (Attendance, ConductDetail) gained a `program` field (PTP /
+// BMT / Combined). Guarantee every row carries it — defaulting legacy/missing
+// values to "Combined" — so writeTab (which derives headers from the first
+// row's keys) never strips the column on a full "Re-push all".
+function normalizeAttendance(records) {
+  return (records || []).map(r => r ? { ...r, program: r.program || "Combined" } : r);
+}
+function normalizeConductDetail(records) {
+  return padD4OnLayer(records).map(r => r ? { ...r, program: r.program || "Combined" } : r);
 }
 
 // MSK records arrive from a Google Form that writes verbose column headers
@@ -309,12 +357,12 @@ function loadLocal() {
     const d = JSON.parse(raw);
     STATE.roster = normalizeRoster(d.roster);
     STATE.medical = normalizeMedical(d.medical);
-    STATE.attendance = d.attendance || [];
+    STATE.attendance = normalizeAttendance(d.attendance);
     STATE.ippt = padD4OnLayer(d.ippt);
     STATE.rm = padD4OnLayer(d.rm);
     STATE.soc = padD4OnLayer(d.soc);
     STATE.polar = padD4OnLayer(d.polar);
-    STATE.conductDetail = padD4OnLayer(d.conductDetail);
+    STATE.conductDetail = normalizeConductDetail(d.conductDetail);
     STATE.appointments = padD4OnLayer(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
     STATE.msk = normalizeMSK(d.msk);
@@ -337,9 +385,10 @@ function loadFilter() {
     STATE.filterPlt = d.plt || "";
     STATE.filterSect = d.sect || "";
     STATE.filterRole = d.role || "";
+    STATE.filterProgram = d.program || "";
   } catch { /* keep defaults */ }
 }
 
 function saveFilter() {
-  localStorage.setItem(FILTER_KEY, JSON.stringify({ plt: STATE.filterPlt, sect: STATE.filterSect, role: STATE.filterRole }));
+  localStorage.setItem(FILTER_KEY, JSON.stringify({ plt: STATE.filterPlt, sect: STATE.filterSect, role: STATE.filterRole, program: STATE.filterProgram }));
 }
