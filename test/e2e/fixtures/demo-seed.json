@@ -1,0 +1,39 @@
+{
+  "cougar-data-v2": {
+    "roster": [
+      { "id": "C1401", "name": "ALPHA ONE", "role": "Recruit" },
+      { "id": "C1402", "name": "ALPHA TWO", "role": "Recruit" },
+      { "id": "C1403", "name": "ALPHA THREE", "role": "Recruit" },
+      { "id": "C2401", "name": "BRAVO ONE", "role": "Recruit" },
+      { "id": "C2402", "name": "BRAVO TWO", "role": "Recruit" },
+      { "id": "C2403", "name": "BRAVO THREE", "role": "Recruit" },
+      { "id": "0001", "name": "COMD TAN", "role": "Commander" }
+    ],
+    "medical": [],
+    "attendance": [
+      { "id": 1, "date": "01 Jul", "time": "0730", "conductId": "c001", "program": "PTP", "total": 3, "participating": 3, "px": 0, "fallout": 0, "remarks": "" },
+      { "id": 2, "date": "01 Jul", "time": "0730", "conductId": "c001", "program": "BMT", "total": 3, "participating": 2, "px": 1, "fallout": 0, "remarks": "one PX" },
+      { "id": 3, "date": "02 Jul", "time": "1500", "conductId": "c002", "program": "Combined", "total": 6, "participating": 6, "px": 0, "fallout": 0, "remarks": "" }
+    ],
+    "ippt": [],
+    "rm": [],
+    "soc": [],
+    "polar": [],
+    "conductDetail": [
+      { "id": 11, "d4": "C2402", "date": "01 Jul", "time": "0730", "conductId": "c001", "program": "BMT", "type": "PX", "reason": "MC" }
+    ],
+    "appointments": [],
+    "leave": [],
+    "msk": [],
+    "conducts": [
+      { "id": "c001", "name": "Orientation Run" },
+      { "id": "c002", "name": "Route March" }
+    ],
+    "rev": {}
+  },
+  "cougar-programs": [
+    { "key": "PTP", "name": "PTP", "platoons": ["1"] },
+    { "key": "BMT", "name": "BMT", "platoons": ["2"] }
+  ],
+  "cougar-filter": { "plt": "", "sect": "", "role": "", "program": "" }
+}
