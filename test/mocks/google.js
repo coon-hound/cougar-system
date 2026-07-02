@@ -46,7 +46,8 @@ function makeGoogle() {
         }
         return this;
       },
-      setFontWeight() { return this; }
+      setFontWeight() { return this; },
+      setNumberFormat() { return this; }
     };
   }
 
