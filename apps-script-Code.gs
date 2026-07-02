@@ -1066,6 +1066,22 @@ var TG_PROCEDURE =
   "AFTER the doctor: come back and tap “Submit MC”, choose your status + days, and upload a photo of the MC slip. " +
   "This must be in by the cut-off (4h before book-in).";
 
+// ─── Patch notes ("What's New") ────────────────────────
+// Shown once to each registered user on their first message/tap after this
+// string changes. Bump TG_PATCH_VERSION (any short human-readable tag — a date
+// or "v3") whenever you want to announce something; edit TG_PATCH_NOTES to match.
+// Per-user "seen" state lives in the TgUsers.patchSeen column. Plain text only
+// (tgSend sends no parse_mode) — no *markdown*, just emoji + newlines like TG_PROCEDURE.
+var TG_PATCH_VERSION = "2026-07-02";
+var TG_PATCH_NOTES =
+  "🆕 What's New\n\n" +
+  "This bot walks you through reporting sick the right way so you don't miss cut-offs or forget to tell your SC.\n\n" +
+  "• Tap 📋 Report Sick to log a report — I'll ask your reason + clinic and ping your Section Commander for you.\n" +
+  "• After the doctor, tap “Submit MC” to send your status, days, and a photo of the MC slip.\n" +
+  "• Tap ℹ️ RSO Procedure any time for the full steps and cut-off rules.\n" +
+  "• Useful commands: /reportsick, /procedure, /whoami, /cancel.\n\n" +
+  "Send /start to open the menu.";
+
 // ─── Telegram transport ────────────────────────────────
 
 function tgProp(k) { return PropertiesService.getScriptProperties().getProperty(k); }
@@ -1287,7 +1303,7 @@ function setupBotTabs() {
       })]);
     }
   }
-  ensure("TgUsers", ["id", "chatId", "userId", "username", "d4", "name", "role", "sectionsOwned", "registeredAt"]);
+  ensure("TgUsers", ["id", "chatId", "userId", "username", "d4", "name", "role", "sectionsOwned", "registeredAt", "patchSeen"]);
   ensure("ReportSick", ["id", "d4", "name", "plt", "sect", "context", "reason", "clinic", "reportedAt", "cutoffAt", "bookInAt", "status", "startDate", "endDate", "mcUrl", "state", "notifiedSC"]);
   ensure("Config", ["botGroupChatId", "nextBookInDate", "nextBookInTime", "outOfCamp", "cutoffHours", "rsoFormUrl"], { cutoffHours: 4, outOfCamp: "FALSE" });
   Logger.log("Bot tabs ready: TgUsers, ReportSick, Config");
@@ -1549,6 +1565,19 @@ function handleTelegramUpdate(update) {
   if (update.message) { tgHandleMessage(update.message); return; }
 }
 
+// If this registered user hasn't seen the current patch notes, send them once
+// and stamp their row. Called after the user is resolved in both handlers, so it
+// catches a first message OR a first button tap after a patch. Sends an extra
+// message and returns — normal dispatch continues, so it never swallows the
+// user's action or interrupts an in-flight report-sick flow.
+function tgMaybePatchNotes(user) {
+  if (!user) return;                                   // mid-registration: no row yet, skip
+  if (String(user.patchSeen || "") === TG_PATCH_VERSION) return;
+  tgSend(user.chatId, TG_PATCH_NOTES);
+  user.patchSeen = TG_PATCH_VERSION;
+  try { tgUpsertUser(user); } catch (e) { Logger.log("tgMaybePatchNotes upsert error: " + e); }
+}
+
 function tgHandleMessage(msg) {
   var chatId = msg.chat.id;
 
@@ -1563,6 +1592,8 @@ function tgHandleMessage(msg) {
   var text = (msg.text || "").trim();
   var user = tgFindUser(chatId);
   var state = tgGetState(chatId);
+
+  tgMaybePatchNotes(user);   // show "What's New" once per patch, then continue normally
 
   // Global commands (work in any state).
   if (text === "/cancel") { tgClearState(chatId); tgSendMenu(chatId, "Cancelled. What would you like to do?"); return; }
@@ -1685,6 +1716,8 @@ function tgHandleCallback(cb) {
   if (data === "reg:redo" || data === "reg:again") { tgStripKeyboard(cb); tgDoReRegister(chatId); return; }
 
   if (!user) { tgSend(chatId, "Please /start to register first."); return; }
+
+  tgMaybePatchNotes(user);   // show "What's New" once per patch, then continue normally
 
   var step = state.step;
 
