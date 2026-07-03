@@ -968,6 +968,11 @@ function renderRoster(el) {
   STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
   const scoped = filteredRoster();
   const rosterToday = todayISO();
+  // Status column = the recruit's CURRENTLY-active medical status(es), derived
+  // from the medical layer (same source as the dashboard) rather than the stale
+  // roster `status` field. No active status → ACTIVE.
+  const effByD4 = {};
+  currentMedicalEffectiveAll(rosterToday).forEach(e => { effByD4[e.d4] = e.statuses; });
   // Push/Export operate on the FULL roster — scoping is a view concern; we
   // don't want the user to silently overwrite the sheet with only their slice.
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
@@ -987,11 +992,15 @@ function renderRoster(el) {
       const idCell = isCmd ? "" : r.id;
       const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `<span style="color:var(--muted)">Recruit</span>`;
       // Book Out / Book In toggle reflecting the shared booked-out flag.
+      const effStatuses = effByD4[r.id];
+      const statusCell = (effStatuses && effStatuses.length)
+        ? effStatuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("")
+        : statusBadge("Active");
       const bookedOut = isBookedOut(r, rosterToday);
       const campCell = bookedOut
         ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book back in">↩ In</button>`
         : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', true, 'Out of camp')" title="Book out of camp">🚪 Out</button>`;
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusBadge(r.status)}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
+      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No personnel in ${filterLabel()}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
 }
