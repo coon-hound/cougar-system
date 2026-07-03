@@ -40,10 +40,11 @@ function openPerson(d4) {
   const latest = computed[computed.length - 1];
 
   // Commanders never show their 00xx id — surface rank instead. Recruits keep
-  // the existing "4D — status" header.
+  // the existing "4D — status" header, plus a training-program badge (PTP/BMT).
+  const prog = p.role === "Commander" ? "" : programOf(p);
   let html = p.role === "Commander"
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}</div>`;
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}${prog ? " " + programBadge(prog) : ""}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ───────
   // Reflects the shared out-of-camp computation. Medical/leave are managed by
@@ -87,6 +88,35 @@ function openPerson(d4) {
 
   if (p.allergies) html += `<div style="background:#E3B34122;border:1px solid #E3B34144;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:var(--yellow)"><strong>Allergies:</strong> ${p.allergies}</div>`;
   if (p.msk) html += `<div style="background:#F8514922;border:1px solid #F8514944;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--red)"><strong>MSK history:</strong> ${p.msk}</div>`;
+  if (p.otherMedical) html += `<div style="background:#E3B34122;border:1px solid #E3B34144;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--yellow)"><strong>Other medical:</strong> ${p.otherMedical}</div>`;
+
+  // ── Personal details (enlistment form) ────────────────
+  // Only rendered when at least one field is present — hides the whole card for
+  // commanders and older recruits who never filled the detailed intake form.
+  if (p.dob || p.bloodType || p.fieldOfStudy || p.gpa || p.smoker || p.address) {
+    html += `<div class="card" style="margin-bottom:12px;padding:14px"><h3 style="margin-bottom:10px">Personal</h3>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:${p.address ? '8px' : '0'}">
+        ${fact("DOB", p.dob)}
+        ${fact("Blood", p.bloodType)}
+        ${fact("Smoker", p.smoker)}
+        ${fact("Field of study", p.fieldOfStudy)}
+        ${fact("GPA", p.gpa)}
+      </div>
+      ${p.address ? `<div style="font-size:12px"><span style="color:var(--muted)">Address:</span> <strong>${p.address}</strong></div>` : ""}
+    </div>`;
+  }
+
+  // ── Next of kin ───────────────────────────────────────
+  if (p.nokName || p.nokRelation || p.nokPhone || p.nokOccupation) {
+    html += `<div class="card" style="margin-bottom:12px;padding:14px"><h3 style="margin-bottom:10px">Next of Kin</h3>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px">
+        ${fact("Name", p.nokName)}
+        ${fact("Relationship", p.nokRelation)}
+        ${p.nokPhone ? `<span style="color:var(--muted)">Phone:</span> <strong><a href="tel:${escapeAttr(String(p.nokPhone).replace(/\D/g, ""))}" style="color:var(--accent);text-decoration:none">${fmtPhone(p.nokPhone)}</a></strong>` : fact("Phone", "")}
+        ${fact("Occupation", p.nokOccupation)}
+      </div>
+    </div>`;
+  }
 
   // RSIs stat is clickable when there are records — opens an inline patterns
   // panel below the stats strip with day-of-week, status mix, timeline, reasons.

@@ -1759,7 +1759,7 @@ function renderConducts(el) {
     <div class="card" style="padding:12px 14px;margin-bottom:16px;background:var(--surface2);border-radius:8px">
       <div style="margin-bottom:8px">
         <strong style="font-size:14px">🎯 Training Programs</strong>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">Which platoons belong to each parallel training program. Drives the conduct wizard's program scoping and the program badges/filters. A platoon can belong to only one program; unassigned platoons appear only under Combined.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">Defines the programs and a <strong>fallback</strong> platoon→program mapping. A recruit's own <code>program</code> column (BMT/PTP on the Roster) overrides this; the platoon map only applies to recruits with no explicit program set. Drives the conduct wizard's program scoping and the program badges/filters.</div>
       </div>
       <div class="table-wrap"><table><thead><tr><th style="text-align:left">Program</th>${allPlatoons.map(p => `<th>P${p}</th>`).join("")}</tr></thead><tbody>
         ${STATE.programs.map(pr => `<tr>

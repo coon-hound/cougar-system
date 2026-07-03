@@ -46,7 +46,11 @@ function programOfPlt(plt) {
   const hit = (STATE.programs || []).find(pr => (pr.platoons || []).map(String).includes(p));
   return hit ? hit.key : "";
 }
-const programOf = r => programOfPlt(getPlt(r));
+// A recruit's training program. The explicit per-recruit `program` column is
+// authoritative (BMT membership isn't a clean platoon partition — some Plt1/Plt4
+// recruits do BMT); fall back to the platoon→program map only when the column is
+// blank, so recruits added later without a value still resolve sensibly.
+const programOf = r => (r && r.program && String(r.program).trim()) || programOfPlt(getPlt(r));
 
 // Roster (recruits only — commanders aren't tracked in conduct attendance) for a
 // program. Combined / "" / unknown key → all recruits (both programs together).
