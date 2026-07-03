@@ -1006,8 +1006,8 @@ function renderAttendance(el) {
         <button class="btn btn-primary" onclick="openLogConductWizard()" title="One-shot wizard: date + time + conduct + Status Personnel checklist + bulk Report Sick / Fallout / RSI rows + auto totals + chat-format copy">+ Log Conduct</button>
       </div>
     </div>
-    ${STATE.attendance.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th>Conduct</th><th>Total</th><th>Part.</th><th>LMS</th><th>Status</th><th>Fallout</th><th>Rate</th><th>LMS Rate</th><th style="text-align:left">Remarks</th><th></th></tr></thead><tbody>
-    ${[...STATE.attendance].sort((a, b) => {
+    ${STATE.attendance.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th>Conduct</th><th>Program</th><th>Total</th><th>Part.</th><th>LMS</th><th>Status</th><th>Fallout</th><th>Rate</th><th>LMS Rate</th><th style="text-align:left">Remarks</th><th></th></tr></thead><tbody>
+    ${[...STATE.attendance].filter(a => !STATE.filterProgram || progKey(a) === STATE.filterProgram).sort((a, b) => {
       // Newest first by date, then time (later in the day on top within a date).
       const ai = displayDateToISO(a.date) || a.date || "";
       const bi = displayDateToISO(b.date) || b.date || "";
@@ -1020,7 +1020,7 @@ function renderAttendance(el) {
       const rateColor = r >= 95 ? 'var(--green)' : r >= 70 ? 'var(--orange)' : 'var(--red)';
       const lmsRateColor = a.participating ? (lmsRate >= 95 ? 'var(--green)' : lmsRate >= 70 ? 'var(--orange)' : 'var(--red)') : 'var(--muted)';
       const time = fmtHrs(a.time) || '—';
-      return `<tr><td>${a.date}</td><td class="mono" style="color:${a.time ? 'var(--text)' : 'var(--dim)'}">${time}</td><td style="text-align:left">${conductName(a.conductId)}</td><td>${a.total}</td><td>${a.participating}</td><td style="color:${lms > 0 ? 'var(--accent)' : 'var(--muted)'}">${lms}</td><td style="color:${a.px > 0 ? 'var(--orange)' : 'var(--muted)'}">${a.px}</td><td style="color:${a.fallout > 0 ? 'var(--red)' : 'var(--muted)'}">${a.fallout}</td><td style="font-weight:700;color:${rateColor}">${r}%</td><td style="font-weight:700;color:${lmsRateColor}">${a.participating ? lmsRate + '%' : '—'}</td><td style="text-align:left;color:${a.remarks ? 'var(--yellow)' : 'var(--muted)'};max-width:200px;white-space:normal;font-size:11px">${a.remarks || ''}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="copyConductChatFormat(${a.id})" title="Copy WhatsApp-format parade state message">📋</button> <button class="btn btn-icon" onclick="openLogConductWizard(${a.id})" title="Edit conduct (wizard)">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('attendance', ${a.id}, 'attendance entry')" title="Delete">✕</button></td></tr>`;
+      return `<tr><td>${a.date}</td><td class="mono" style="color:${a.time ? 'var(--text)' : 'var(--dim)'}">${time}</td><td style="text-align:left">${conductName(a.conductId)}</td><td>${programBadge(progKey(a))}</td><td>${a.total}</td><td>${a.participating}</td><td style="color:${lms > 0 ? 'var(--accent)' : 'var(--muted)'}">${lms}</td><td style="color:${a.px > 0 ? 'var(--orange)' : 'var(--muted)'}">${a.px}</td><td style="color:${a.fallout > 0 ? 'var(--red)' : 'var(--muted)'}">${a.fallout}</td><td style="font-weight:700;color:${rateColor}">${r}%</td><td style="font-weight:700;color:${lmsRateColor}">${a.participating ? lmsRate + '%' : '—'}</td><td style="text-align:left;color:${a.remarks ? 'var(--yellow)' : 'var(--muted)'};max-width:200px;white-space:normal;font-size:11px">${a.remarks || ''}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="copyConductChatFormat(${a.id})" title="Copy WhatsApp-format parade state message">📋</button> <button class="btn btn-icon" onclick="openLogConductWizard(${a.id})" title="Edit conduct (wizard)">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('attendance', ${a.id}, 'attendance entry')" title="Delete">✕</button></td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="empty-state">No attendance records yet.</div>`}`;
 }
@@ -1041,9 +1041,14 @@ function toggleParticipants() { _showParticipants = !_showParticipants; render()
 // the inverse gives us the participants for free, no extra data needed).
 function renderDetailParticipantsSummary(scopedAll) {
   if (!_detailFilterConduct) return "";
-  const conductRecords = scopedAll.filter(d => `${d.date}|${d.time || ""}|${d.conductId || ""}` === _detailFilterConduct);
+  const conductRecords = scopedAll.filter(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${progKey(d)}` === _detailFilterConduct);
   const absentSet = new Set(conductRecords.map(d => d.d4));
-  const inScope = filteredRoster();
+  // Participants = the session's program roster minus absentees (the detail rows
+  // enumerate absentees, so the inverse gives participants for free). Scope to
+  // the session's program so a PTP conduct doesn't count BMT recruits present.
+  const sessionProgram = _detailFilterConduct.split("|")[3] || "Combined";
+  const visible = visibleD4Set();
+  const inScope = recruitsInProgram(sessionProgram).filter(r => passesFilter(r.id, visible));
   const participants = inScope.filter(r => !absentSet.has(r.id));
   const ct = t => conductRecords.filter(d => d.type === t).length;
   return `
@@ -1068,11 +1073,12 @@ function renderConductDetail(el) {
   const visible = visibleD4Set();
   const scopedAll = STATE.conductDetail.filter(d => passesFilter(d.d4, visible));
   let scoped = scopedAll;
-  if (_detailFilterConduct) scoped = scoped.filter(d => `${d.date}|${d.time || ""}|${d.conductId || ""}` === _detailFilterConduct);
+  if (_detailFilterConduct) scoped = scoped.filter(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${progKey(d)}` === _detailFilterConduct);
   if (_detailFilterType) scoped = scoped.filter(d => d.type === _detailFilterType);
 
-  // Unique conduct keys for the dropdown — newest first by parsed date.
-  const conductKeys = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conductId || ""}`))]
+  // Unique conduct keys for the dropdown — newest first by parsed date. Program
+  // is part of the key so PTP/BMT sessions of the same conduct list separately.
+  const conductKeys = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${progKey(d)}`))]
     .filter(Boolean)
     .sort((a, b) => {
       const [ad, at] = a.split("|"), [bd, bt] = b.split("|");
@@ -1104,7 +1110,7 @@ function renderConductDetail(el) {
   // remains a stable view of overall absence within the platoon scope.
   const missed = {};
   scopedAll.forEach(d => {
-    const k = `${d.date}|${d.time || ""}|${d.conductId || ""}`;
+    const k = `${d.date}|${d.time || ""}|${d.conductId || ""}|${progKey(d)}`;
     (missed[d.d4] = missed[d.d4] || new Set()).add(k);
   });
   const topMissed = Object.entries(missed)
@@ -1113,7 +1119,7 @@ function renderConductDetail(el) {
     .slice(0, 10);
 
   const typeBadgeColor = t => t === "PX" ? "orange" : t === "RSI" ? "red" : t === "Fallout" ? "purple" : "yellow";
-  const totalConducts = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conductId || ""}`))].length;
+  const totalConducts = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${progKey(d)}`))].length;
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scopedAll.length}/${STATE.conductDetail.length}]</span>` : ` (${STATE.conductDetail.length})`;
 
   el.innerHTML = `
@@ -1134,7 +1140,7 @@ function renderConductDetail(el) {
       <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Filter:</span>
       <select onchange="setDetailFilterConduct(this.value)" class="topbar-select" style="min-width:260px">
         <option value="">All conducts (${totalConducts})</option>
-        ${conductKeys.map(k => { const [dt, tm, cid] = k.split("|"); return `<option value="${escapeAttr(k)}" ${k === _detailFilterConduct ? "selected" : ""}>${dt}${tm ? " " + fmtHrs(tm) : ""} — ${conductName(cid) || "(unknown)"}</option>`; }).join("")}
+        ${conductKeys.map(k => { const [dt, tm, cid, prog] = k.split("|"); return `<option value="${escapeAttr(k)}" ${k === _detailFilterConduct ? "selected" : ""}>${dt}${tm ? " " + fmtHrs(tm) : ""} — ${conductName(cid) || "(unknown)"} (${programLabel(prog)})</option>`; }).join("")}
       </select>
       <select onchange="setDetailFilterType(this.value)" class="topbar-select">
         <option value="">All types</option>
@@ -1145,8 +1151,8 @@ function renderConductDetail(el) {
     ${renderDetailParticipantsSummary(scopedAll)}
     <div class="grid-2" style="grid-template-columns:2fr 1fr;align-items:start">
       <div>
-        ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th style="text-align:left">Conduct</th><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
-        ${rows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td>${d.date || ""}</td><td class="mono">${fmtHrs(d.time) || "—"}</td><td style="text-align:left">${conductName(d.conductId)}</td><td class="mono" style="font-weight:700;color:var(--accent)">${d.d4}</td><td style="text-align:left">${getName(d.d4)}</td><td>${badge(d.type, typeBadgeColor(d.type))}</td><td style="text-align:left;max-width:280px;white-space:normal;font-size:11px">${d.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm(${d.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', ${d.id}, 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
+        ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th style="text-align:left">Conduct</th><th>Program</th><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
+        ${rows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td>${d.date || ""}</td><td class="mono">${fmtHrs(d.time) || "—"}</td><td style="text-align:left">${conductName(d.conductId)}</td><td>${programBadge(progKey(d))}</td><td class="mono" style="font-weight:700;color:var(--accent)">${d.d4}</td><td style="text-align:left">${getName(d.d4)}</td><td>${badge(d.type, typeBadgeColor(d.type))}</td><td style="text-align:left;max-width:280px;white-space:normal;font-size:11px">${d.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm(${d.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', ${d.id}, 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
         </tbody></table></div>` : `<div class="empty-state">${STATE.conductDetail.length ? "No records match current filter." : "No conduct detail records yet. Tap + Log to add one."}</div>`}
       </div>
       <div class="card">
@@ -1746,7 +1752,25 @@ function renderConducts(el) {
   const anyRecordsWithConductId = STATE.attendance.some(r => r.conductId) || STATE.polar.some(r => r.conductId) || STATE.conductDetail.some(r => r.conductId);
   const emptyRegistryWithUsage = rows.length === 0 && anyRecordsWithConductId;
 
+  // Platoons present in the roster — the assignable columns for programs. A
+  // platoon belongs to at most one program (mutually exclusive).
+  const allPlatoons = [...new Set(STATE.roster.map(getPlt).filter(Boolean))].sort();
+  const programsCard = `
+    <div class="card" style="padding:12px 14px;margin-bottom:16px;background:var(--surface2);border-radius:8px">
+      <div style="margin-bottom:8px">
+        <strong style="font-size:14px">🎯 Training Programs</strong>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">Which platoons belong to each parallel training program. Drives the conduct wizard's program scoping and the program badges/filters. A platoon can belong to only one program; unassigned platoons appear only under Combined.</div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th style="text-align:left">Program</th>${allPlatoons.map(p => `<th>P${p}</th>`).join("")}</tr></thead><tbody>
+        ${STATE.programs.map(pr => `<tr>
+          <td style="text-align:left"><span style="color:${programColor(pr.key)};font-weight:700">${escapeAttr(pr.name || pr.key)}</span> <button class="btn btn-icon" onclick="promptRenameProgram('${escapeAttr(pr.key)}')" title="Rename program">✎</button></td>
+          ${allPlatoons.map(p => `<td><input type="checkbox" ${(pr.platoons || []).map(String).includes(String(p)) ? "checked" : ""} onchange="programSetPlatoon('${escapeAttr(pr.key)}','${escapeAttr(p)}',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>`).join("")}
+        </tr>`).join("")}
+      </tbody></table></div>
+    </div>`;
+
   el.innerHTML = `
+    ${programsCard}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <h2 style="font-size:18px;font-weight:700">Conducts Registry <span style="color:var(--muted);font-weight:400;font-size:13px">${rows.length} entries · ${totalUsage} record${totalUsage === 1 ? "" : "s"}</span></h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1788,6 +1812,28 @@ function renderConducts(el) {
       }).join("")}
     </tbody></table></div>` : `<div class="empty-state">No conducts yet. Add one with "+ New conduct" or run the legacy-data migration if you have existing records.</div>`}
   `;
+}
+
+// Assign/unassign a platoon to a program. A platoon belongs to at most one
+// program, so assigning it first removes it from every other program.
+function programSetPlatoon(programKey, plt, assigned) {
+  const p = String(plt);
+  STATE.programs.forEach(pr => {
+    pr.platoons = (pr.platoons || []).map(String).filter(x => x !== p);
+    if (assigned && pr.key === programKey) pr.platoons.push(p);
+  });
+  savePrograms();
+  render();
+}
+
+function promptRenameProgram(programKey) {
+  const pr = STATE.programs.find(x => x.key === programKey);
+  if (!pr) return;
+  const name = (prompt("Program name:", pr.name || pr.key) || "").trim();
+  if (!name) return;
+  pr.name = name;
+  savePrograms();
+  render();
 }
 
 function promptCreateConduct() {
