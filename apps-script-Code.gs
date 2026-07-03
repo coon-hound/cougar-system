@@ -37,16 +37,26 @@
  * SHEET TABS REQUIRED (create with headers in Row 1):
  *   Roster:     4d | name | age | status | notes | phone | email |
  *               ration | allergies | msk | highest education level |
- *               motorcycle license | height | weight | role | rank |
- *               leaveQuota
- *               (the column may be named "4d" or "id" — the frontend mirrors
- *                whichever is present into r.id at pull time. height in cm,
- *                weight in kg — BMI is computed client-side. role ∈
+ *               motorcycle license | height | weight | id | role | rank |
+ *               leaveQuota | outOfCamp | outReason | outSince |
+ *               program | dob | bloodType | fieldOfStudy | gpa | smoker |
+ *               otherMedical | nokName | nokRelation | nokPhone |
+ *               nokOccupation | address
+ *               (the key column may be named "4d" or "id" — the frontend
+ *                mirrors whichever is present into r.id at pull time. height
+ *                in cm, weight in kg — BMI is computed client-side. role ∈
  *                {"Recruit", "Commander"} (defaults to Recruit if blank).
  *                Commanders use 4D 0001–0099, are never displayed in the
  *                UI by id — their rank+name shows instead. rank is free
  *                text ("3SG", "2LT", "CPT", "MSG"); leaveQuota is the
- *                off-in-lieu day cap (numeric, optional for recruits).)
+ *                off-in-lieu day cap (numeric, optional for recruits).
+ *                outOfCamp/outReason/outSince back the manual book-out.
+ *                program is the training program ("BMT"/"PTP", blank for
+ *                commanders) — authoritative per-recruit; run
+ *                seedRosterPrograms() once to populate. dob..address are the
+ *                enlistment-form personal + next-of-kin fields (free text;
+ *                gpa/smoker are free text, not coerced). The sheet is kept
+ *                ordered by 4D via sortRosterBy4d().)
  *   Medical:    id | d4 | date | reason | location | status | startDate | endDate
  *               (Each row represents a "report sick" event — `date` is the
  *                date the recruit reported sick. `location` is optional —
@@ -804,6 +814,8 @@ function writeTab(tabName, data) {
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }
 
+  if (tabName === "Roster") sortRosterBy4d();
+
   return {
     ok: true,
     tab: tabName,
@@ -834,6 +846,91 @@ function ensureColumnsForKeys(sheet, keys) {
   return trimmed;
 }
 
+// ── Roster ordering + training-program seeding ────────────────────
+// Sort key for a 4D value. Strips a leading "C" and parses the digits.
+// Recruits (>= 1000, e.g. 1101) sort BEFORE commanders (00xx, < 1000) — group 0
+// vs 1 — and ascending by number within each group. Non-numeric values sort last.
+function roster4dSortKey_(v) {
+  var s = String(v == null ? "" : v).trim().replace(/^C/i, "");
+  var n = /^\d+$/.test(s) ? parseInt(s, 10) : Number.MAX_SAFE_INTEGER;
+  return { group: (n < 1000) ? 1 : 0, n: n };   // commanders (00xx) last
+}
+
+// Reorders the Roster sheet in place by 4D (recruits first, then commanders).
+// Reads the sheet, sorts data rows by the 4d/id column, rewrites them as TEXT so
+// dob/program/etc. are never coerced. Safe to run standalone from the editor, and
+// called after Roster writes below to keep the tab tidy. Bumps rev so clients
+// refresh (harmless extra bump when already inside a withRevLock write).
+function sortRosterBy4d() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster");
+  if (!sheet) return { error: "Roster tab not found" };
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 3 || !lastCol) return { ok: true, note: "nothing to sort" };
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function (h) { return String(h).trim(); });
+  var keyCol = headers.indexOf("4d");
+  if (keyCol === -1) keyCol = headers.indexOf("id");
+  if (keyCol === -1) return { error: "Roster has no 4d/id column" };
+
+  // Read DISPLAY values so a pure reorder never coerces text like dob "31/07/2005"
+  // into a date serial when written back — we rewrite the range as plain text.
+  var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getDisplayValues();
+  rows.sort(function (a, b) {
+    var ka = roster4dSortKey_(a[keyCol]), kb = roster4dSortKey_(b[keyCol]);
+    return ka.group !== kb.group ? ka.group - kb.group : ka.n - kb.n;
+  });
+  var outRange = sheet.getRange(2, 1, rows.length, lastCol);
+  outRange.setNumberFormat("@");       // force plain text before write (no coercion)
+  outRange.setValues(rows);
+  bumpRev("Roster");
+  return { ok: true, rowsSorted: rows.length };
+}
+
+// One-time (re-runnable) seeder for the per-recruit `program` column: BMT for
+// the new intake, PTP for every other recruit, blank for commanders. Run once
+// from the Apps Script editor. Plt2 + Plt3 are wholly BMT; a handful of Plt1/Plt4
+// recruits (the detailed-intake batch) are BMT too — everyone else is PTP.
+function seedRosterPrograms() {
+  var BMT = {};
+  [2, 3].forEach(function (plt) {                 // all of Plt2 + Plt3 → BMT
+    [1, 2, 3, 4].forEach(function (sect) {
+      for (var bed = 1; bed <= 16; bed++) BMT[String(plt * 1000 + sect * 100 + bed)] = true;
+    });
+  });
+  ["1103", "1204", "1214", "1215", "1216", "1315", "1316", "1415", "1416",
+   "4113", "4309", "4315", "4316", "4404", "4414", "4415", "4416"]
+    .forEach(function (id) { BMT[id] = true; });  // Plt1/Plt4 BMT exceptions
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Roster");
+  if (!sheet) return { error: "Roster tab not found" };
+  var trimmed = ensureColumnsForKeys(sheet, ["program"]);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { ok: true, note: "no data rows" };
+  var keyCol = trimmed.indexOf("4d");
+  if (keyCol === -1) keyCol = trimmed.indexOf("id");
+  var roleCol = trimmed.indexOf("role");
+  var progCol = trimmed.indexOf("program");
+
+  var data = sheet.getRange(2, 1, lastRow - 1, trimmed.length).getValues();
+  var counts = { BMT: 0, PTP: 0, blank: 0 };
+  var out = data.map(function (row) {
+    var id = String(row[keyCol] == null ? "" : row[keyCol]).trim().replace(/^C/i, "");
+    var role = roleCol > -1 ? String(row[roleCol] || "") : "";
+    var isCmdr = role === "Commander" || /^00\d\d$/.test(("0000" + id).slice(-4));
+    var val = isCmdr ? "" : (BMT[id] ? "BMT" : "PTP");
+    counts[val || "blank"]++;
+    return [val];
+  });
+  var progRange = sheet.getRange(2, progCol + 1, out.length, 1);
+  progRange.setNumberFormat("@");      // plain text so "BMT"/"PTP" store verbatim
+  progRange.setValues(out);
+  bumpRev("Roster");
+  return { ok: true, bmt: counts.BMT, ptp: counts.PTP, blank: counts.blank };
+}
+
 function appendRow(tabName, rowData) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(tabName);
@@ -846,6 +943,8 @@ function appendRow(tabName, rowData) {
   });
 
   sheet.appendRow(newRow);
+
+  if (tabName === "Roster") sortRosterBy4d();
 
   return {
     ok: true,
@@ -876,6 +975,8 @@ function appendMany(tabName, rows) {
 
   var startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 1, newRows.length, trimmed.length).setValues(newRows);
+
+  if (tabName === "Roster") sortRosterBy4d();
 
   return {
     ok: true,
@@ -931,6 +1032,9 @@ function upsertRow(tabName, rowData) {
     return val !== undefined && val !== null ? val : "";
   });
   sheet.appendRow(newRow);
+  // New row changes membership → re-sort. (The update-in-place branch above
+  // keeps row order, so a book-out toggle doesn't pay for a full re-sort.)
+  if (tabName === "Roster") sortRosterBy4d();
   return {
     ok: true,
     tab: tabName,
