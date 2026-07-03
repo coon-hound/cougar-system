@@ -987,6 +987,7 @@ function renderRoster(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
       <div style="display:flex;gap:8px">
+        <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
         <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
         <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
       </div>

@@ -75,7 +75,69 @@ function programColor(key) {
   return idx >= 0 ? palette[idx % palette.length] : "var(--accent)";
 }
 
-const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram);
+// ── Recruit groups (ad-hoc named subsets, e.g. "Guard Duty") ─────
+// A group cuts ACROSS platoons and behaves like the platoon filter/scope.
+// Membership is stored on the Roster row as a comma-delimited `groups` string
+// (synced like `location`), so the whole company shares it; the set of group
+// NAMES is DERIVED from the roster - a group exists exactly while it has ≥1
+// member - so there's one source of truth, same as platoons/programs. Commas
+// are the delimiter, so group names must not contain commas (enforced on input).
+function getGroups(r) {
+  return String((r && r.groups) || "").split(",").map(s => s.trim()).filter(Boolean);
+}
+const recruitInGroup = (r, name) => getGroups(r).includes(name);
+function allGroupNames() {
+  const set = new Set();
+  (STATE.roster || []).forEach(r => getGroups(r).forEach(g => set.add(g)));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+// Recruit members of a group (commanders excluded, matching strength/conduct/
+// book-out convention). Named distinctly from recruitsInProgram.
+function groupMembers(name) {
+  return (STATE.roster || []).filter(r => r.role !== "Commander" && recruitInGroup(r, name));
+}
+
+// ── Combined groups (saved set-formulas) ─────────────────────────
+// A scope token → the recruit d4s it selects (commanders always excluded).
+// Tokens: "company" | "plt:N" | "prog:KEY" | "grp:NAME". THE resolver shared by
+// combined-group membership, the filter and the book-out scope, so a combined
+// group means the same everywhere.
+function scopeTokenMembers(token) {
+  const recruits = (STATE.roster || []).filter(r => r.role !== "Commander");
+  if (token === "company") return recruits.map(r => r.id);
+  if (token.indexOf("plt:") === 0) { const p = token.slice(4); return recruits.filter(r => getPlt(r) === p).map(r => r.id); }
+  if (token.indexOf("prog:") === 0) { const k = token.slice(5); return recruits.filter(r => programOf(r) === k).map(r => r.id); }
+  if (token.indexOf("grp:") === 0) { const g = token.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
+  return [];
+}
+// Human label for a token, e.g. "P4", "PTP", "⦿ Guard Duty", "Company".
+function scopeTokenLabel(token) {
+  if (token === "company") return "Company";
+  if (token.indexOf("plt:") === 0) return "P" + token.slice(4);
+  if (token.indexOf("prog:") === 0) return programLabel(token.slice(5));
+  if (token.indexOf("grp:") === 0) return "⦿ " + token.slice(4);
+  return token;
+}
+const combinedByName = name => (STATE.combinedGroups || []).find(c => c.name === name) || null;
+const allCombinedNames = () => (STATE.combinedGroups || []).map(c => c.name).sort((a, b) => a.localeCompare(b));
+// Resolve a def {include,exclude} to a Set of recruit d4s: union of includes,
+// minus union of excludes. Used live for the builder preview and saved lookups.
+function combinedMemberSetFromDef(def) {
+  const set = new Set();
+  if (!def) return set;
+  (def.include || []).forEach(tok => scopeTokenMembers(tok).forEach(d4 => set.add(d4)));
+  (def.exclude || []).forEach(tok => scopeTokenMembers(tok).forEach(d4 => set.delete(d4)));
+  return set;
+}
+const combinedMemberSet = name => combinedMemberSetFromDef(combinedByName(name));
+// A readable formula for a combined def, e.g. "P4 + P1 − ⦿ Guard Duty".
+function combinedFormula(def) {
+  const inc = (def.include || []).map(scopeTokenLabel).join(" + ");
+  const exc = (def.exclude || []).map(scopeTokenLabel).join(" − ");
+  return exc ? `${inc || "∅"} − ${exc}` : (inc || "∅");
+}
+
+const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram || STATE.filterGroup);
 
 function filteredRoster() {
   if (!isFilterActive()) return STATE.roster;
@@ -84,8 +146,20 @@ function filteredRoster() {
     if (STATE.filterPlt && getPlt(r) !== String(STATE.filterPlt)) return false;
     if (STATE.filterSect && getSect(r) !== String(STATE.filterSect)) return false;
     if (STATE.filterProgram && programOf(r) !== STATE.filterProgram) return false;
+    if (STATE.filterGroup && !filterGroupHas(STATE.filterGroup, r)) return false;
     return true;
   });
+}
+
+// The group filter value is either a plain group name or "c:<combined name>".
+// Resolves both to a membership test for one recruit.
+function filterGroupHas(val, r) {
+  if (val.indexOf("c:") === 0) return combinedMemberSet(val.slice(2)).has(r.id);
+  return recruitInGroup(r, val);
+}
+// Display label for whichever group-scope value is active.
+function filterGroupLabel(val) {
+  return val.indexOf("c:") === 0 ? "▣ " + val.slice(2) : "⦿ " + val;
 }
 
 // Returns null when no filter is active so callers can skip the Set lookup
@@ -105,6 +179,7 @@ function filterLabel() {
   if (STATE.filterPlt) parts.push("P" + STATE.filterPlt);
   if (STATE.filterSect) parts.push("S" + STATE.filterSect);
   if (STATE.filterProgram) parts.push(programLabel(STATE.filterProgram));
+  if (STATE.filterGroup) parts.push(filterGroupLabel(STATE.filterGroup));
   return parts.join(" ");
 }
 

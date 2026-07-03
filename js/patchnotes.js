@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 112;
+const APP_VERSION = 113;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 113,
+    date: "3 Jul 2026",
+    title: "Book out by group, platoon or program",
+    intro: "Booking out and filtering now work on whole slices of the company, not just one recruit at a time.",
+    items: [
+      { t: "🚪 Scoped book-out", d: "The Book Out picker can book out the whole company, a platoon, a training program, or a group in one tap - recruits already out (MC / leave) are skipped." },
+      { t: "⦿ Recruit groups", d: "Create ad-hoc groups that cut across platoons (e.g. Guard Duty) from Roster → ⦿ Groups. Filter the whole app by a group, or book one out on its own." },
+      { t: "▣ Combined groups", d: "Mix platoons / programs / groups with + and − to save scopes like \"P4 − Guard Duty\" - tap chips to build, use them as a filter or a book-out scope." },
+    ],
+  },
   {
     v: 112,
     date: "3 Jul 2026",

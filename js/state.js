@@ -17,6 +17,7 @@ const FITNESS_SENT_KEY = "cougar-fitness-sent";
 const DIRTY_KEY = "cougar-dirty-tabs";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
 const PROGRAMS_KEY = "cougar-programs";
+const COMBINED_KEY = "cougar-combined-groups";
 
 // Sheet-tab-name → STATE-array-key lookup. The autoSync coalesce path uses
 // this when flushing a queued replace push: by the time the flush runs the
@@ -93,6 +94,31 @@ function savePrograms() {
   localStorage.setItem(PROGRAMS_KEY, JSON.stringify(STATE.programs || []));
 }
 
+// Combined groups: saved set-formulas over platoons / programs / groups / the
+// whole company, e.g. "P4 − Guard Duty" = include {plt:4} minus exclude
+// {grp:Guard Duty}. Membership is resolved LIVE from the current roster (see
+// helpers.js combinedMemberSet), so they track group/platoon changes with no
+// stored member list. Shape: [{ name, include:[token], exclude:[token] }] where
+// a token is "company" | "plt:N" | "prog:KEY" | "grp:NAME". Per-device config
+// like programs (own localStorage key); the underlying groups it references are
+// the shared, synced part.
+function loadCombinedGroups() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(COMBINED_KEY) || "[]");
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter(c => c && c.name)
+      .map(c => ({
+        name: String(c.name),
+        include: (Array.isArray(c.include) ? c.include : []).map(String),
+        exclude: (Array.isArray(c.exclude) ? c.exclude : []).map(String)
+      }));
+  } catch { return []; }
+}
+function saveCombinedGroups() {
+  localStorage.setItem(COMBINED_KEY, JSON.stringify(STATE.combinedGroups || []));
+}
+
 // Reads the persisted "who got a fitness report and when" map.
 // Shape: { "1101": "2026-05-27T14:40:25.296Z", ... }.
 // Lives in localStorage so it doesn't get touched by saveLocal / pullAll,
@@ -163,9 +189,16 @@ const STATE = {
   // program stored on each record, and per-recruit views by the recruit's
   // platoon→program mapping. See helpers.js (programOf, recruitsInProgram).
   filterProgram: "",
+  // Ad-hoc recruit-group scope: "" = all. Filters every per-recruit view to one
+  // named group (e.g. "Guard Duty") or a combined group ("c:<name>"). Membership
+  // lives on the Roster row (`groups` column); the name list is derived. See helpers.js.
+  filterGroup: "",
   // Editable platoon→program map (see loadPrograms). Drives the conduct
   // wizard's program scoping and the program badges/filters.
   programs: loadPrograms(),
+  // Saved combined-group formulas (see loadCombinedGroups). Surfaced in the
+  // group filter dropdown and the book-out picker alongside plain groups.
+  combinedGroups: loadCombinedGroups(),
   // IPPT stats aggregation: "latest" (most recent attempt per recruit) or
   // "best" (highest-scoring attempt). Drives the IPPT tab's stats row, charts,
   // and leaderboard. Does NOT affect the underlying table — that always
@@ -235,7 +268,11 @@ function normalizeRoster(roster) {
       outOfCamp: rest.outOfCamp === true || String(rest.outOfCamp).toUpperCase() === "TRUE",
       // Manual "present" override (Book In on an otherwise-out recruit). Same
       // TRUE-text coercion; campInSince (the local YYYY-MM-DD) passes through ...rest.
-      campIn: rest.campIn === true || String(rest.campIn).toUpperCase() === "TRUE"
+      campIn: rest.campIn === true || String(rest.campIn).toUpperCase() === "TRUE",
+      // Ad-hoc group membership: comma-delimited group names (e.g. "Guard,Range
+      // Party"). Persistent (not day-scoped). Defaulted so the column survives a
+      // full re-push (writeTab derives headers from the first row's keys).
+      groups: rest.groups != null ? String(rest.groups) : ""
     };
   });
 }
@@ -389,9 +426,10 @@ function loadFilter() {
     STATE.filterSect = d.sect || "";
     STATE.filterRole = d.role || "";
     STATE.filterProgram = d.program || "";
+    STATE.filterGroup = d.group || "";
   } catch { /* keep defaults */ }
 }
 
 function saveFilter() {
-  localStorage.setItem(FILTER_KEY, JSON.stringify({ plt: STATE.filterPlt, sect: STATE.filterSect, role: STATE.filterRole, program: STATE.filterProgram }));
+  localStorage.setItem(FILTER_KEY, JSON.stringify({ plt: STATE.filterPlt, sect: STATE.filterSect, role: STATE.filterRole, program: STATE.filterProgram, group: STATE.filterGroup }));
 }

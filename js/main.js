@@ -55,6 +55,22 @@ function refreshFilterUI() {
     progSel.classList.toggle("active", !!STATE.filterProgram);
   }
 
+  // Recruit-group scope — plain groups (value = name) + combined groups (value =
+  // "c:<name>"), both derived from the roster/config. Hidden until at least one
+  // exists. A stale filter for a now-gone group falls back to "All groups".
+  const grpSel = document.getElementById("filter-group");
+  if (grpSel) {
+    const names = allGroupNames();
+    const combined = allCombinedNames();
+    const valid = new Set([...names, ...combined.map(n => "c:" + n)]);
+    if (STATE.filterGroup && !valid.has(STATE.filterGroup)) { STATE.filterGroup = ""; saveFilter(); }
+    grpSel.style.display = (names.length || combined.length) ? "" : "none";
+    const grpOpts = names.map(n => `<option value="${escapeAttr(n)}" ${n === STATE.filterGroup ? "selected" : ""}>⦿ ${escapeAttr(n)}</option>`);
+    const combOpts = combined.map(n => `<option value="c:${escapeAttr(n)}" ${("c:" + n) === STATE.filterGroup ? "selected" : ""}>▣ ${escapeAttr(n)}</option>`);
+    grpSel.innerHTML = `<option value="">All groups</option>` + grpOpts.join("") + combOpts.join("");
+    grpSel.classList.toggle("active", !!STATE.filterGroup);
+  }
+
   // Sections depend on platoon selection — "section 2" is ambiguous across
   // platoons, so the section dropdown is disabled until a platoon is picked.
   if (STATE.filterPlt) {
@@ -123,11 +139,19 @@ function initFilterControls() {
     panel?.classList.remove("open");
   });
 
+  document.getElementById("filter-group")?.addEventListener("change", e => {
+    STATE.filterGroup = e.target.value;
+    saveFilter();
+    render();
+    panel?.classList.remove("open");
+  });
+
   clearBtn.addEventListener("click", () => {
     STATE.filterPlt = "";
     STATE.filterSect = "";
     STATE.filterRole = "";
     STATE.filterProgram = "";
+    STATE.filterGroup = "";
     saveFilter();
     render();
     panel?.classList.remove("open");
