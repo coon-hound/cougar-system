@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 109;
+const APP_VERSION = 112;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 112,
+    date: "3 Jul 2026",
+    title: "Roster now shows real camp status",
+    intro: "The Roster's Camp column used to show a red \"Out\" button on everyone, even recruits who were actually in camp.",
+    items: [
+      { t: "🏕️ In camp / Out at a glance", d: "Each recruit shows their true camp status - \"In camp\", or \"Out\" with the reason (Medical / Leave / Booked out) - matching the Dashboard exactly." },
+      { t: "🔁 Book in / Book out always offers the opposite", d: "The button flips to whatever they're not: an out recruit shows Book In, an in-camp recruit shows Book Out." },
+      { t: "💪 Full manual strength control", d: "Book In on someone out on MC/leave counts them present for today (shown as \"In camp · manual\"); Book Out sends anyone out - both reset to their real status the next day." },
+      { t: "📋 Parade state stays consistent", d: "Anyone kept in camp is no longer listed under ATTC - their MC/status shows under MEDICAL STATUS marked \"(kept in camp)\" instead." },
+    ],
+  },
   {
     v: 106,
     date: "2 Jul 2026",

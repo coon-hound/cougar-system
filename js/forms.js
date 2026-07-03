@@ -47,17 +47,20 @@ function openPerson(d4) {
     : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}${prog ? " " + programBadge(prog) : ""}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ───────
-  // Reflects the shared out-of-camp computation. Medical/leave are managed by
-  // their own records (no toggle); only the manual book-out is toggled here.
+  // Reflects the shared out-of-camp computation. The lever always offers the
+  // opposite of the effective state: out (any reason, incl. MC/leave) → Book In,
+  // which counts them present for today; in camp → Book Out. A present-override
+  // over an MC/leave reason shows as a teal "IN CAMP (MANUAL)" pill.
   const campInfo = outOfCampMap(todayISO()).get(d4);
-  const booked = isBookedOut(p, todayISO());
+  const forcedInHere = !campInfo && isForcedIn(p, todayISO()) && derivedCampOut(d4, todayISO());
   const pill = (txt, bg) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:${bg}22;color:${bg}">${txt}</span>`;
   html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-    ${campInfo ? pill("OUT OF CAMP", "#F85149") : pill("IN CAMP", "#3FB950")}
+    ${campInfo ? pill("OUT OF CAMP", "#F85149") : forcedInHere ? pill("IN CAMP (MANUAL)", "#39D2C0") : pill("IN CAMP", "#3FB950")}
     ${campInfo ? `<span style="font-size:11px;color:var(--muted)">${escapeAttr(campInfo.reason || "")}</span>` : ""}
     ${campInfo && campInfo.kind !== "bookedout"
-      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
-      : `<button class="btn ${booked ? "btn-success" : "btn-danger"}" style="font-size:11px;padding:4px 10px" onclick="bookOutToggle('${d4}', ${booked ? "false" : "true"}, 'Out of camp'); openPerson('${d4}')">${booked ? "↩ Book In" : "🚪 Book Out"}</button>`}
+      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record — Book In counts them present today)</span>`
+      : forcedInHere ? `<span style="font-size:10px;color:var(--dim)">(would be out: ${escapeAttr(forcedInHere.reason || "")}; resets tomorrow)</span>` : ""}
+    <button class="btn ${campInfo ? "btn-success" : "btn-danger"}" style="font-size:11px;padding:4px 10px" onclick="bookOutToggle('${d4}', ${campInfo ? "false" : "true"}, 'Out of camp'); openPerson('${d4}')">${campInfo ? "↩ Book In" : "🚪 Book Out"}</button>
   </div>`;
 
   // ── Profile section ──────────────────────────────────
@@ -1334,15 +1337,29 @@ function toggleAppointmentResolved(id) {
 function bookOutToggle(d4, on, reason) {
   const r = STATE.roster.find(x => x.id === d4);
   if (!r) return;
-  if (on === undefined) on = !isBookedOut(r, todayISO());
+  const today = todayISO();
+  if (on === undefined) on = !outOfCampMap(today).has(d4);   // toggle the EFFECTIVE camp state
   if (on) {
+    // Book out — manual out for today. Clears any present-override.
     r.outOfCamp = true;
     r.outReason = reason || r.outReason || "Out of camp";
-    r.outSince = todayISO();
+    r.outSince = today;
+    r.campIn = false;
+    r.campInSince = "";
   } else {
+    // Book in — clear any manual book-out. If they'd STILL be out for a medical
+    // or leave reason, set a manual present-override so they count in camp today
+    // (auto-clears tomorrow); otherwise just return them to the derived state.
     r.outOfCamp = false;
     r.outReason = "";
     r.outSince = "";
+    if (derivedCampOut(d4, today)) {
+      r.campIn = true;
+      r.campInSince = today;
+    } else {
+      r.campIn = false;
+      r.campInSince = "";
+    }
   }
   saveLocal(); render();
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
@@ -1491,12 +1508,18 @@ const SEP = "----------------------------------------------------------------";
 // custom status can never silently fall through the cracks of the report.
 const PARADE_SECTIONED_STATUSES = ["MC", "Warded", "Pending", "NIL"];
 const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(s);
+// A medical record counts as "kept in camp" for the parade when the recruit is
+// consuming it in camp (the record's inCamp flag) OR a commander manually booked
+// them IN today (the day-scoped force-in override). Either way they're present in
+// camp, so an MC/Warded belongs under MEDICAL STATUS, never ATTC.
+const medKeptInCamp = (m, dateIso) =>
+  m.inCamp === true || isForcedIn(STATE.roster.find(r => r.id === m.d4), dateIso || todayISO());
 // A record belongs in MEDICAL STATUS if its status is a catch-all restriction
-// (LD/Excuse/custom) OR it's a consume-in-camp MC/Warded (pulled out of ATTC but
+// (LD/Excuse/custom) OR it's a kept-in-camp MC/Warded (pulled out of ATTC but
 // still needing to show its status). Shared by the parade state and the
 // standalone Medical Status List so the two never diverge.
-const isMedicalStatusRecord = m =>
-  isMedicalStatusCatchAll(m.status) || (m.inCamp && (m.status === "MC" || m.status === "Warded"));
+const isMedicalStatusRecord = (m, dateIso) =>
+  isMedicalStatusCatchAll(m.status) || (medKeptInCamp(m, dateIso) && (m.status === "MC" || m.status === "Warded"));
 
 // "2026-05-20" → "200526" — battalion uses DDMMYY everywhere.
 function toDDMMYY(iso) {
@@ -1532,13 +1555,15 @@ function paradeDuration(record) {
 }
 
 // Day count for the status line ("Status: 5D MC"). Inclusive of both ends.
-function paradeStatusLabel(record) {
+function paradeStatusLabel(record, dateIso) {
   const s = displayDateToISO(record.startDate || "");
   const e = displayDateToISO(record.endDate || "");
   if (!record.status) return "";
-  // A consume-in-camp MC/Warded reads "2D MC (consume in camp)" — the suffix is
-  // derived from the inCamp flag, the underlying status stays "MC".
-  const suffix = record.inCamp ? " (consume in camp)" : "";
+  // A kept-in-camp MC/Warded reads "2D MC (consume in camp)" for a record flagged
+  // inCamp, or "(kept in camp)" when a commander manually booked them in today.
+  // The underlying status stays "MC".
+  const suffix = record.inCamp ? " (consume in camp)"
+    : (isForcedIn(STATE.roster.find(r => r.id === record.d4), dateIso || todayISO()) ? " (kept in camp)" : "");
   if (!s || !e) return record.status + suffix;
   const days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
   return (days > 0 ? `${days}D ${record.status}` : record.status) + suffix;
@@ -1580,7 +1605,7 @@ function buildMedicalSection(label, dateIso, recordFilter) {
     ? recordFilter
     : m => recordFilter.includes(m.status);
   let matches = STATE.medical.filter(m =>
-    medStatusActive(m, dateIso) && matchRecord(m)
+    medStatusActive(m, dateIso) && matchRecord(m, dateIso)
   );
 
   // ATTC gets the PDS-confirmed borderline returnees folded in so they
@@ -1621,11 +1646,11 @@ function buildMedicalSection(label, dateIso, recordFilter) {
 
     if (records.length === 1) {
       const r = records[0];
-      return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus: ${paradeStatusLabel(r)}\nDuration: ${paradeDuration(r)}`;
+      return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus: ${paradeStatusLabel(r, dateIso)}\nDuration: ${paradeDuration(r)}`;
     }
     // Multi-status: stack numbered Status + Duration pairs under one R/N.
     const subStatuses = records.map((r, i) =>
-      `${i + 1}. ${paradeStatusLabel(r)}\nDuration: ${paradeDuration(r)}`
+      `${i + 1}. ${paradeStatusLabel(r, dateIso)}\nDuration: ${paradeDuration(r)}`
     ).join("\n");
     return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus received:\n${subStatuses}`;
   });
@@ -1788,9 +1813,10 @@ function generateParadeStateText(type, dateIso, time) {
   const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
   const sections = [
     buildStrengthBlock(dateIso),
-    // ATTC = MC/Warded physically AWAY (consume-in-camp MCs are excluded here and
-    // fall through to MEDICAL STATUS below).
-    buildMedicalSection("ATTC", dateIso, m => (m.status === "MC" || m.status === "Warded") && !m.inCamp),
+    // ATTC = MC/Warded physically AWAY. Kept-in-camp MC/Warded (consume-in-camp OR
+    // a manual same-day Book In) are excluded here and fall through to MEDICAL
+    // STATUS below, so anyone counted in camp is never listed as away.
+    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d)),
     buildMedicalSection("REPORT SICK", dateIso, m => m.status === "Pending"),
     buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord),
     buildAppointmentSection(dateIso, time),
@@ -3808,9 +3834,9 @@ function buildConductChatFormat(attendanceId) {
           STATE.medical.filter(m => m.d4 === d.d4 && medStatusActive(m, date))
         ).sort((x, y) => medSeverityRank(medStatusTag(y, date)?.tag) - medSeverityRank(medStatusTag(x, date)?.tag));
         if (med.length === 1) {
-          block += `\nStatus: ${paradeStatusLabel(med[0])}\nDuration: ${paradeDuration(med[0])}`;
+          block += `\nStatus: ${paradeStatusLabel(med[0], date)}\nDuration: ${paradeDuration(med[0])}`;
         } else if (med.length > 1) {
-          const sub = med.map((r, j) => `${j + 1}. ${paradeStatusLabel(r)}\n    Duration: ${paradeDuration(r)}`).join("\n");
+          const sub = med.map((r, j) => `${j + 1}. ${paradeStatusLabel(r, date)}\n    Duration: ${paradeDuration(r)}`).join("\n");
           block += `\nStatus received:\n${sub}`;
         }
       }

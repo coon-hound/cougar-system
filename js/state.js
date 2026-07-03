@@ -232,7 +232,10 @@ function normalizeRoster(roster) {
       // Out-of-camp ("booked out") persists per recruit. Sheets may return the
       // boolean as a real boolean or the text "TRUE"; coerce to a real boolean.
       // outReason / outSince (the local YYYY-MM-DD it was set) pass through ...rest.
-      outOfCamp: rest.outOfCamp === true || String(rest.outOfCamp).toUpperCase() === "TRUE"
+      outOfCamp: rest.outOfCamp === true || String(rest.outOfCamp).toUpperCase() === "TRUE",
+      // Manual "present" override (Book In on an otherwise-out recruit). Same
+      // TRUE-text coercion; campInSince (the local YYYY-MM-DD) passes through ...rest.
+      campIn: rest.campIn === true || String(rest.campIn).toUpperCase() === "TRUE"
     };
   });
 }

@@ -422,26 +422,54 @@ function isBookedOut(r, dateIso) {
   return out && r.outSince === (dateIso || todayISO());
 }
 
+// Manual "present" override: a commander tapped Book In on someone who is
+// otherwise out (on MC/leave) to count them toward in-camp strength for the day.
+// Day-scoped like book-out (campInSince === today) so it auto-clears tomorrow.
+function isForcedIn(r, dateIso) {
+  if (!r) return false;
+  const on = r.campIn === true || String(r.campIn).toUpperCase() === "TRUE";
+  return on && r.campInSince === (dateIso || todayISO());
+}
+
+// Why a recruit is out of camp IGNORING any manual override — i.e. their
+// recorded medical (away MC/Warded, not consumed in camp) or active leave.
+// Returns { kind: "medical" | "leave", reason } or null. Shared by outOfCampMap,
+// the roster badge and bookOutToggle so the three never drift on what "out" means.
+function derivedCampOut(d4, dateIso) {
+  dateIso = dateIso || todayISO();
+  const mc = STATE.medical.find(m => m.d4 === d4 && medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp);
+  if (mc) return { kind: "medical", reason: mc.status + (mc.reason ? " — " + mc.reason : "") };
+  const lv = STATE.leave.find(l => {
+    const s = displayDateToISO(l.startDate), e = displayDateToISO(l.endDate);
+    return l.d4 === d4 && s && e && s <= dateIso && dateIso <= e;
+  });
+  if (lv) return { kind: "leave", reason: [lv.type, lv.reason].filter(Boolean).join(" — ") || "Leave" };
+  return null;
+}
+
 // d4 → { kind: "medical" | "leave" | "bookedout", reason } for everyone out of
 // camp on `dateIso`. Precedence: medical > leave > manual book-out.
 function outOfCampMap(dateIso) {
   dateIso = dateIso || todayISO();
   const map = new Map();
+  // A manual "present" override wins over every out-reason for the day, so a
+  // commander can count e.g. an in-camp-consuming MC recruit toward strength.
+  const forcedIn = new Set((STATE.roster || []).filter(r => isForcedIn(r, dateIso)).map(r => r.id));
   STATE.medical.forEach(m => {
     // inCamp MC/Warded is consumed IN camp — counted present, so it never joins
     // the out-of-camp set (nor the dashboard "Out of Camp" tile / parade CURRENT).
-    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp && !map.has(m.d4)) {
+    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp && !forcedIn.has(m.d4) && !map.has(m.d4)) {
       map.set(m.d4, { kind: "medical", reason: m.status + (m.reason ? " — " + m.reason : "") });
     }
   });
   STATE.leave.forEach(l => {
     const s = displayDateToISO(l.startDate), e = displayDateToISO(l.endDate);
-    if (s && e && s <= dateIso && dateIso <= e && !map.has(l.d4)) {
+    if (s && e && s <= dateIso && dateIso <= e && !forcedIn.has(l.d4) && !map.has(l.d4)) {
       map.set(l.d4, { kind: "leave", reason: [l.type, l.reason].filter(Boolean).join(" — ") || "Leave" });
     }
   });
   (STATE.roster || []).forEach(r => {
-    if (isBookedOut(r, dateIso) && !map.has(r.id)) {
+    if (isBookedOut(r, dateIso) && !forcedIn.has(r.id) && !map.has(r.id)) {
       map.set(r.id, { kind: "bookedout", reason: r.outReason || "Out of camp" });
     }
   });
