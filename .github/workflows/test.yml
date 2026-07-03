@@ -5,6 +5,8 @@ on:
   pull_request:
 
 jobs:
+  # Fast, zero-install gate: sync units, multi-tab e2e, and static load-time
+  # guards (duplicate-declaration parse + cache-version + rev-bump + setValues).
   test:
     runs-on: ubuntu-latest
     steps:
@@ -12,7 +14,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      # Zero dependencies — nothing to install. This runs the sync test suite:
-      # backend OCC/rev units, end-to-end multi-tab scenarios, and the static
-      # load-time guards (duplicate-declaration parse + cache-version + rev-bump).
       - run: node test/run.js
+
+  # Real-browser gate: drives the actual frontend in headless Chromium against
+  # seeded demo data (no network). This is the only job that installs anything;
+  # the node job above stays dependency-free on purpose.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

@@ -44,3 +44,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+
+# ── Pipeline / e2e artifacts ───────────────────────
+# Feature worktrees, Playwright output, and the generated preview seeding page.
+.worktrees/
+test-results/
+playwright-report/
+playwright/.cache/
+__preview.html
+.verify-appsscript.js

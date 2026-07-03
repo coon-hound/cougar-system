@@ -4,6 +4,12 @@
   "private": true,
   "description": "40 SAR Cougar Company data system — tests for the multi-device sync layer.",
   "scripts": {
-    "test": "node test/run.js"
+    "test": "node test/run.js",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:all": "node test/run.js && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
   }
 }
