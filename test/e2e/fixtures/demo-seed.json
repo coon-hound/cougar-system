@@ -35,5 +35,6 @@
     { "key": "PTP", "name": "PTP", "platoons": ["1"] },
     { "key": "BMT", "name": "BMT", "platoons": ["2"] }
   ],
-  "cougar-filter": { "plt": "", "sect": "", "role": "", "program": "" }
+  "cougar-filter": { "plt": "", "sect": "", "role": "", "program": "" },
+  "cougar-seen-version": 999
 }

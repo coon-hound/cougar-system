@@ -40,11 +40,20 @@ document.getElementById("search-input").addEventListener("input", e => {
 function refreshFilterUI() {
   const pltSel = document.getElementById("filter-plt");
   const sectSel = document.getElementById("filter-sect");
+  const progSel = document.getElementById("filter-program");
   const clearBtn = document.getElementById("filter-clear");
   if (!pltSel || !sectSel) return;
 
   const platoons = [...new Set(STATE.roster.map(getPlt).filter(v => v !== ""))].sort();
   pltSel.innerHTML = `<option value="">All plts</option>` + platoons.map(p => `<option value="${p}" ${p === String(STATE.filterPlt) ? "selected" : ""}>P${p}</option>`).join("");
+
+  // Training-program scope — programs from STATE.programs plus the implicit
+  // "Combined" (both programs together).
+  if (progSel) {
+    const opts = [...STATE.programs.map(p => p.key), PROGRAM_COMBINED];
+    progSel.innerHTML = `<option value="">All programs</option>` + opts.map(k => `<option value="${escapeAttr(k)}" ${k === STATE.filterProgram ? "selected" : ""}>${escapeAttr(programLabel(k))}</option>`).join("");
+    progSel.classList.toggle("active", !!STATE.filterProgram);
+  }
 
   // Sections depend on platoon selection — "section 2" is ambiguous across
   // platoons, so the section dropdown is disabled until a platoon is picked.
@@ -81,6 +90,7 @@ function refreshFilterUI() {
 function initFilterControls() {
   const pltSel = document.getElementById("filter-plt");
   const sectSel = document.getElementById("filter-sect");
+  const progSel = document.getElementById("filter-program");
   const clearBtn = document.getElementById("filter-clear");
   const panel = document.getElementById("topbar-filters");
   const toggleBtn = document.getElementById("mobile-filter-toggle");
@@ -106,10 +116,18 @@ function initFilterControls() {
     panel?.classList.remove("open");
   });
 
+  progSel?.addEventListener("change", () => {
+    STATE.filterProgram = progSel.value;
+    saveFilter();
+    render();
+    panel?.classList.remove("open");
+  });
+
   clearBtn.addEventListener("click", () => {
     STATE.filterPlt = "";
     STATE.filterSect = "";
     STATE.filterRole = "";
+    STATE.filterProgram = "";
     saveFilter();
     render();
     panel?.classList.remove("open");
