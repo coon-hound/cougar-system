@@ -17,6 +17,10 @@ async function seedAndGoto(page, url = "/index.html") {
   // The bootstrap runs loadLocal() + render() synchronously on DOMContentLoaded;
   // wait for STATE to be populated so assertions don't race the first paint.
   await page.waitForFunction(() => typeof STATE !== "undefined" && Array.isArray(STATE.roster));
+  // Dismiss any launch modal so its full-screen overlay can't intercept clicks.
+  // The seed also pre-stamps "cougar-seen-version" to suppress the "What's New"
+  // patch-notes popup, but this keeps specs robust against any future launch modal.
+  await page.evaluate(() => { if (typeof closeModal === "function") closeModal(); });
 }
 
 // Convenience: number of recruits/commanders the fixture seeds.
