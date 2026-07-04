@@ -567,6 +567,77 @@ function outOfCampMap(dateIso) {
   return map;
 }
 
+// ── Movement board (where is each body right now) ────────────
+// Partitions every recruit into exactly ONE location bucket so the buckets sum
+// to strength. Precedence: OUT OF CAMP (derived, read-only) > manual in-camp
+// location (day-scoped) > DEFAULT_LOCATION. Out-of-camp bodies are bucketed by
+// the SAME outOfCampMap the strength board reads, so the movement counts can
+// never diverge from the dashboard. In-camp movement is a per-recruit Roster
+// field (location/locationSince) that auto-resets daily — exactly like a manual
+// book-out — so nobody has to "reset" the board each morning.
+//
+// Pass a precomputed `outMap` (from outOfCampMap) to avoid rebuilding it per
+// recruit on the aggregation path. Returns { location, kind, outKind, reason }.
+// kind: "out" (read-only) | "in" (movable). outKind/reason set only when out.
+function movementLocationOf(d4, dateIso, outMap) {
+  dateIso = dateIso || todayISO();
+  const map = outMap || outOfCampMap(dateIso);
+  if (map.has(d4)) {
+    const e = map.get(d4);
+    return { location: "Out of Camp", kind: "out", outKind: e.kind, reason: e.reason };
+  }
+  const r = (STATE.roster || []).find(x => x.id === d4);
+  if (r && r.locationSince === dateIso && r.location) {
+    return { location: r.location, kind: "in", outKind: "", reason: "" };
+  }
+  return { location: DEFAULT_LOCATION, kind: "in", outKind: "", reason: "" };
+}
+
+// Aggregate recruits (commanders excluded — same convention as strength) into
+// ordered location buckets, respecting the global scope filter. Order:
+// DEFAULT_LOCATION first, then the managed STATE.locations, then any stray
+// location still assigned to someone but no longer in the list, then the single
+// read-only "Out of Camp" bucket last. Empty in-camp locations from the managed
+// list still appear (as 0) so a defined location is always visible; the Out of
+// Camp bucket is omitted when nobody is out.
+// Returns [{ location, kind, recruits:[r...], byPlt:{ "1":n,... }, count }].
+function movementBuckets(dateIso) {
+  dateIso = dateIso || todayISO();
+  const visible = visibleD4Set();
+  const outMap = outOfCampMap(dateIso);
+  const OUT = "Out of Camp";
+  const buckets = new Map();
+  const ensure = (location, kind) => {
+    let b = buckets.get(location);
+    if (!b) { b = { location, kind, recruits: [], byPlt: {}, count: 0 }; buckets.set(location, b); }
+    return b;
+  };
+  // Seed managed in-camp locations so defined-but-empty ones still render.
+  (STATE.locations || []).forEach(l => ensure(l, "in"));
+  ensure(DEFAULT_LOCATION, "in");
+  (STATE.roster || []).forEach(r => {
+    if (r.role === "Commander" || !passesFilter(r.id, visible)) return;
+    const loc = movementLocationOf(r.id, dateIso, outMap);
+    const b = ensure(loc.location, loc.kind);
+    b.recruits.push(r);
+    b.count++;
+    const p = getPlt(r) || "?";
+    b.byPlt[p] = (b.byPlt[p] || 0) + 1;
+  });
+  // Stable ordering.
+  const managed = STATE.locations || [];
+  const rank = loc => {
+    if (loc === DEFAULT_LOCATION) return -1;
+    if (loc === OUT) return 1e6;
+    const i = managed.indexOf(loc);
+    return i >= 0 ? i : 1e5;   // stray (removed-but-assigned) locations before Out
+  };
+  const arr = [...buckets.values()]
+    .filter(b => !(b.location === OUT && b.count === 0))
+    .sort((a, b) => rank(a.location) - rank(b.location) || a.location.localeCompare(b.location));
+  return arr;
+}
+
 // Returns { tag, ghostDay } for the record on the given date, or null if the
 // record doesn't apply at all. ghostDay is 0 for active, 1 or 2 for the post-
 // expiry tag period. Only MC and LD get ghost-tagged; everything else just

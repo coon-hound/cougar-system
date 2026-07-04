@@ -24,6 +24,7 @@ function render() {
   switch (STATE.nav) {
     case "dashboard": renderDashboard(el); break;
     case "roster": renderRoster(el); break;
+    case "movement": renderMovement(el); break;
     case "attendance": renderAttendance(el); break;
     case "detail": renderConductDetail(el); break;
     case "medical": renderMedical(el); break;
@@ -131,6 +132,7 @@ function renderDashboard(el) {
       <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
       <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
     </div>
+    ${renderDashMovement(today)}
     ${renderDashOutOfCamp(scoped, outMap)}
     ${renderDashAppointments(visible, today)}
     <div class="grid-2">
@@ -733,6 +735,42 @@ function renderDashLeaveOut(visible, todayIso) {
   </tbody></table></div>`;
 }
 
+// Dashboard HERO — the movement picture at the top of the dashboard, big and
+// prominent because "where is everyone right now" is the question a spec on the
+// ground asks most. A single distribution bar (segment width ∝ headcount, one
+// colour per location, matching the Movement tab) + a tappable legend, all
+// linking straight into the board. Shows the WHOLE company (in-camp locations +
+// Out of Camp) so the bar always reconciles to strength.
+function renderDashMovement(today) {
+  const buckets = movementBuckets(today).filter(b => b.count > 0);
+  const total = buckets.reduce((n, b) => n + b.count, 0);
+  if (!total) return "";   // nothing scoped — nothing to show
+  const distinctIn = buckets.filter(b => b.kind === "in").length;
+  const summary = distinctIn <= 1
+    ? `Whole company together at ${DEFAULT_LOCATION}`
+    : `Split across ${distinctIn} in-camp location${distinctIn === 1 ? "" : "s"}`;
+  const segs = buckets.map((b, i) => {
+    const c = mvColor(b.location, i);
+    return `<div class="mv-seg" style="flex:${b.count} 0 0;background:${c}" title="${b.location}: ${b.count}" onclick="gotoNav('movement')">${b.count}</div>`;
+  }).join("");
+  const legend = buckets.map((b, i) => {
+    const c = mvColor(b.location, i);
+    return `<div class="mv-leg" onclick="gotoNav('movement')" title="Open Movement board"><span class="mv-leg-dot" style="background:${c}"></span><span class="mv-leg-c" style="color:${c}">${b.count}</span><span class="mv-leg-n">${b.location}</span></div>`;
+  }).join("");
+  return `
+    <div class="mv-hero">
+      <div class="mv-hero-head">
+        <div>
+          <div class="mv-hero-title">🚶 Movement — where everyone is</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${summary}</div>
+        </div>
+        <button class="btn btn-primary" onclick="gotoNav('movement')">Open board →</button>
+      </div>
+      <div class="mv-bar">${segs}</div>
+      <div class="mv-legend">${legend}</div>
+    </div>`;
+}
+
 function renderLeave(el) {
   const visible = visibleD4Set();
   const today = todayISO();
@@ -1026,6 +1064,220 @@ function renderRoster(el) {
       return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No personnel in ${filterLabel()}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
+}
+
+// A stable, distinct colour per location — shared by the tab cards and the
+// dashboard distribution bar so a place reads the same everywhere. Main Body
+// (teal) and Out of Camp (orange) are pinned; the rest cycle a palette.
+const MV_PALETTE = ["#58A6FF", "#3FB950", "#BC8CFF", "#E3B341", "#F778BA", "#7EE787", "#FF9E64", "#79C0FF"];
+function mvColor(location, idx) {
+  if (location === DEFAULT_LOCATION) return "#39D2C0";   // teal
+  if (location === "Out of Camp") return "#D29922";      // orange
+  return MV_PALETTE[(idx >= 0 ? idx : 0) % MV_PALETTE.length];
+}
+
+// On-board move mode. When true, recruit chips become tap-to-select and every
+// location becomes a drop target — no modal, no scrolling a 40-person list.
+// Kept as a module flag (not STATE) since it's pure view state. `_mvScroll`
+// preserves scroll across a move-mode re-render (render() resets it to top).
+let MOVE_MODE = false;
+let _mvScroll = 0;
+
+// Movement board — where every in-camp body is right now. One card per location
+// (big count + per-platoon pips + name chips). A read-only "Out of Camp" card so
+// the counts reconcile to strength. In MOVE MODE: tap chips to pick recruits up,
+// tap a location card (or a big drop button) to drop them — the fast path. The
+// modal list-picker (📋) stays as a manual backup.
+function renderMovement(el) {
+  const today = todayISO();
+  if (!STATE.roster.length) {
+    MOVE_MODE = false;
+    el.innerHTML = `<h2 style="font-size:20px;font-weight:800;margin-bottom:16px">🚶 Movement Board</h2>
+      <div class="card empty-state">${STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet."}</div>`;
+    return;
+  }
+  const buckets = movementBuckets(today);
+  const outMap = outOfCampMap(today);
+  const scoped = filteredRoster().filter(r => r.role !== "Commander");
+  const totalRecs = scoped.length;
+  const outCount = scoped.filter(r => outMap.has(r.id)).length;
+  const inCount = totalRecs - outCount;
+  const awayFromMain = scoped.filter(r => !outMap.has(r.id) && r.locationSince === today && r.location && r.location !== DEFAULT_LOCATION).length;
+  const picking = MOVE_MODE;
+  const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong></div>` : "";
+
+  const pips = byPlt => Object.keys(byPlt).sort().map(p =>
+    `<span style="white-space:nowrap;margin-right:8px">${p === "?" ? "–" : "P" + p} <strong style="color:var(--text)">${byPlt[p]}</strong></span>`
+  ).join("");
+  const outKindLabel = k => k === "medical" ? "Medical" : k === "leave" ? "Leave" : "Booked out";
+
+  const cards = buckets.map((b, i) => {
+    const isOut = b.kind === "out";
+    const color = mvColor(b.location, i);
+    const chips = [...b.recruits].sort((x, y) => String(x.id).localeCompare(String(y.id))).map(r => {
+      if (isOut) {
+        const info = outMap.get(r.id) || {};
+        return `<span class="mv-chip" style="cursor:default" title="${escapeAttr(info.reason || "")}"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)} <span class="mv-chip-sub">${outKindLabel(info.kind)}</span></span>`;
+      }
+      if (picking) {
+        return `<span class="mv-chip" data-d4="${r.id}" onclick="mvChipToggle(this, event)"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)}</span>`;
+      }
+      return `<span class="mv-chip" onclick="openPerson('${r.id}')"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)}</span>`;
+    }).join("");
+    const selAll = (picking && !isOut && b.count) ? `<button class="mv-selall" onclick="mvSelectAllInCard('${escapeAttr(b.location)}', event)">✓ Pick all ${b.count} here</button>` : "";
+    const body = b.count ? `<div class="mv-chips">${chips}</div>` : `<div class="mv-empty">Empty${picking && !isOut ? " — tap to drop here" : ""}</div>`;
+    const dropTarget = (picking && !isOut) ? ` onclick="mvCardDrop('${escapeAttr(b.location)}', event)"` : "";
+    return `
+      <div class="mv-card${isOut ? " mv-out" : ""}" data-loc="${escapeAttr(b.location)}"${dropTarget}>
+        <div class="mv-card-head">
+          <h3 class="mv-name"><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${color};margin-right:8px;vertical-align:middle"></span>${isOut ? "🚪 " : ""}${b.location}</h3>
+          <div class="mv-count" style="color:${color}">${b.count}</div>
+        </div>
+        <div class="mv-pips">${b.count ? pips(b.byPlt) : "&nbsp;"}</div>
+        ${selAll}
+        ${body}
+      </div>`;
+  }).join("");
+
+  const actions = picking
+    ? `<button class="btn btn-success" onclick="exitMoveMode()">✓ Done</button>
+       <button class="btn" onclick="openMoveForm()" title="Manual checklist picker (backup)">📋 List picker</button>`
+    : `<button class="btn btn-primary" onclick="enterMoveMode()">🚶 Move Bodies</button>
+       ${awayFromMain ? `<button class="btn btn-success" onclick="recallAll()" title="Send everyone in camp back to ${DEFAULT_LOCATION}">↩ Recall all (${awayFromMain})</button>` : ""}
+       <button class="btn" onclick="openLocationsForm()" title="Add / rename / remove locations">⚙ Locations</button>`;
+
+  const banner = picking
+    ? `<div class="mv-pick-banner">👉 Pick a unit below (or tap individual recruits), then tap where they go — at the drop bar or a location card.</div>`
+    : "";
+
+  // Quick-pick units — the fast path for a spec on the ground: one tap toggles a
+  // whole platoon / program / group of in-camp recruits. Only units that have
+  // in-camp members in the current scope are shown (no dead buttons).
+  let quickpick = "";
+  if (picking) {
+    const inCampScoped = scoped.filter(r => !outMap.has(r.id));
+    const plts = [...new Set(inCampScoped.map(getPlt).filter(Boolean))].sort();
+    const progs = [...new Set(inCampScoped.map(programOf).filter(p => p && p !== PROGRAM_COMBINED))].sort();
+    const groups = allGroupNames().filter(g => inCampScoped.some(r => recruitInGroup(r, g)));
+    const qp = (kind, val, label) => `<button class="mv-qp" data-kind="${kind}" data-val="${escapeAttr(val)}" onclick="mvQuickPickEl(this)">${label}</button>`;
+    quickpick = `
+      <div class="mv-quickpick">
+        <span class="mv-qp-label">Pick a unit:</span>
+        ${qp("all", "", "All in camp")}
+        ${plts.map(p => qp("plt", p, "P" + p)).join("")}
+        ${progs.map(pr => qp("prog", pr, escapeAttr(programLabel(pr)))).join("")}
+        ${groups.map(g => qp("group", g, "⦿ " + escapeAttr(g))).join("")}
+      </div>`;
+  }
+
+  const dests = picking
+    ? (STATE.locations || []).map(loc => `<button class="mv-dest" style="border-color:${mvColor(loc, (STATE.locations || []).indexOf(loc))}88" onclick="mvDropTo('${escapeAttr(loc)}')">${loc === DEFAULT_LOCATION ? "🏠 " : ""}${loc}</button>`).join("")
+      + `<button class="mv-dest" style="border-style:dashed" onclick="mvDropToNew()">＋ New place</button>`
+    : "";
+  const movebar = picking ? `
+    <div class="mv-movebar">
+      <div class="mv-movebar-top">
+        <div class="mv-movebar-count"><span id="mv-sel-count">0</span> picked — drop them at:</div>
+        <button class="btn" onclick="exitMoveMode()">✕ Cancel</button>
+      </div>
+      <div class="mv-dests">${dests}</div>
+    </div>` : "";
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <h2 style="font-size:18px;font-weight:700">🚶 Movement Board <span style="font-size:12px;color:var(--dim);font-weight:400">${isoToDisplayDate(today)}</span></h2>
+      <div class="mv-actions">${actions}</div>
+    </div>
+    ${scopeBanner}
+    ${banner}
+    ${quickpick}
+    <div class="stats-row" style="margin-top:2px">
+      <div class="stat"><label>Recruits</label><div class="val">${totalRecs}</div></div>
+      <div class="stat"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCount}</div></div>
+      <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${outCount}</div></div>
+    </div>
+    <div class="mv-grid${picking ? " picking" : ""}">${cards}</div>
+    ${movebar}
+    <div style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.5">Movement is day-scoped — bodies auto-return to ${DEFAULT_LOCATION} tomorrow. Card counts sum to Recruits (${totalRecs}). Out-of-camp bodies (MC / leave / booked out) are managed from Medical / Leave / Book Out.</div>`;
+
+  // Preserve scroll across a move-mode re-render (render() reset it to 0).
+  if (picking && _mvScroll) { el.scrollTop = _mvScroll; _mvScroll = 0; }
+}
+
+// ── Move-mode interactions (pure DOM — no re-render until a drop commits) ──
+function enterMoveMode() { MOVE_MODE = true; render(); }
+function exitMoveMode() { MOVE_MODE = false; render(); }
+function mvChipToggle(chip, ev) { ev.stopPropagation(); chip.classList.toggle("sel"); mvUpdateCount(); }
+function mvSelectedIds() { return [...document.querySelectorAll(".mv-chip.sel[data-d4]")].map(c => c.dataset.d4); }
+function mvUpdateCount() {
+  const el = document.getElementById("mv-sel-count");
+  if (el) el.textContent = document.querySelectorAll(".mv-chip.sel[data-d4]").length;
+}
+function mvSelectAllInCard(loc, ev) {
+  ev.stopPropagation();
+  const card = [...document.querySelectorAll(".mv-card")].find(c => c.dataset.loc === loc);
+  if (card) card.querySelectorAll(".mv-chip[data-d4]").forEach(c => c.classList.add("sel"));
+  mvUpdateCount();
+}
+// Quick-pick a whole unit (platoon / program / group / all) — in-camp, in-scope
+// recruits only. TOGGLES as a group: if the unit is already fully picked, it
+// clears; otherwise it selects the lot. Lets a spec build "P1 + sick party" or
+// peel a unit back off with repeated taps.
+function mvUnitIds(kind, val) {
+  const visible = visibleD4Set();
+  const outMap = outOfCampMap(todayISO());
+  return STATE.roster.filter(r => {
+    if (r.role === "Commander" || outMap.has(r.id) || !passesFilter(r.id, visible)) return false;
+    if (kind === "all") return true;
+    if (kind === "plt") return getPlt(r) === String(val);
+    if (kind === "prog") return programOf(r) === val;
+    if (kind === "group") return recruitInGroup(r, val);
+    return false;
+  }).map(r => r.id);
+}
+function mvQuickPick(kind, val) {
+  const chips = mvUnitIds(kind, val).map(id => document.querySelector(`.mv-chip[data-d4="${id}"]`)).filter(Boolean);
+  if (!chips.length) return;
+  const allSel = chips.every(c => c.classList.contains("sel"));
+  chips.forEach(c => c.classList.toggle("sel", !allSel));   // toggle the whole unit at once
+  mvUpdateCount();
+}
+function mvQuickPickEl(el) { mvQuickPick(el.dataset.kind, el.dataset.val); }
+// Drop via a big destination button — explicit intent, so nudge if empty.
+function mvDropTo(loc) {
+  const ids = mvSelectedIds();
+  if (!ids.length) { alert("Tap some recruits first, then choose where to drop them."); return; }
+  _mvScroll = document.getElementById("content")?.scrollTop || 0;
+  moveToLocation(ids, loc);   // re-renders; MOVE_MODE stays on for the next move
+}
+// Drop by tapping a location card — silent no-op when nothing is picked, so an
+// accidental card tap doesn't nag.
+function mvCardDrop(loc, ev) {
+  if (!MOVE_MODE) return;
+  const ids = mvSelectedIds();
+  if (!ids.length) return;
+  _mvScroll = document.getElementById("content")?.scrollTop || 0;
+  moveToLocation(ids, loc);
+}
+function mvDropToNew() {
+  if (!mvSelectedIds().length) { alert("Tap some recruits first."); return; }
+  openModal("New place", `
+    <form onsubmit="event.preventDefault(); mvSubmitNewDrop(); return false">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${formField("f-mv-new", "Location name", "text", "e.g. Parade Square", `required maxlength="40"`)}
+        <button class="btn btn-primary" type="submit">Drop ${mvSelectedIds().length} here</button>
+      </div>
+    </form>`);
+}
+function mvSubmitNewDrop() {
+  const name = (gv("f-mv-new") || "").trim();
+  if (!name) return;
+  if (/^out of camp$/i.test(name)) { alert('"Out of Camp" is reserved.'); return; }
+  if (name !== DEFAULT_LOCATION && !(STATE.locations || []).includes(name)) { STATE.locations.push(name); saveLocations(); }
+  const ids = mvSelectedIds();   // chips still live in #content behind the modal
+  closeModal();
+  _mvScroll = document.getElementById("content")?.scrollTop || 0;
+  moveToLocation(ids, name);
 }
 
 function renderAttendance(el) {

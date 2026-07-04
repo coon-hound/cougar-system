@@ -1392,8 +1392,8 @@ function bookInTargets(scope) {
   return [];
 }
 
-// Bulk book-out for TODAY — optimistic local update, then one row-scoped upsert
-// per changed recruit. Only recruits currently IN camp are affected; anyone already out (MC/
+// Bulk book-out for TODAY — mirrors moveToLocation's optimistic + N-upsert
+// pattern. Only recruits currently IN camp are affected; anyone already out (MC/
 // leave/booked out) is skipped so we never stamp a manual reason over a record.
 // Day-scoped (outSince === today) so the whole batch auto-clears tomorrow.
 function bookOutMany(d4s, reason) {
@@ -1523,10 +1523,174 @@ function submitBookOut(dir) {
   closeModal();
 }
 
+// ── Movement board mutations + forms ─────────────────────────
+// Move one or more recruits to an in-camp location for TODAY. Day-scoped
+// (locationSince === today) exactly like a manual book-out, so it auto-clears
+// tomorrow with no cron. Optimistic: STATE + render() update instantly, then
+// each Roster row upserts (row-scoped, cross-device-safe). Moving to
+// DEFAULT_LOCATION clears the fields. A body that's OUT of camp isn't on the
+// in-camp board, so it's skipped — movement never touches out-of-camp state.
+function moveToLocation(d4s, location) {
+  const ids = Array.isArray(d4s) ? d4s : [d4s];
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const toDefault = !location || location === DEFAULT_LOCATION;
+  const moved = [];
+  ids.forEach(d4 => {
+    const r = STATE.roster.find(x => x.id === d4);
+    if (!r || r.role === "Commander" || outMap.has(d4)) return;
+    if (toDefault) { r.location = ""; r.locationSince = ""; }
+    else { r.location = location; r.locationSince = today; }
+    moved.push(r);
+  });
+  if (!moved.length) return;
+  saveLocal(); render();
+  // N sequential row upserts through the per-tab queue. Fine for squad sizes;
+  // the local update already landed so the UI never waits on the network.
+  if (STATE.apiUrl) moved.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+}
+
+// One-tap automation: send everyone currently in camp back to DEFAULT_LOCATION
+// (end-of-activity recall). Out-of-camp bodies are untouched. The manual per-
+// move flow remains the backup for anything finer-grained.
+function recallAll() {
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const ids = STATE.roster
+    .filter(r => r.role !== "Commander" && !outMap.has(r.id) && r.locationSince === today && r.location && r.location !== DEFAULT_LOCATION)
+    .map(r => r.id);
+  if (!ids.length) { alert(`Everyone in camp is already at ${DEFAULT_LOCATION}.`); return; }
+  if (!confirm(`Recall all ${ids.length} recruit${ids.length === 1 ? "" : "s"} back to ${DEFAULT_LOCATION}?`)) return;
+  moveToLocation(ids, DEFAULT_LOCATION);
+}
+
+// Toggle every checkbox in a platoon group (or all, when plt === "*").
+function moveToggleGroup(master, plt) {
+  const sel = plt === "*"
+    ? "#move-recruit-list input[type=checkbox][data-d4]"
+    : `#move-recruit-list input[type=checkbox][data-plt="${CSS.escape(plt)}"]`;
+  document.querySelectorAll(sel).forEach(el => { el.checked = master.checked; });
+}
+
+// Primary movement input: pick a destination + check who's moving. In-camp
+// recruits only (out-of-camp bodies are managed by medical/leave/book-out),
+// grouped by platoon with per-group select-all so a whole squad moves in a tap.
+// `preselectId` pre-checks one recruit for the per-card quick-move path.
+function openMoveForm(preselectId) {
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const recruits = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
+  if (!recruits.length) {
+    openModal("🚶 Move Bodies", `<div class="empty-state" style="padding:16px;font-size:12px">No in-camp recruits to move — everyone is out of camp or the roster is empty.</div>`);
+    return;
+  }
+  const curLoc = r => (r.locationSince === today && r.location) ? r.location : DEFAULT_LOCATION;
+  const byPlt = {};
+  recruits.forEach(r => { const p = getPlt(r) || "?"; (byPlt[p] = byPlt[p] || []).push(r); });
+  const groups = Object.keys(byPlt).sort().map(p => {
+    const rows = byPlt[p].sort((a, b) => String(a.id).localeCompare(String(b.id))).map(r => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;background:var(--surface2)">
+        <input type="checkbox" data-d4="${r.id}" data-plt="${escapeAttr(p)}" ${r.id === preselectId ? "checked" : ""} style="width:14px;height:14px;cursor:pointer">
+        <span class="mono" style="font-weight:700;color:var(--accent);font-size:11px;min-width:34px">${displayId(r.id)}</span>
+        <span style="font-size:12px;flex:1">${displayPersonLabel(r.id)}</span>
+        <span style="font-size:10px;color:var(--muted)">${curLoc(r)}</span>
+      </label>`).join("");
+    return `
+      <div style="margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;cursor:pointer">
+          <input type="checkbox" onchange="moveToggleGroup(this, '${escapeAttr(p)}')" style="width:14px;height:14px;cursor:pointer"> Platoon ${p} <span style="font-weight:400">(${byPlt[p].length})</span>
+        </label>
+        <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+      </div>`;
+  }).join("");
+
+  openModal("🚶 Move Bodies", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Pick who's moving and where to. Movement is for <strong>today</strong> only — everyone auto-returns to ${DEFAULT_LOCATION} tomorrow. Out-of-camp recruits (MC / leave / booked out) aren't shown.</div>
+      ${formSelect("f-move-loc", "Move to", STATE.locations, false, DEFAULT_LOCATION)}
+      ${formField("f-move-new", "…or a new location", "text", "e.g. Parade Square", `maxlength="40"`)}
+      <div id="move-recruit-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px;cursor:pointer">
+          <input type="checkbox" onchange="moveToggleGroup(this, '*')" style="width:14px;height:14px;cursor:pointer"> Select all in camp (${recruits.length})
+        </label>
+        ${groups}
+      </div>
+      <button class="btn btn-primary" onclick="submitMove()">Move selected</button>
+    </div>`);
+}
+function submitMove() {
+  const ids = [...document.querySelectorAll("#move-recruit-list input[type=checkbox][data-d4]:checked")].map(el => el.dataset.d4);
+  if (!ids.length) { alert("Pick at least one recruit to move."); return; }
+  const dest = ((gv("f-move-new") || "").trim()) || gv("f-move-loc") || DEFAULT_LOCATION;
+  if (/^out of camp$/i.test(dest)) { alert('"Out of Camp" is managed automatically — pick or type an in-camp location.'); return; }
+  // Register a brand-new location name so it's reusable next time.
+  if (dest !== DEFAULT_LOCATION && !(STATE.locations || []).includes(dest)) {
+    STATE.locations.push(dest); saveLocations();
+  }
+  moveToLocation(ids, dest);
+  closeModal();
+}
+
+// Manage the named location list. Rename → recruits follow; remove → recruits
+// return to DEFAULT_LOCATION; DEFAULT_LOCATION itself is protected.
+function openLocationsForm() {
+  const rows = (STATE.locations || []).map(loc => {
+    if (loc === DEFAULT_LOCATION) {
+      return `<div data-loc-row style="display:flex;align-items:center;gap:8px">
+        <input data-orig="${escapeAttr(loc)}" value="${escapeAttr(loc)}" readonly style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:12px">
+        <span style="font-size:10px;color:var(--dim);min-width:44px;text-align:right">default</span></div>`;
+    }
+    return `<div data-loc-row style="display:flex;align-items:center;gap:8px">
+      <input data-orig="${escapeAttr(loc)}" value="${escapeAttr(loc)}" maxlength="40" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px">
+      <button type="button" class="btn btn-danger" style="padding:4px 10px" onclick="this.closest('[data-loc-row]').remove()">✕</button></div>`;
+  }).join("");
+  openModal("⚙ Manage Locations", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Rename a location and its recruits move with it. Remove one (✕) and its recruits return to ${DEFAULT_LOCATION}. ${DEFAULT_LOCATION} is the default and can't be removed.</div>
+      <div id="loc-list" style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+      ${formField("f-loc-new", "Add a location", "text", "e.g. Parade Square", `maxlength="40"`)}
+      <button class="btn btn-primary" onclick="submitLocations()">Save locations</button>
+    </div>`);
+}
+function submitLocations() {
+  const inputs = [...document.querySelectorAll("#loc-list [data-loc-row] input[data-orig]")];
+  const newList = [DEFAULT_LOCATION];
+  const renameMap = {};   // orig name → new name (kept rows only)
+  for (const inp of inputs) {
+    const orig = inp.dataset.orig;
+    const val = (inp.value || "").trim();
+    if (orig === DEFAULT_LOCATION) continue;   // fixed, already seeded
+    if (!val) continue;                        // emptied → treated as removed
+    if (/^out of camp$/i.test(val)) { alert('"Out of Camp" is reserved.'); return; }
+    if (!newList.includes(val)) newList.push(val);
+    renameMap[orig] = val;
+  }
+  const add = (gv("f-loc-new") || "").trim();
+  if (add) {
+    if (/^out of camp$/i.test(add)) { alert('"Out of Camp" is reserved.'); return; }
+    if (!newList.includes(add)) newList.push(add);
+  }
+  // Migrate recruits whose current (fresh) location was renamed or removed.
+  const today = todayISO();
+  const changed = [];
+  STATE.roster.forEach(r => {
+    if (r.role === "Commander" || r.locationSince !== today || !r.location || r.location === DEFAULT_LOCATION) return;
+    const renamed = renameMap[r.location];
+    if (renamed && renamed !== r.location) { r.location = renamed; changed.push(r); }
+    else if (!newList.includes(r.location)) { r.location = ""; r.locationSince = ""; changed.push(r); }
+  });
+  STATE.locations = newList; saveLocations();
+  if (changed.length) {
+    saveLocal();
+    if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+  }
+  closeModal(); render();
+}
+
 // ── Recruit groups: mutations + management UI ────────────────
 // A group's membership is stored on each recruit's `groups` tag. Setting the
-// FULL membership in one batch: optimistic local update, then N row-scoped
-// upserts. Persistent (NOT day-scoped) — a group assignment
+// FULL membership in one batch mirrors moveToLocation (optimistic local update,
+// then N row-scoped upserts). Persistent (NOT day-scoped) — a group assignment
 // stays until changed. Commanders are never grouped (strength convention).
 function setGroupMembers(name, d4s) {
   name = String(name || "").trim();
