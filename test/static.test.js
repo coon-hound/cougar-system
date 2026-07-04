@@ -63,4 +63,24 @@ module.exports = async function run() {
     }
     ok(offenders.length === 0, "tracked-tab writes missing a nearby bumpRev:\n   " + offenders.join("\n   "));
   });
+
+  suite("static: data rows are written as plain text (no date/time coercion)");
+
+  // (d) Sheets auto-coerces strings like "12:30" (a 2.4km run time) into time/date
+  // serials on setValues, corrupting them (the IPPT run-time charts vanished). Data
+  // rows must go through setValuesAsText (which sets "@" plain-text format first).
+  // A raw `.setValues(<data payload>)` is a regression. Header/missing-column
+  // writes (row 1) stay raw and are fine.
+  await test("data-row writes go through setValuesAsText, not raw setValues", () => {
+    const gs = fs.readFileSync(path.join(ROOT, "apps-script-Code.gs"), "utf8").split("\n");
+    const payloads = ["rows", "newRow", "newRows", "updatedRow"]; // the data-row variables
+    const offenders = [];
+    for (let i = 0; i < gs.length; i++) {
+      const line = gs[i];
+      const mm = line.match(/\.setValues\(\s*\[?\s*([A-Za-z_]\w*)/);
+      if (!mm) continue;
+      if (payloads.indexOf(mm[1]) !== -1) offenders.push((i + 1) + ": " + line.trim());
+    }
+    ok(offenders.length === 0, "data rows written with raw setValues (should be setValuesAsText):\n   " + offenders.join("\n   "));
+  });
 };
