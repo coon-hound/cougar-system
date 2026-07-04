@@ -47,17 +47,20 @@ function openPerson(d4) {
     : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}${prog ? " " + programBadge(prog) : ""}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ───────
-  // Reflects the shared out-of-camp computation. Medical/leave are managed by
-  // their own records (no toggle); only the manual book-out is toggled here.
+  // Reflects the shared out-of-camp computation. The lever always offers the
+  // opposite of the effective state: out (any reason, incl. MC/leave) → Book In,
+  // which counts them present for today; in camp → Book Out. A present-override
+  // over an MC/leave reason shows as a teal "IN CAMP (MANUAL)" pill.
   const campInfo = outOfCampMap(todayISO()).get(d4);
-  const booked = isBookedOut(p, todayISO());
+  const forcedInHere = !campInfo && isForcedIn(p, todayISO()) && derivedCampOut(d4, todayISO());
   const pill = (txt, bg) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:${bg}22;color:${bg}">${txt}</span>`;
   html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-    ${campInfo ? pill("OUT OF CAMP", "#F85149") : pill("IN CAMP", "#3FB950")}
+    ${campInfo ? pill("OUT OF CAMP", "#F85149") : forcedInHere ? pill("IN CAMP (MANUAL)", "#39D2C0") : pill("IN CAMP", "#3FB950")}
     ${campInfo ? `<span style="font-size:11px;color:var(--muted)">${escapeAttr(campInfo.reason || "")}</span>` : ""}
     ${campInfo && campInfo.kind !== "bookedout"
-      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
-      : `<button class="btn ${booked ? "btn-success" : "btn-danger"}" style="font-size:11px;padding:4px 10px" onclick="bookOutToggle('${d4}', ${booked ? "false" : "true"}, 'Out of camp'); openPerson('${d4}')">${booked ? "↩ Book In" : "🚪 Book Out"}</button>`}
+      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record — Book In counts them present today)</span>`
+      : forcedInHere ? `<span style="font-size:10px;color:var(--dim)">(would be out: ${escapeAttr(forcedInHere.reason || "")}; resets tomorrow)</span>` : ""}
+    <button class="btn ${campInfo ? "btn-success" : "btn-danger"}" style="font-size:11px;padding:4px 10px" onclick="bookOutToggle('${d4}', ${campInfo ? "false" : "true"}, 'Out of camp'); openPerson('${d4}')">${campInfo ? "↩ Book In" : "🚪 Book Out"}</button>
   </div>`;
 
   // ── Profile section ──────────────────────────────────
@@ -1334,38 +1337,362 @@ function toggleAppointmentResolved(id) {
 function bookOutToggle(d4, on, reason) {
   const r = STATE.roster.find(x => x.id === d4);
   if (!r) return;
-  if (on === undefined) on = !isBookedOut(r, todayISO());
+  const today = todayISO();
+  if (on === undefined) on = !outOfCampMap(today).has(d4);   // toggle the EFFECTIVE camp state
   if (on) {
+    // Book out — manual out for today. Clears any present-override.
     r.outOfCamp = true;
     r.outReason = reason || r.outReason || "Out of camp";
-    r.outSince = todayISO();
+    r.outSince = today;
+    r.campIn = false;
+    r.campInSince = "";
   } else {
+    // Book in — clear any manual book-out. If they'd STILL be out for a medical
+    // or leave reason, set a manual present-override so they count in camp today
+    // (auto-clears tomorrow); otherwise just return them to the derived state.
     r.outOfCamp = false;
     r.outReason = "";
     r.outSince = "";
+    if (derivedCampOut(d4, today)) {
+      r.campIn = true;
+      r.campInSince = today;
+    } else {
+      r.campIn = false;
+      r.campInSince = "";
+    }
   }
   saveLocal(); render();
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
 }
 
-// Ad-hoc "book out" picker (dashboard "+ Book Out"): choose any in-camp recruit
-// + a reason, then mark them booked out for today.
+// In-camp recruits (commanders excluded, anyone already out skipped) matching a
+// book-out scope: "company", "plt:<n>", or "prog:<key>". THE definition of who a
+// bulk book-out targets, shared by the picker's live counts and submit.
+function bookOutTargets(scope) {
+  const outMap = outOfCampMap(todayISO());
+  const inCamp = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
+  if (scope === "company") return inCamp;
+  if (scope && scope.indexOf("plt:") === 0) { const p = scope.slice(4); return inCamp.filter(r => getPlt(r) === p); }
+  if (scope && scope.indexOf("prog:") === 0) { const k = scope.slice(5); return inCamp.filter(r => programOf(r) === k); }
+  if (scope && scope.indexOf("grp:") === 0) { const g = scope.slice(4); return inCamp.filter(r => recruitInGroup(r, g)); }
+  if (scope && scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return inCamp.filter(r => set.has(r.id)); }
+  return [];
+}
+
+// Bulk book-out for TODAY — optimistic local update, then one row-scoped upsert
+// per changed recruit. Only recruits currently IN camp are affected; anyone already out (MC/
+// leave/booked out) is skipped so we never stamp a manual reason over a record.
+// Day-scoped (outSince === today) so the whole batch auto-clears tomorrow.
+function bookOutMany(d4s, reason) {
+  const ids = Array.isArray(d4s) ? d4s : [d4s];
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const booked = [];
+  ids.forEach(d4 => {
+    const r = STATE.roster.find(x => x.id === d4);
+    if (!r || r.role === "Commander" || outMap.has(d4)) return;
+    r.outOfCamp = true;
+    r.outReason = reason || "Out of camp";
+    r.outSince = today;
+    r.campIn = false;
+    r.campInSince = "";
+    booked.push(r);
+  });
+  if (!booked.length) return 0;
+  saveLocal(); render();
+  if (STATE.apiUrl) booked.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+  return booked.length;
+}
+
+// Ad-hoc "book out" picker (dashboard "+ Book Out"): book out a single recruit,
+// or a whole company / platoon / training program in one tap. Scope options show
+// the live count of in-camp recruits they'd affect.
 function openBookOutPicker() {
+  const outMap = outOfCampMap(todayISO());
+  const inCamp = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
+  const platoons = [...new Set(inCamp.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => inCamp.some(r => programOf(r) === pr.key));
+  const groups = allGroupNames().filter(g => inCamp.some(r => recruitInGroup(r, g)));
+  const inCampIds = new Set(inCamp.map(r => r.id));
+  const combined = allCombinedNames();
+  const scopeOpts = [
+    `<option value="recruit">One recruit…</option>`,
+    `<option value="company">Whole company (${inCamp.length})</option>`,
+    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${inCamp.filter(r => getPlt(r) === p).length})</option>`),
+    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${inCamp.filter(r => programOf(r) === pr.key).length})</option>`),
+    ...groups.map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${inCamp.filter(r => recruitInGroup(r, g)).length})</option>`),
+    ...combined.map(n => { const c = [...combinedMemberSet(n)].filter(d => inCampIds.has(d)).length; return `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${c})</option>`; })
+  ].join("");
   openModal("Book Out of Camp", `
     <form onsubmit="event.preventDefault(); submitBookOut(); return false">
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-size:11px;color:var(--muted)">Marks the recruit out of camp for today (auto-clears tomorrow). For multi-day absences, log a Leave instead.</div>
-        <div class="form-group"><label>Recruit</label>${rosterSelect("f-bo-d4", true, "")}</div>
+        <div style="font-size:11px;color:var(--muted)">Marks recruits out of camp for today (auto-clears tomorrow). Recruits already out (MC / leave / booked out) are skipped. For multi-day absences, log a Leave instead.</div>
+        <div class="form-group"><label>Scope</label><select id="f-bo-scope" class="topbar-select" style="width:100%" onchange="onBookOutScopeChange()">${scopeOpts}</select></div>
+        <div class="form-group" id="f-bo-recruit-wrap"><label>Recruit</label>${rosterSelect("f-bo-d4", false, "")}</div>
         ${formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`)}
         <button type="submit" class="btn btn-danger">🚪 Book Out</button>
       </div>
     </form>`);
+  onBookOutScopeChange();
+}
+// Show the single-recruit dropdown only when the "One recruit" scope is picked.
+function onBookOutScopeChange() {
+  const wrap = document.getElementById("f-bo-recruit-wrap");
+  if (wrap) wrap.style.display = gv("f-bo-scope") === "recruit" ? "" : "none";
 }
 function submitBookOut() {
-  const d4 = gv("f-bo-d4");
-  if (!d4) { alert("Pick a recruit first."); return; }
-  bookOutToggle(d4, true, gv("f-bo-reason") || "Out of camp");
+  const scope = gv("f-bo-scope") || "recruit";
+  const reason = gv("f-bo-reason") || "Out of camp";
+  if (scope === "recruit") {
+    const d4 = gv("f-bo-d4");
+    if (!d4) { alert("Pick a recruit first."); return; }
+    bookOutToggle(d4, true, reason);
+    closeModal();
+    return;
+  }
+  const targets = bookOutTargets(scope).map(r => r.id);
+  if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
+  const label = scope === "company" ? "the whole company"
+    : scope.indexOf("plt:") === 0 ? "Platoon " + scope.slice(4)
+    : scope.indexOf("grp:") === 0 ? scope.slice(4)
+    : scope.indexOf("comb:") === 0 ? scope.slice(5)
+    : programLabel(scope.slice(5));
+  if (!confirm(`Book out ${targets.length} in-camp recruit${targets.length === 1 ? "" : "s"} in ${label}?\nReason: ${reason}`)) return;
+  bookOutMany(targets, reason);
   closeModal();
+}
+
+// ── Recruit groups: mutations + management UI ────────────────
+// A group's membership is stored on each recruit's `groups` tag. Setting the
+// FULL membership in one batch: optimistic local update, then N row-scoped
+// upserts. Persistent (NOT day-scoped) — a group assignment
+// stays until changed. Commanders are never grouped (strength convention).
+function setGroupMembers(name, d4s) {
+  name = String(name || "").trim();
+  if (!name) return 0;
+  const want = new Set(d4s);
+  const changed = [];
+  (STATE.roster || []).forEach(r => {
+    if (r.role === "Commander") return;
+    const has = recruitInGroup(r, name);
+    const should = want.has(r.id);
+    if (has === should) return;
+    const groups = getGroups(r).filter(g => g !== name);
+    if (should) groups.push(name);
+    r.groups = groups.join(",");
+    changed.push(r);
+  });
+  if (!changed.length) return 0;
+  saveLocal(); render();
+  if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+  return changed.length;
+}
+// Rename a group across all members (de-dupes if the target name already exists).
+function renameGroup(oldName, newName) {
+  oldName = String(oldName || "").trim(); newName = String(newName || "").trim();
+  if (!oldName || !newName || oldName === newName) return;
+  const changed = [];
+  (STATE.roster || []).forEach(r => {
+    if (!recruitInGroup(r, oldName)) return;
+    r.groups = [...new Set(getGroups(r).map(g => g === oldName ? newName : g))].join(",");
+    changed.push(r);
+  });
+  if (!changed.length) return;
+  saveLocal(); render();
+  if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+}
+// Delete a group = clear its membership (dissolves it, since names are derived).
+function deleteGroup(name) {
+  setGroupMembers(name, []);
+  if (STATE.filterGroup === name) { STATE.filterGroup = ""; saveFilter(); }
+}
+
+// Toggle every checkbox in a platoon block of the group member picker (or all
+// when plt === "*").
+function groupToggleAll(master, plt) {
+  const sel = plt === "*"
+    ? "#group-member-list input[type=checkbox][data-d4]"
+    : `#group-member-list input[type=checkbox][data-plt="${CSS.escape(plt)}"]`;
+  document.querySelectorAll(sel).forEach(el => { el.checked = master.checked; });
+}
+
+// Groups overview: rename / delete existing groups + create a new one. "Members"
+// opens the member picker for that group. Commanders are excluded everywhere.
+function openGroupsForm() {
+  const names = allGroupNames();
+  const rows = names.length ? names.map(n => `
+    <div data-grp-row style="display:flex;align-items:center;gap:8px">
+      <input data-orig="${escapeAttr(n)}" value="${escapeAttr(n)}" maxlength="40" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px">
+      <span style="font-size:10px;color:var(--muted);min-width:52px;text-align:right">${groupMembers(n).length} rec</span>
+      <button type="button" class="btn" style="padding:4px 10px" onclick="openGroupMembersForm('${escapeAttr(n)}')" title="Edit members">✎ Members</button>
+      <button type="button" class="btn btn-danger" style="padding:4px 10px" onclick="if(confirm('Delete group ${escapeAttr(n)}? Members keep their other groups.')){deleteGroup('${escapeAttr(n)}');openGroupsForm();}">✕</button>
+    </div>`).join("") : `<div class="empty-state" style="padding:10px;font-size:11px">No groups yet. Create one below, then pick its members.</div>`;
+  const combRows = (STATE.combinedGroups || []).length ? (STATE.combinedGroups || []).map(c => `
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:12px">▣ ${escapeAttr(c.name)}</div>
+        <div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeAttr(combinedFormula(c))} = ${combinedMemberSet(c.name).size} rec</div>
+      </div>
+      <button type="button" class="btn" style="padding:4px 10px" onclick="openCombinedForm('${escapeAttr(c.name)}')" title="Edit formula">✎</button>
+      <button type="button" class="btn btn-danger" style="padding:4px 10px" onclick="if(confirm('Delete combined group ${escapeAttr(c.name)}?')){deleteCombined('${escapeAttr(c.name)}')}">✕</button>
+    </div>`).join("") : `<div class="empty-state" style="padding:10px;font-size:11px">No combined groups yet — e.g. "P4 − Guard Duty".</div>`;
+  openModal("⦿ Recruit Groups", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Groups are ad-hoc squads that cut across platoons (e.g. <strong>Guard Duty</strong>). Filter the whole app by a group, or book a group out on its own. Rename a group and its members follow; membership persists until you change it.</div>
+      <div id="grp-list" style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <div class="form-group" style="flex:1;margin:0"><label>New group</label><input id="f-grp-new" type="text" placeholder="e.g. Guard Duty" maxlength="40"></div>
+        <button class="btn btn-primary" onclick="createGroupThenPick()">Create + pick members</button>
+      </div>
+      <button class="btn" onclick="submitGroupNames()">Save names</button>
+      <div style="border-top:1px solid var(--border);margin:4px 0"></div>
+      <div style="font-size:12px;font-weight:700;color:var(--text)">▣ Combined groups <span style="font-weight:400;color:var(--muted);font-size:11px">— mix platoons / programs / groups with + and −</span></div>
+      <div style="display:flex;flex-direction:column;gap:6px">${combRows}</div>
+      <button class="btn btn-primary" onclick="openCombinedForm()">＋ New combined group</button>
+    </div>`);
+}
+// Apply inline renames from the overview (delete is immediate via its button).
+function submitGroupNames() {
+  const inputs = [...document.querySelectorAll("#grp-list [data-grp-row] input[data-orig]")];
+  for (const inp of inputs) {
+    const orig = inp.dataset.orig;
+    const val = (inp.value || "").trim();
+    if (!val) { alert("Group names can't be empty — use ✕ to delete a group."); return; }
+    if (val.indexOf(",") !== -1) { alert("Group names can't contain a comma."); return; }
+    if (val !== orig) renameGroup(orig, val);
+  }
+  closeModal(); render();
+}
+function createGroupThenPick() {
+  const name = (gv("f-grp-new") || "").trim();
+  if (!name) { alert("Enter a group name first."); return; }
+  if (name.indexOf(",") !== -1) { alert("Group names can't contain a comma."); return; }
+  if (allGroupNames().includes(name)) { alert("That group already exists."); return; }
+  openGroupMembersForm(name);
+}
+
+// Member picker for one group: ALL recruits (group membership isn't camp-scoped),
+// grouped by platoon with per-block select-all. Ticked = member. Save replaces
+// the group's membership with exactly the ticked set.
+function openGroupMembersForm(name) {
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  const byPlt = {};
+  recruits.forEach(r => { const p = getPlt(r) || "?"; (byPlt[p] = byPlt[p] || []).push(r); });
+  const blocks = Object.keys(byPlt).sort().map(p => {
+    const rows = byPlt[p].sort((a, b) => String(a.id).localeCompare(String(b.id))).map(r => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;background:var(--surface2)">
+        <input type="checkbox" data-d4="${r.id}" data-plt="${escapeAttr(p)}" ${recruitInGroup(r, name) ? "checked" : ""} style="width:14px;height:14px;cursor:pointer">
+        <span class="mono" style="font-weight:700;color:var(--accent);font-size:11px;min-width:34px">${displayId(r.id)}</span>
+        <span style="font-size:12px;flex:1">${displayPersonLabel(r.id)}</span>
+        <span style="font-size:10px;color:var(--muted)">${getGroups(r).filter(g => g !== name).join(", ")}</span>
+      </label>`).join("");
+    return `<div style="margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;cursor:pointer">
+        <input type="checkbox" onchange="groupToggleAll(this, '${escapeAttr(p)}')" style="width:14px;height:14px;cursor:pointer"> Platoon ${p} <span style="font-weight:400">(${byPlt[p].length})</span>
+      </label>
+      <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+    </div>`;
+  }).join("");
+  openModal(`⦿ ${name} — members`, `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted)">Tick everyone in <strong>${escapeAttr(name)}</strong>. Saving replaces the group's members with exactly who's ticked.</div>
+      <div id="group-member-list" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px;cursor:pointer">
+          <input type="checkbox" onchange="groupToggleAll(this, '*')" style="width:14px;height:14px;cursor:pointer"> Select all (${recruits.length})
+        </label>
+        ${blocks}
+      </div>
+      <button class="btn btn-primary" onclick="submitGroupMembers('${escapeAttr(name)}')">Save members</button>
+    </div>`);
+}
+function submitGroupMembers(name) {
+  const ids = [...document.querySelectorAll("#group-member-list input[type=checkbox][data-d4]:checked")].map(el => el.dataset.d4);
+  setGroupMembers(name, ids);
+  closeModal(); render();
+}
+
+// ── Combined-group builder (tristate chips) ──────────────────
+// The chips a combined group can mix: whole company, each platoon, each program,
+// each plain group. Tap a chip to cycle neutral → include(+) → exclude(−).
+let _combBuilder = null;
+function combTokens() {
+  const toks = ["company"];
+  [...new Set(STATE.roster.filter(r => r.role !== "Commander").map(getPlt).filter(Boolean))].sort().forEach(p => toks.push("plt:" + p));
+  (STATE.programs || []).forEach(pr => toks.push("prog:" + pr.key));
+  allGroupNames().forEach(g => toks.push("grp:" + g));
+  return toks;
+}
+function openCombinedForm(name) {
+  const def = name ? combinedByName(name) : null;
+  _combBuilder = {
+    editing: name || "",
+    name: def ? def.name : "",
+    include: new Set(def ? def.include : []),
+    exclude: new Set(def ? def.exclude : []),
+    autoName: !def   // keep name synced to the formula until the user types
+  };
+  renderCombinedForm();
+}
+// Cycle a chip: neutral → include → exclude → neutral.
+function combCycle(token) {
+  const b = _combBuilder;
+  if (b.include.has(token)) { b.include.delete(token); b.exclude.add(token); }
+  else if (b.exclude.has(token)) { b.exclude.delete(token); }
+  else { b.include.add(token); }
+  renderCombinedForm();
+}
+function combNameInput(v) { _combBuilder.name = v; _combBuilder.autoName = false; }
+function renderCombinedForm() {
+  const b = _combBuilder;
+  const def = { include: [...b.include], exclude: [...b.exclude] };
+  const formula = combinedFormula(def);
+  const count = b.include.size ? combinedMemberSetFromDef(def).size : 0;
+  if (b.autoName) b.name = formula === "∅" ? "" : formula.replace(/⦿ /g, "");
+  const chips = combTokens().map(tok => {
+    const inc = b.include.has(tok), exc = b.exclude.has(tok);
+    const bg = inc ? "#3FB950" : exc ? "#F85149" : "transparent";
+    const bd = inc ? "#3FB950" : exc ? "#F85149" : "var(--border)";
+    const col = (inc || exc) ? "#0D1117" : "var(--muted)";
+    const sign = inc ? "+ " : exc ? "− " : "";
+    return `<button type="button" onclick="combCycle('${escapeAttr(tok)}')" style="padding:6px 11px;border-radius:14px;border:1px solid ${bd};background:${bg};color:${col};font-weight:600;font-size:12px;cursor:pointer">${sign}${escapeAttr(scopeTokenLabel(tok))}</button>`;
+  }).join("");
+  openModal(b.editing ? `▣ Edit ${b.editing}` : "▣ New combined group", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Tap a chip once to <span style="color:var(--green);font-weight:700">include (+)</span>, again to <span style="color:var(--red);font-weight:700">exclude (−)</span>, again to clear. e.g. tap <strong>P4</strong>, then tap <strong>⦿ Guard Duty</strong> twice → "P4 − Guard Duty".</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Formula</div>
+        <div style="font-size:13px;font-weight:700">${escapeAttr(formula)} <span style="color:var(--accent);font-weight:600">= ${count} recruit${count === 1 ? "" : "s"}</span></div>
+      </div>
+      <div class="form-group" style="margin:0"><label>Name</label><input id="f-comb-name" type="text" value="${escapeAttr(b.name)}" oninput="combNameInput(this.value)" placeholder="Auto from formula" maxlength="40"></div>
+      <button class="btn btn-primary" onclick="submitCombined()">${b.editing ? "Save changes" : "Create combined group"}</button>
+    </div>`);
+}
+function submitCombined() {
+  const b = _combBuilder;
+  if (!b.include.size) { alert("Tap at least one chip to INCLUDE (green +) first."); return; }
+  let name = (b.name || "").trim() || combinedFormula({ include: [...b.include], exclude: [...b.exclude] }).replace(/⦿ /g, "");
+  name = name.replace(/,/g, "").trim();
+  if (!name) { alert("Give the combined group a name."); return; }
+  const list = STATE.combinedGroups || [];
+  const def = { name, include: [...b.include], exclude: [...b.exclude] };
+  if (b.editing) {
+    const i = list.findIndex(c => c.name === b.editing);
+    if (i >= 0) list[i] = def; else list.push(def);
+    if (STATE.filterGroup === "c:" + b.editing) { STATE.filterGroup = "c:" + name; saveFilter(); }
+  } else {
+    if (list.some(c => c.name === name)) { alert("A combined group with that name already exists."); return; }
+    list.push(def);
+  }
+  STATE.combinedGroups = list; saveCombinedGroups();
+  _combBuilder = null;
+  openGroupsForm(); render();
+}
+function deleteCombined(name) {
+  STATE.combinedGroups = (STATE.combinedGroups || []).filter(c => c.name !== name);
+  saveCombinedGroups();
+  if (STATE.filterGroup === "c:" + name) { STATE.filterGroup = ""; saveFilter(); }
+  openGroupsForm(); render();
 }
 
 // Lightweight roster-add form scoped to commanders. Recruits are added via
@@ -1421,6 +1748,20 @@ function openLeaveForm(id) {
   const e = id ? STATE.leave.find(x => x.id === id) : null;
   const startVal = e ? displayDateToISO(e.startDate) || todayISO() : todayISO();
   const endVal = e ? displayDateToISO(e.endDate) || todayISO() : todayISO();
+  // Bulk scope options (add mode only): a whole platoon / program / group /
+  // combined group on leave in one entry. Counts are recruits in the scope.
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
+  const cnt = s => scopeRecruits(s).length;
+  const scopeOpts = [
+    `<option value="person">One person…</option>`,
+    `<option value="company">Whole company (${recruits.length})</option>`,
+    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt("plt:" + p)})</option>`),
+    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt("prog:" + pr.key)})</option>`),
+    ...allGroupNames().map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt("grp:" + g)})</option>`),
+    ...allCombinedNames().map(n => `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt("comb:" + n)})</option>`)
+  ].join("");
   openModal(e ? "Edit Leave/Out Entry" : "Log Leave / Out", `
     <form onsubmit="event.preventDefault(); submitLeave(); return false">
       <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
@@ -1431,7 +1772,8 @@ function openLeaveForm(id) {
           <div><strong>Off-in-Lieu</strong> — counts against the commander's quota.</div>
           <div><strong>Leave / Compassionate / Course / Guard Duty / NDP / Other</strong> — tracked but doesn't decrement the off balance.</div>
         </div>
-        <div class="form-group"><label>Person</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
+        ${e ? "" : `<div class="form-group"><label>Apply to</label><select id="f-leave-scope" class="topbar-select" style="width:100%" onchange="onLeaveScopeChange()">${scopeOpts}</select></div>`}
+        <div class="form-group" id="f-leave-person-wrap"><label>Person</label>${rosterSelect("f-d4", false, e?.d4 || "")}</div>
         ${formSelect("f-type", "Type", [["Off-in-Lieu", "Off-in-Lieu (counts toward quota)"], ["Annual Leave", "Annual Leave"], ["Compassionate", "Compassionate Leave"], ["Weekend", "Weekend"], ["Night's Out", "Night's Out (same-day, evening off-camp)"], ["Course", "Course"], ["Guard Duty", "Guard Duty"], ["NDP", "NDP"], ["Other", "Other"]], true, e?.type || "")}
         <div class="form-row">
           ${formField("f-start", "Start date", "date", "", `required value="${startVal}" min="2020-01-01" max="2099-12-31" onchange="recalcLeaveDays()"`)}
@@ -1451,20 +1793,36 @@ function recalcLeaveDays() {
   const diff = Math.round((new Date(en.value) - new Date(s.value)) / 86400000) + 1;
   if (diff > 0) d.value = diff;
 }
+// Show the single-person picker only for the "One person" scope.
+function onLeaveScopeChange() {
+  const wrap = document.getElementById("f-leave-person-wrap");
+  if (wrap) wrap.style.display = (gv("f-leave-scope") || "person") === "person" ? "" : "none";
+}
 function submitLeave() {
   const editId = +gv("f-entry-id");
   const startIso = gv("f-start");
   const endIso = gv("f-end");
   if (endIso < startIso) { alert("End date must be on or after start date."); return; }
-  const entry = {
-    id: editId || nextId(),
-    d4: gv("f-d4"),
+  const template = {
     type: gv("f-type"),
     startDate: isoToDisplayDate(startIso),
     endDate: isoToDisplayDate(endIso),
     days: +gv("f-days") || 0,
     reason: gv("f-reason") || ""
   };
+  // Bulk: one entry per recruit in the chosen scope (platoon / program / group /
+  // combined). Skipped for edits, which always target the single person.
+  const scope = editId ? "person" : (gv("f-leave-scope") || "person");
+  if (scope !== "person") {
+    const ids = scopeRecruits(scope);
+    if (!ids.length) { alert("No recruits in that scope."); return; }
+    if (!confirm(`Log ${template.type} for ${ids.length} recruit${ids.length === 1 ? "" : "s"}?`)) return;
+    leaveMany(ids, template);
+    closeModal();
+    return;
+  }
+  const entry = { id: editId || nextId(), d4: gv("f-d4"), ...template };
+  if (!entry.d4) { alert("Pick a person."); return; }
   if (editId) {
     const idx = STATE.leave.findIndex(l => l.id === editId);
     if (idx >= 0) STATE.leave[idx] = entry;
@@ -1473,6 +1831,15 @@ function submitLeave() {
   }
   saveLocal(); closeModal(); render();
   if (STATE.apiUrl) autoSync("Leave", { type: "upsert", row: entry });
+}
+// Bulk leave/out — one row per recruit, optimistic local update then a row
+// upsert each (Leave rows are id-keyed, so upsert = append here).
+function leaveMany(d4s, t) {
+  const rows = d4s.map(d4 => ({ id: nextId(), d4, type: t.type, startDate: t.startDate, endDate: t.endDate, days: t.days, reason: t.reason }));
+  STATE.leave.push(...rows);
+  saveLocal(); render();
+  if (STATE.apiUrl) rows.forEach(row => autoSync("Leave", { type: "upsert", row }));
+  return rows.length;
 }
 
 // ─── PARADE STATE + MEDICAL STATUS GENERATORS ─────────
@@ -1491,12 +1858,18 @@ const SEP = "----------------------------------------------------------------";
 // custom status can never silently fall through the cracks of the report.
 const PARADE_SECTIONED_STATUSES = ["MC", "Warded", "Pending", "NIL"];
 const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(s);
+// A medical record counts as "kept in camp" for the parade when the recruit is
+// consuming it in camp (the record's inCamp flag) OR a commander manually booked
+// them IN today (the day-scoped force-in override). Either way they're present in
+// camp, so an MC/Warded belongs under MEDICAL STATUS, never ATTC.
+const medKeptInCamp = (m, dateIso) =>
+  m.inCamp === true || isForcedIn(STATE.roster.find(r => r.id === m.d4), dateIso || todayISO());
 // A record belongs in MEDICAL STATUS if its status is a catch-all restriction
-// (LD/Excuse/custom) OR it's a consume-in-camp MC/Warded (pulled out of ATTC but
+// (LD/Excuse/custom) OR it's a kept-in-camp MC/Warded (pulled out of ATTC but
 // still needing to show its status). Shared by the parade state and the
 // standalone Medical Status List so the two never diverge.
-const isMedicalStatusRecord = m =>
-  isMedicalStatusCatchAll(m.status) || (m.inCamp && (m.status === "MC" || m.status === "Warded"));
+const isMedicalStatusRecord = (m, dateIso) =>
+  isMedicalStatusCatchAll(m.status) || (medKeptInCamp(m, dateIso) && (m.status === "MC" || m.status === "Warded"));
 
 // "2026-05-20" → "200526" — battalion uses DDMMYY everywhere.
 function toDDMMYY(iso) {
@@ -1532,13 +1905,15 @@ function paradeDuration(record) {
 }
 
 // Day count for the status line ("Status: 5D MC"). Inclusive of both ends.
-function paradeStatusLabel(record) {
+function paradeStatusLabel(record, dateIso) {
   const s = displayDateToISO(record.startDate || "");
   const e = displayDateToISO(record.endDate || "");
   if (!record.status) return "";
-  // A consume-in-camp MC/Warded reads "2D MC (consume in camp)" — the suffix is
-  // derived from the inCamp flag, the underlying status stays "MC".
-  const suffix = record.inCamp ? " (consume in camp)" : "";
+  // A kept-in-camp MC/Warded reads "2D MC (consume in camp)" for a record flagged
+  // inCamp, or "(kept in camp)" when a commander manually booked them in today.
+  // The underlying status stays "MC".
+  const suffix = record.inCamp ? " (consume in camp)"
+    : (isForcedIn(STATE.roster.find(r => r.id === record.d4), dateIso || todayISO()) ? " (kept in camp)" : "");
   if (!s || !e) return record.status + suffix;
   const days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
   return (days > 0 ? `${days}D ${record.status}` : record.status) + suffix;
@@ -1580,7 +1955,7 @@ function buildMedicalSection(label, dateIso, recordFilter) {
     ? recordFilter
     : m => recordFilter.includes(m.status);
   let matches = STATE.medical.filter(m =>
-    medStatusActive(m, dateIso) && matchRecord(m)
+    medStatusActive(m, dateIso) && matchRecord(m, dateIso)
   );
 
   // ATTC gets the PDS-confirmed borderline returnees folded in so they
@@ -1621,11 +1996,11 @@ function buildMedicalSection(label, dateIso, recordFilter) {
 
     if (records.length === 1) {
       const r = records[0];
-      return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus: ${paradeStatusLabel(r)}\nDuration: ${paradeDuration(r)}`;
+      return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus: ${paradeStatusLabel(r, dateIso)}\nDuration: ${paradeDuration(r)}`;
     }
     // Multi-status: stack numbered Status + Duration pairs under one R/N.
     const subStatuses = records.map((r, i) =>
-      `${i + 1}. ${paradeStatusLabel(r)}\nDuration: ${paradeDuration(r)}`
+      `${i + 1}. ${paradeStatusLabel(r, dateIso)}\nDuration: ${paradeDuration(r)}`
     ).join("\n");
     return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus received:\n${subStatuses}`;
   });
@@ -1788,9 +2163,10 @@ function generateParadeStateText(type, dateIso, time) {
   const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
   const sections = [
     buildStrengthBlock(dateIso),
-    // ATTC = MC/Warded physically AWAY (consume-in-camp MCs are excluded here and
-    // fall through to MEDICAL STATUS below).
-    buildMedicalSection("ATTC", dateIso, m => (m.status === "MC" || m.status === "Warded") && !m.inCamp),
+    // ATTC = MC/Warded physically AWAY. Kept-in-camp MC/Warded (consume-in-camp OR
+    // a manual same-day Book In) are excluded here and fall through to MEDICAL
+    // STATUS below, so anyone counted in camp is never listed as away.
+    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d)),
     buildMedicalSection("REPORT SICK", dateIso, m => m.status === "Pending"),
     buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord),
     buildAppointmentSection(dateIso, time),
@@ -3808,9 +4184,9 @@ function buildConductChatFormat(attendanceId) {
           STATE.medical.filter(m => m.d4 === d.d4 && medStatusActive(m, date))
         ).sort((x, y) => medSeverityRank(medStatusTag(y, date)?.tag) - medSeverityRank(medStatusTag(x, date)?.tag));
         if (med.length === 1) {
-          block += `\nStatus: ${paradeStatusLabel(med[0])}\nDuration: ${paradeDuration(med[0])}`;
+          block += `\nStatus: ${paradeStatusLabel(med[0], date)}\nDuration: ${paradeDuration(med[0])}`;
         } else if (med.length > 1) {
-          const sub = med.map((r, j) => `${j + 1}. ${paradeStatusLabel(r)}\n    Duration: ${paradeDuration(r)}`).join("\n");
+          const sub = med.map((r, j) => `${j + 1}. ${paradeStatusLabel(r, date)}\n    Duration: ${paradeDuration(r)}`).join("\n");
           block += `\nStatus received:\n${sub}`;
         }
       }

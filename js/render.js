@@ -968,6 +968,18 @@ function renderRoster(el) {
   STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
   const scoped = filteredRoster();
   const rosterToday = todayISO();
+  // Camp column reads the SHARED out-of-camp definition (outOfCampMap) so it can
+  // never disagree with the dashboard / parade strength — medical and leave count
+  // as out here, not just manual book-outs. Colours/labels mirror the dashboard
+  // "Currently Out of Camp" panel.
+  const campOutMap = outOfCampMap(rosterToday);
+  const CAMP_COLOR = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
+  const CAMP_WHY = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
+  // Status column = the recruit's CURRENTLY-active medical status(es), derived
+  // from the medical layer (same source as the dashboard) rather than the stale
+  // roster `status` field. No active status → ACTIVE.
+  const effByD4 = {};
+  currentMedicalEffectiveAll(rosterToday).forEach(e => { effByD4[e.d4] = e.statuses; });
   // Push/Export operate on the FULL roster — scoping is a view concern; we
   // don't want the user to silently overwrite the sheet with only their slice.
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
@@ -975,6 +987,7 @@ function renderRoster(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
       <div style="display:flex;gap:8px">
+        <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
         <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
         <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
       </div>
@@ -987,11 +1000,27 @@ function renderRoster(el) {
       const idCell = isCmd ? "" : r.id;
       const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `<span style="color:var(--muted)">Recruit</span>`;
       // Book Out / Book In toggle reflecting the shared booked-out flag.
-      const bookedOut = isBookedOut(r, rosterToday);
-      const campCell = bookedOut
-        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book back in">↩ In</button>`
-        : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', true, 'Out of camp')" title="Book out of camp">🚪 Out</button>`;
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusBadge(r.status)}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
+      const effStatuses = effByD4[r.id];
+      const statusCell = (effStatuses && effStatuses.length)
+        ? effStatuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("")
+        : statusBadge("Active");
+      // CAMP cell = effective status (why they're out, or "In camp") + a book
+      // out/in lever that ALWAYS offers the opposite of their current state.
+      // Out (any reason) → Book in, which counts them present for today (an MC/
+      // leave recruit becomes a manual "In camp"); in camp → Book out. The badge
+      // reads outOfCampMap, so it can never disagree with the dashboard.
+      const outInfo = campOutMap.get(r.id);
+      const forcedIn = !outInfo && isForcedIn(r, rosterToday) && derivedCampOut(r.id, rosterToday);
+      const campBadge = outInfo
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${CAMP_COLOR[outInfo.kind] || "#8B949E"}22;color:${CAMP_COLOR[outInfo.kind] || "#8B949E"}" title="Out of camp — ${escapeAttr(outInfo.reason || "")}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>`
+        : forcedIn
+          ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#39D2C022;color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
+          : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#3FB95018;color:var(--green)">In camp</span>`;
+      const campToggle = outInfo
+        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book in — count as in camp today (resets tomorrow)">↩ Book in</button>`
+        : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', true, 'Out of camp')" title="Book out of camp (controls in-camp strength)">🚪 Book out</button>`;
+      const campCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${campBadge}${campToggle}</div>`;
+      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No personnel in ${filterLabel()}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
 }
