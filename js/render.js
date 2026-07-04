@@ -852,7 +852,10 @@ function renderDashOutOfCamp(scoped, outMap) {
   const label = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
   const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
     <h3 style="font-size:13px;color:var(--muted);margin:0">🚪 Currently Out of Camp <span style="color:var(--dim);font-weight:400">(${rows.length})</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutPicker()">+ Book Out</button>
+    <div style="display:flex;gap:6px">
+      ${rows.length ? `<button class="btn btn-success" style="font-size:11px;padding:4px 10px" onclick="openBookOutPicker('in')" title="Book a group / platoon / program back in to camp">↩ Book In</button>` : ""}
+      <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutPicker('out')">+ Book Out</button>
+    </div>
   </div>`;
   if (!rows.length) return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">Everyone in scope is in camp.</div>`;
   const body = rows.map(r => {

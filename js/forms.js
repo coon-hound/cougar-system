@@ -1379,6 +1379,19 @@ function bookOutTargets(scope) {
   return [];
 }
 
+// Inverse of bookOutTargets: recruits in the scope who are currently OUT of camp
+// (the ones a bulk Book In can act on). Same scope grammar.
+function bookInTargets(scope) {
+  const outMap = outOfCampMap(todayISO());
+  const out = STATE.roster.filter(r => r.role !== "Commander" && outMap.has(r.id));
+  if (scope === "company") return out;
+  if (scope && scope.indexOf("plt:") === 0) { const p = scope.slice(4); return out.filter(r => getPlt(r) === p); }
+  if (scope && scope.indexOf("prog:") === 0) { const k = scope.slice(5); return out.filter(r => programOf(r) === k); }
+  if (scope && scope.indexOf("grp:") === 0) { const g = scope.slice(4); return out.filter(r => recruitInGroup(r, g)); }
+  if (scope && scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return out.filter(r => set.has(r.id)); }
+  return [];
+}
+
 // Bulk book-out for TODAY — optimistic local update, then one row-scoped upsert
 // per changed recruit. Only recruits currently IN camp are affected; anyone already out (MC/
 // leave/booked out) is skipped so we never stamp a manual reason over a record.
@@ -1404,33 +1417,72 @@ function bookOutMany(d4s, reason) {
   return booked.length;
 }
 
-// Ad-hoc "book out" picker (dashboard "+ Book Out"): book out a single recruit,
-// or a whole company / platoon / training program in one tap. Scope options show
-// the live count of in-camp recruits they'd affect.
-function openBookOutPicker() {
+// Bulk book-IN for TODAY (inverse of bookOutMany) — only recruits currently OUT
+// are affected. Clears a manual book-out; for an MC/leave recruit it sets the
+// day-scoped present-override so they count in camp today (same as the per-
+// recruit Book In). Auto-resets tomorrow.
+function bookInMany(d4s) {
+  const ids = Array.isArray(d4s) ? d4s : [d4s];
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const changed = [];
+  ids.forEach(d4 => {
+    const r = STATE.roster.find(x => x.id === d4);
+    if (!r || r.role === "Commander" || !outMap.has(d4)) return;
+    r.outOfCamp = false;
+    r.outReason = "";
+    r.outSince = "";
+    if (derivedCampOut(d4, today)) { r.campIn = true; r.campInSince = today; }
+    else { r.campIn = false; r.campInSince = ""; }
+    changed.push(r);
+  });
+  if (!changed.length) return 0;
+  saveLocal(); render();
+  if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+  return changed.length;
+}
+
+// Ad-hoc book out / in picker (dashboard buttons): act on a single recruit, or a
+// whole company / platoon / program / group / combined group in one tap. `dir`
+// is "out" (default) or "in". Counts show the live number of recruits each scope
+// would affect — in-camp for book-out, out-of-camp for book-in.
+function openBookOutPicker(dir) {
+  dir = dir === "in" ? "in" : "out";
   const outMap = outOfCampMap(todayISO());
-  const inCamp = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
-  const platoons = [...new Set(inCamp.map(getPlt).filter(Boolean))].sort();
-  const progs = (STATE.programs || []).filter(pr => inCamp.some(r => programOf(r) === pr.key));
-  const groups = allGroupNames().filter(g => inCamp.some(r => recruitInGroup(r, g)));
-  const inCampIds = new Set(inCamp.map(r => r.id));
-  const combined = allCombinedNames();
+  // The pool a direction can act on: in-camp recruits for book-out, out-of-camp
+  // recruits for book-in.
+  const pool = STATE.roster.filter(r => r.role !== "Commander" && (dir === "in" ? outMap.has(r.id) : !outMap.has(r.id)));
+  const poolIds = new Set(pool.map(r => r.id));
+  const platoons = [...new Set(pool.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => pool.some(r => programOf(r) === pr.key));
+  const groups = allGroupNames().filter(g => pool.some(r => recruitInGroup(r, g)));
+  const combined = allCombinedNames().filter(n => [...combinedMemberSet(n)].some(d => poolIds.has(d)));
+  const cnt = pred => pool.filter(pred).length;
   const scopeOpts = [
     `<option value="recruit">One recruit…</option>`,
-    `<option value="company">Whole company (${inCamp.length})</option>`,
-    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${inCamp.filter(r => getPlt(r) === p).length})</option>`),
-    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${inCamp.filter(r => programOf(r) === pr.key).length})</option>`),
-    ...groups.map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${inCamp.filter(r => recruitInGroup(r, g)).length})</option>`),
-    ...combined.map(n => { const c = [...combinedMemberSet(n)].filter(d => inCampIds.has(d)).length; return `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${c})</option>`; })
+    `<option value="company">Whole company (${pool.length})</option>`,
+    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt(r => getPlt(r) === p)})</option>`),
+    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt(r => programOf(r) === pr.key)})</option>`),
+    ...groups.map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt(r => recruitInGroup(r, g))})</option>`),
+    ...combined.map(n => { const set = combinedMemberSet(n); return `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt(r => set.has(r.id))})</option>`; })
   ].join("");
-  openModal("Book Out of Camp", `
-    <form onsubmit="event.preventDefault(); submitBookOut(); return false">
+  const title = dir === "in" ? "Book In to Camp" : "Book Out of Camp";
+  const info = dir === "in"
+    ? "Books recruits back IN for today — clears a manual book-out, or counts an MC/leave recruit present (auto-resets tomorrow). Only affects recruits currently out of camp."
+    : "Marks recruits out of camp for today (auto-clears tomorrow). Recruits already out (MC / leave / booked out) are skipped. For multi-day absences, log a Leave instead.";
+  const reasonField = dir === "in" ? "" : formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`);
+  const btn = dir === "in"
+    ? `<button type="submit" class="btn btn-success">↩ Book In</button>`
+    : `<button type="submit" class="btn btn-danger">🚪 Book Out</button>`;
+  openModal(title, `
+    <form onsubmit="event.preventDefault(); submitBookOut('${dir}'); return false">
+      <input type="hidden" id="f-bo-dir" value="${dir}">
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-size:11px;color:var(--muted)">Marks recruits out of camp for today (auto-clears tomorrow). Recruits already out (MC / leave / booked out) are skipped. For multi-day absences, log a Leave instead.</div>
+        <div style="font-size:11px;color:var(--muted)">${info}</div>
         <div class="form-group"><label>Scope</label><select id="f-bo-scope" class="topbar-select" style="width:100%" onchange="onBookOutScopeChange()">${scopeOpts}</select></div>
         <div class="form-group" id="f-bo-recruit-wrap"><label>Recruit</label>${rosterSelect("f-bo-d4", false, "")}</div>
-        ${formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`)}
-        <button type="submit" class="btn btn-danger">🚪 Book Out</button>
+        ${reasonField}
+        ${btn}
       </div>
     </form>`);
   onBookOutScopeChange();
@@ -1440,23 +1492,32 @@ function onBookOutScopeChange() {
   const wrap = document.getElementById("f-bo-recruit-wrap");
   if (wrap) wrap.style.display = gv("f-bo-scope") === "recruit" ? "" : "none";
 }
-function submitBookOut() {
+function submitBookOut(dir) {
+  dir = (dir || gv("f-bo-dir")) === "in" ? "in" : "out";
   const scope = gv("f-bo-scope") || "recruit";
-  const reason = gv("f-bo-reason") || "Out of camp";
   if (scope === "recruit") {
     const d4 = gv("f-bo-d4");
     if (!d4) { alert("Pick a recruit first."); return; }
-    bookOutToggle(d4, true, reason);
+    bookOutToggle(d4, dir === "out", dir === "out" ? (gv("f-bo-reason") || "Out of camp") : undefined);
     closeModal();
     return;
   }
-  const targets = bookOutTargets(scope).map(r => r.id);
-  if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
   const label = scope === "company" ? "the whole company"
     : scope.indexOf("plt:") === 0 ? "Platoon " + scope.slice(4)
     : scope.indexOf("grp:") === 0 ? scope.slice(4)
     : scope.indexOf("comb:") === 0 ? scope.slice(5)
     : programLabel(scope.slice(5));
+  if (dir === "in") {
+    const targets = bookInTargets(scope).map(r => r.id);
+    if (!targets.length) { alert("No out-of-camp recruits to book in in that scope."); return; }
+    if (!confirm(`Book in ${targets.length} recruit${targets.length === 1 ? "" : "s"} in ${label}?`)) return;
+    bookInMany(targets);
+    closeModal();
+    return;
+  }
+  const reason = gv("f-bo-reason") || "Out of camp";
+  const targets = bookOutTargets(scope).map(r => r.id);
+  if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
   if (!confirm(`Book out ${targets.length} in-camp recruit${targets.length === 1 ? "" : "s"} in ${label}?\nReason: ${reason}`)) return;
   bookOutMany(targets, reason);
   closeModal();
