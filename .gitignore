@@ -17,6 +17,10 @@ config.local.*
 # Claude Code per-machine settings (project settings.json stays tracked).
 .claude/settings.local.json
 
+# Local agent/instruction memory (and the CLAUDE.md symlink pointing at it).
+AGENTS.md
+CLAUDE.md
+
 # ── Local data exports / backups ───────────────────
 # exportJSON() / exportCSV() downloads land here if you save into the repo.
 cougar_backup*.json
