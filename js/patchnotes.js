@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 113;
+const APP_VERSION = 114;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 114,
+    date: "4 Jul 2026",
+    title: "Log Leave / Out for a whole group",
+    intro: "The Leave / Out form can now cover a slice of the company in one entry, not just one person.",
+    items: [
+      { t: "👥 Apply to a scope", d: "Pick \"Apply to\" → a platoon, training program, group, or combined group (each shows its recruit count) and one Log creates an entry per recruit." },
+      { t: "🙋 Still one-at-a-time when you want", d: "Leave it on \"One person\" for the classic single-recruit entry; editing an entry always stays single." },
+    ],
+  },
   {
     v: 113,
     date: "3 Jul 2026",

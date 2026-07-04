@@ -1748,6 +1748,20 @@ function openLeaveForm(id) {
   const e = id ? STATE.leave.find(x => x.id === id) : null;
   const startVal = e ? displayDateToISO(e.startDate) || todayISO() : todayISO();
   const endVal = e ? displayDateToISO(e.endDate) || todayISO() : todayISO();
+  // Bulk scope options (add mode only): a whole platoon / program / group /
+  // combined group on leave in one entry. Counts are recruits in the scope.
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
+  const cnt = s => scopeRecruits(s).length;
+  const scopeOpts = [
+    `<option value="person">One person…</option>`,
+    `<option value="company">Whole company (${recruits.length})</option>`,
+    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt("plt:" + p)})</option>`),
+    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt("prog:" + pr.key)})</option>`),
+    ...allGroupNames().map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt("grp:" + g)})</option>`),
+    ...allCombinedNames().map(n => `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt("comb:" + n)})</option>`)
+  ].join("");
   openModal(e ? "Edit Leave/Out Entry" : "Log Leave / Out", `
     <form onsubmit="event.preventDefault(); submitLeave(); return false">
       <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
@@ -1758,7 +1772,8 @@ function openLeaveForm(id) {
           <div><strong>Off-in-Lieu</strong> — counts against the commander's quota.</div>
           <div><strong>Leave / Compassionate / Course / Guard Duty / NDP / Other</strong> — tracked but doesn't decrement the off balance.</div>
         </div>
-        <div class="form-group"><label>Person</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
+        ${e ? "" : `<div class="form-group"><label>Apply to</label><select id="f-leave-scope" class="topbar-select" style="width:100%" onchange="onLeaveScopeChange()">${scopeOpts}</select></div>`}
+        <div class="form-group" id="f-leave-person-wrap"><label>Person</label>${rosterSelect("f-d4", false, e?.d4 || "")}</div>
         ${formSelect("f-type", "Type", [["Off-in-Lieu", "Off-in-Lieu (counts toward quota)"], ["Annual Leave", "Annual Leave"], ["Compassionate", "Compassionate Leave"], ["Weekend", "Weekend"], ["Night's Out", "Night's Out (same-day, evening off-camp)"], ["Course", "Course"], ["Guard Duty", "Guard Duty"], ["NDP", "NDP"], ["Other", "Other"]], true, e?.type || "")}
         <div class="form-row">
           ${formField("f-start", "Start date", "date", "", `required value="${startVal}" min="2020-01-01" max="2099-12-31" onchange="recalcLeaveDays()"`)}
@@ -1778,20 +1793,36 @@ function recalcLeaveDays() {
   const diff = Math.round((new Date(en.value) - new Date(s.value)) / 86400000) + 1;
   if (diff > 0) d.value = diff;
 }
+// Show the single-person picker only for the "One person" scope.
+function onLeaveScopeChange() {
+  const wrap = document.getElementById("f-leave-person-wrap");
+  if (wrap) wrap.style.display = (gv("f-leave-scope") || "person") === "person" ? "" : "none";
+}
 function submitLeave() {
   const editId = +gv("f-entry-id");
   const startIso = gv("f-start");
   const endIso = gv("f-end");
   if (endIso < startIso) { alert("End date must be on or after start date."); return; }
-  const entry = {
-    id: editId || nextId(),
-    d4: gv("f-d4"),
+  const template = {
     type: gv("f-type"),
     startDate: isoToDisplayDate(startIso),
     endDate: isoToDisplayDate(endIso),
     days: +gv("f-days") || 0,
     reason: gv("f-reason") || ""
   };
+  // Bulk: one entry per recruit in the chosen scope (platoon / program / group /
+  // combined). Skipped for edits, which always target the single person.
+  const scope = editId ? "person" : (gv("f-leave-scope") || "person");
+  if (scope !== "person") {
+    const ids = scopeRecruits(scope);
+    if (!ids.length) { alert("No recruits in that scope."); return; }
+    if (!confirm(`Log ${template.type} for ${ids.length} recruit${ids.length === 1 ? "" : "s"}?`)) return;
+    leaveMany(ids, template);
+    closeModal();
+    return;
+  }
+  const entry = { id: editId || nextId(), d4: gv("f-d4"), ...template };
+  if (!entry.d4) { alert("Pick a person."); return; }
   if (editId) {
     const idx = STATE.leave.findIndex(l => l.id === editId);
     if (idx >= 0) STATE.leave[idx] = entry;
@@ -1800,6 +1831,15 @@ function submitLeave() {
   }
   saveLocal(); closeModal(); render();
   if (STATE.apiUrl) autoSync("Leave", { type: "upsert", row: entry });
+}
+// Bulk leave/out — one row per recruit, optimistic local update then a row
+// upsert each (Leave rows are id-keyed, so upsert = append here).
+function leaveMany(d4s, t) {
+  const rows = d4s.map(d4 => ({ id: nextId(), d4, type: t.type, startDate: t.startDate, endDate: t.endDate, days: t.days, reason: t.reason }));
+  STATE.leave.push(...rows);
+  saveLocal(); render();
+  if (STATE.apiUrl) rows.forEach(row => autoSync("Leave", { type: "upsert", row }));
+  return rows.length;
 }
 
 // ─── PARADE STATE + MEDICAL STATUS GENERATORS ─────────

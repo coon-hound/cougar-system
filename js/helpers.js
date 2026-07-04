@@ -137,6 +137,22 @@ function combinedFormula(def) {
   return exc ? `${inc || "∅"} − ${exc}` : (inc || "∅");
 }
 
+// Resolve a scope value to the recruit d4s it selects (commanders excluded).
+// Accepts the same values the book-out picker uses: "company" | "plt:N" |
+// "prog:KEY" | "grp:NAME" | "comb:NAME". Unlike bookOutTargets this is NOT
+// camp-filtered — callers like bulk leave/out want everyone in the scope
+// regardless of their current in/out-of-camp state. "person"/"" → [].
+function scopeRecruits(scope) {
+  const recruits = (STATE.roster || []).filter(r => r.role !== "Commander");
+  if (!scope || scope === "person") return [];
+  if (scope === "company") return recruits.map(r => r.id);
+  if (scope.indexOf("plt:") === 0) { const p = scope.slice(4); return recruits.filter(r => getPlt(r) === p).map(r => r.id); }
+  if (scope.indexOf("prog:") === 0) { const k = scope.slice(5); return recruits.filter(r => programOf(r) === k).map(r => r.id); }
+  if (scope.indexOf("grp:") === 0) { const g = scope.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
+  if (scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return recruits.filter(r => set.has(r.id)).map(r => r.id); }
+  return [];
+}
+
 const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram || STATE.filterGroup);
 
 function filteredRoster() {
