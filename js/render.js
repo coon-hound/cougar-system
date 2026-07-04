@@ -84,8 +84,16 @@ function renderDashboard(el) {
   const outScoped = scoped.filter(r => outMap.has(r.id));
   const awayFromCamp = outScoped.length;
   const inCamp = scoped.length - awayFromCamp;
-  const avgPart = STATE.attendance.length ? Math.round(STATE.attendance.reduce((a, c) => a + (c.participating / c.total * 100), 0) / STATE.attendance.length) : 0;
-  const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong> — Attendance figures remain company-wide.</div>` : "";
+  // Attendance rows carry a `program` (progKey) but no recruit/platoon linkage,
+  // so they can be scoped by PROGRAM — but not by plt/sect/role. Avg Part. and
+  // the participation chart honour the program filter; other scope dims can't
+  // touch attendance (hence the banner note).
+  const attScoped = STATE.attendance.filter(a => !STATE.filterProgram || progKey(a) === STATE.filterProgram);
+  const avgPart = avgParticipation(attScoped);
+  const attNote = STATE.filterProgram
+    ? `Attendance scoped to <strong>${programLabel(STATE.filterProgram)}</strong>.`
+    : `Attendance figures remain company-wide.`;
+  const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong> — ${attNote}</div>` : "";
 
   // R/C breakdown — only shown when scope is "All". Helps reproduce the
   // parade-state-style "PLATOON x: y/z … COMMANDERS: a/b" split in one
@@ -107,6 +115,31 @@ function renderDashboard(el) {
   const inlineBreakdown = (rec, cmd) => isAll
     ? `<span style="font-size:55%;color:var(--muted);font-weight:400;margin-left:1px">/${rec}/${cmd}</span>`
     : "";
+
+  // ── By Program comparison (only when NOT focused on one program) ──────
+  // Side-by-side PTP vs BMT: recruits, active today, in camp, and average
+  // conduct participation. Uses full program rosters (recruitsInProgram) — it's
+  // a program-vs-program view, independent of plt/sect scope. Hidden once a
+  // single program is picked in the topbar (the tiles/chart then focus on it).
+  const byProgramCard = (!STATE.filterProgram && (STATE.programs || []).length >= 2) ? (() => {
+    const tiles = STATE.programs.map(p => {
+      const recs = recruitsInProgram(p.key);
+      const nonActive = recs.filter(r => topTag(r) && topTag(r).ghostDay === 0).length;
+      const inCampN = recs.filter(r => !outMap.has(r.id)).length;
+      const part = avgParticipation(STATE.attendance.filter(a => progKey(a) === p.key));
+      const col = programColor(p.key);
+      return `<div style="flex:1;min-width:160px;background:var(--surface);border:1px solid ${col}55;border-left:3px solid ${col};border-radius:8px;padding:10px 12px">
+        <div style="margin-bottom:8px">${programBadge(p.key)} <span style="color:var(--muted);font-size:11px">${recs.length} recruits</span></div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px">
+          <span><span style="color:var(--muted)">Active</span> <strong style="color:var(--green)">${recs.length - nonActive}</strong></span>
+          <span><span style="color:var(--muted)">In camp</span> <strong style="color:var(--teal)">${inCampN}</strong></span>
+          <span><span style="color:var(--muted)">Avg part.</span> <strong style="color:${col}">${part}%</strong></span>
+        </div>
+      </div>`;
+    }).join("");
+    return `<div class="card" style="margin-top:12px;padding:12px 14px"><h3 style="margin-bottom:10px">By Program</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${tiles}</div></div>`;
+  })() : "";
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;flex-wrap:wrap">
@@ -131,6 +164,7 @@ function renderDashboard(el) {
       <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
       <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
     </div>
+    ${byProgramCard}
     ${renderDashOutOfCamp(scoped, outMap)}
     ${renderDashAppointments(visible, today)}
     <div class="grid-2">
@@ -190,35 +224,51 @@ function renderDashboard(el) {
   // by its own rate; each segment takes the color of the rate it descends/rises
   // INTO, so the eye is drawn to where participation drops into a bad conduct.
   // Plot chronologically — oldest conduct on the left, newest on the right.
-  const partRows = [...STATE.attendance].sort((a, b) => {
+  const rateColorHex = r => r >= 95 ? "#3FB950" : r >= 70 ? "#D29922" : "#F85149";
+  const sortAtt = rows => [...rows].sort((a, b) => {
     const ai = displayDateToISO(a.date) || a.date || "";
     const bi = displayDateToISO(b.date) || b.date || "";
     if (ai !== bi) return ai < bi ? -1 : 1;
     return (a.time || "") < (b.time || "") ? -1 : 1;
   });
-  const partData = partRows.map(a => pct(a.participating, a.total));
-  const rateColorHex = r => r >= 95 ? "#3FB950" : r >= 70 ? "#D29922" : "#F85149";
-  const partColors = partData.map(rateColorHex);
-  STATE.charts.participation = new Chart(document.getElementById("chart-participation"), {
-    type: "line",
-    data: { labels: partRows.map(a => conductName(a.conductId).slice(0, 12)), datasets: [{
-      data: partData,
-      borderColor: "#8B949E",
-      borderWidth: 2,
-      tension: 0.35,
-      fill: false,
-      pointRadius: 4,
-      pointHoverRadius: 7,
-      pointBackgroundColor: partColors,
-      pointBorderColor: partColors,
-      // Color each segment by the rate it lands on (the later point), so a drop
-      // into a weak conduct turns the descending line red/amber.
-      segment: { borderColor: ctx => rateColorHex(partData[ctx.p1DataIndex]) }
-    }] },
-    // No fixed min/max — let the axis auto-scale around the data so dips below
-    // 80% are visible instead of being clipped off the bottom.
-    options: { plugins: { legend: { display: false } }, scales: { y: { grace: "10%", grid: { color: "#30363D" }, ticks: { color: "#8B949E" } }, x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 9 } } } } }
-  });
+  // Shared axis styling — no fixed min/max so dips below 80% stay visible.
+  const partScales = { y: { grace: "10%", grid: { color: "#30363D" }, ticks: { color: "#8B949E" } }, x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 9 } } } };
+  const partCanvas = document.getElementById("chart-participation");
+  if (STATE.filterProgram) {
+    // FOCUS mode: one program → keep the rate-encoded single line (green ≥95,
+    // amber ≥70, red <70; each segment coloured by the rate it lands on).
+    const partRows = sortAtt(attScoped);
+    const partData = partRows.map(a => pct(a.participating, a.total));
+    const partColors = partData.map(rateColorHex);
+    STATE.charts.participation = new Chart(partCanvas, {
+      type: "line",
+      data: { labels: partRows.map(a => conductName(a.conductId).slice(0, 12)), datasets: [{
+        data: partData, borderColor: "#8B949E", borderWidth: 2, tension: 0.35, fill: false,
+        pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: partColors, pointBorderColor: partColors,
+        segment: { borderColor: ctx => rateColorHex(partData[ctx.p1DataIndex]) }
+      }] },
+      options: { plugins: { legend: { display: false } }, scales: partScales }
+    });
+  } else {
+    // COMPARE mode: "All programs" → one solid-coloured line per program over a
+    // shared chronological axis. spanGaps connects each program across its own
+    // sessions (the two programs run different conducts on different dates).
+    const allRows = sortAtt(STATE.attendance);
+    const datasets = (STATE.programs || []).map(p => {
+      const col = programColorHex(p.key);
+      return {
+        label: programLabel(p.key),
+        data: allRows.map(a => progKey(a) === p.key ? pct(a.participating, a.total) : null),
+        borderColor: col, backgroundColor: col, borderWidth: 2, tension: 0.35, fill: false,
+        pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: col, pointBorderColor: col, spanGaps: true
+      };
+    });
+    STATE.charts.participation = new Chart(partCanvas, {
+      type: "line",
+      data: { labels: allRows.map(a => conductName(a.conductId).slice(0, 12)), datasets },
+      options: { plugins: { legend: { display: true, labels: { color: "#8B949E", font: { size: 11 } } } }, scales: partScales }
+    });
+  }
 }
 
 // Active MSK Cases — recruits who self-reported an injury via the Google

@@ -74,6 +74,24 @@ function programColor(key) {
   const palette = ["var(--accent)", "var(--green)", "var(--purple)", "var(--orange)", "var(--yellow)"];
   return idx >= 0 ? palette[idx % palette.length] : "var(--accent)";
 }
+// Hex parallel to programColor — Chart.js draws on a <canvas> and can't resolve
+// CSS vars, so chart series need literal hex. Palette hexes mirror the theme
+// vars in styles.css (--accent/--green/--purple/--orange/--yellow), same index
+// order as programColor so a program keeps one colour across badges and charts.
+function programColorHex(key) {
+  const k = key || PROGRAM_COMBINED;
+  if (k === PROGRAM_COMBINED) return "#8B949E";  // --muted
+  const idx = (STATE.programs || []).findIndex(pr => pr.key === k);
+  const palette = ["#58A6FF", "#3FB950", "#BC8CFF", "#D29922", "#E3B341"];
+  return idx >= 0 ? palette[idx % palette.length] : "#58A6FF";
+}
+
+// Average conduct-participation % over a set of attendance rows (each row is one
+// conduct session with participating/total). Reuses pct; 0 for an empty set.
+function avgParticipation(rows) {
+  if (!rows || !rows.length) return 0;
+  return Math.round(rows.reduce((s, a) => s + pct(a.participating, a.total), 0) / rows.length);
+}
 
 // ── Recruit groups (ad-hoc named subsets, e.g. "Guard Duty") ─────
 // A group cuts ACROSS platoons and behaves like the platoon filter/scope.
