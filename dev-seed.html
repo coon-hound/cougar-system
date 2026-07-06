@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cougar System — Dev Playground</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: "IBM Plex Sans", system-ui, sans-serif; background:#0d1117; color:#e6edf3; display:flex; min-height:100vh; align-items:center; justify-content:center; padding:24px; box-sizing:border-box; }
+  .card { max-width:560px; width:100%; background:#161b22; border:1px solid #30363d; border-radius:12px; padding:28px 26px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#8b949e; font-size:13px; margin:0 0 20px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }
+  button { font:inherit; font-size:14px; font-weight:600; border-radius:8px; padding:11px 18px; cursor:pointer; border:1px solid transparent; }
+  .primary { background:#238636; color:#fff; }
+  .primary:hover { background:#2ea043; }
+  .ghost { background:transparent; color:#e6edf3; border-color:#30363d; }
+  .ghost:hover { background:#21262d; }
+  .danger { background:transparent; color:#f85149; border-color:#f85149; }
+  .danger:hover { background:#f8514915; }
+  ul { color:#8b949e; font-size:12.5px; line-height:1.7; padding-left:18px; margin:14px 0 0; }
+  code { background:#21262d; padding:1px 6px; border-radius:4px; font-family:"JetBrains Mono", monospace; font-size:12px; }
+  .note { font-size:11.5px; color:#6e7681; margin-top:20px; line-height:1.6; border-top:1px solid #21262d; padding-top:14px; }
+  #status { font-size:12.5px; color:#3fb950; margin-top:14px; min-height:16px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🚶 Cougar System — Dev Playground</h1>
+  <p class="sub">Loads a demo company into this browser (no backend, no invite) so you can play with the <strong>Movement Board</strong>.</p>
+  <ul>
+    <li><strong>40 recruits</strong> across 4 platoons (PTP: Plt 1+4 · BMT: Plt 2+3) + 3 commanders.</li>
+    <li>Some already split across <strong>Range / Cookhouse / Lecture Hall</strong> for today; the rest in <strong>Main Body</strong>.</li>
+    <li><strong>6 out of camp</strong> (MC · Warded · leave) so the read-only "Out of Camp" card is populated.</li>
+    <li>Open the <strong>Movement</strong> tab in the sidebar — tap <code>🚶 Move Bodies</code> to move squads, <code>⚙ Locations</code> to manage places.</li>
+  </ul>
+  <div class="row">
+    <button class="primary" onclick="loadDemo()">Load demo company &amp; open app →</button>
+    <button class="ghost" onclick="location.href='index.html'">Open app as-is</button>
+    <button class="danger" onclick="resetAll()">Reset (clear all data)</button>
+  </div>
+  <div id="status"></div>
+  <p class="note">Movement is <strong>day-scoped</strong>: bodies auto-return to Main Body tomorrow. Everything is local to this browser — nothing is pushed to the Google Sheet (no auth token is seeded). Re-run this page any time to reset the demo.</p>
+</div>
+<script>
+  const SEED = {"cougar-data-v2":{"roster":[{"id":"C1101","name":"TAN WEI","role":"Recruit"},{"id":"C1102","name":"LIM JUN","role":"Recruit"},{"id":"C1103","name":"LEE KAI","role":"Recruit"},{"id":"C1201","name":"NG HAO","role":"Recruit"},{"id":"C1202","name":"WONG MING","role":"Recruit"},{"id":"C1203","name":"GOH XIN","role":"Recruit"},{"id":"C1301","name":"SIM JIE","role":"Recruit"},{"id":"C1302","name":"ONG YONG","role":"Recruit"},{"id":"C1303","name":"TEO FENG","role":"Recruit"},{"id":"C1304","name":"YEO LONG","role":"Recruit"},{"id":"C2101","name":"KOH RUI","role":"Recruit"},{"id":"C2102","name":"CHUA ZHI","role":"Recruit"},{"id":"C2103","name":"LOW HUI","role":"Recruit"},{"id":"C2104","name":"ANG LE","role":"Recruit"},{"id":"C2201","name":"CHAN AN","role":"Recruit"},{"id":"C2202","name":"HO BO","role":"Recruit"},{"id":"C2203","name":"CHEN CHENG","role":"Recruit"},{"id":"C2301","name":"YAP DA","role":"Recruit"},{"id":"C2302","name":"SEAH EN","role":"Recruit"},{"id":"C2303","name":"TOH FA","role":"Recruit"},{"id":"C3101","name":"POH WEI","role":"Recruit"},{"id":"C3102","name":"QUEK JUN","role":"Recruit"},{"id":"C3103","name":"FOO KAI","role":"Recruit"},{"id":"C3201","name":"GAN HAO","role":"Recruit"},{"id":"C3202","name":"HENG MING","role":"Recruit"},{"id":"C3203","name":"KWAN XIN","role":"Recruit"},{"id":"C3204","name":"LAU JIE","role":"Recruit"},{"id":"C3301","name":"MOK YONG","role":"Recruit"},{"id":"C3302","name":"PHUA FENG","role":"Recruit"},{"id":"C3303","name":"SOH LONG","role":"Recruit"},{"id":"C4101","name":"TAN RUI","role":"Recruit"},{"id":"C4102","name":"LIM ZHI","role":"Recruit"},{"id":"C4103","name":"LEE HUI","role":"Recruit"},{"id":"C4201","name":"NG LE","role":"Recruit"},{"id":"C4202","name":"WONG AN","role":"Recruit"},{"id":"C4203","name":"GOH BO","role":"Recruit"},{"id":"C4301","name":"SIM CHENG","role":"Recruit"},{"id":"C4302","name":"ONG DA","role":"Recruit"},{"id":"C4303","name":"TEO EN","role":"Recruit"},{"id":"C4304","name":"YEO FA","role":"Recruit"},{"id":"0001","name":"3SG KOH","role":"Commander","rank":"3SG"},{"id":"0002","name":"2SG CHUA","role":"Commander","rank":"2SG"},{"id":"0003","name":"LTA LOW","role":"Commander","rank":"LTA"}],"medical":[{"id":9001,"d4":"C1103","date":"__TODAY__","reason":"Fever","status":"MC","startDate":"__TODAY__","endDate":"__TODAY__","inCamp":false},{"id":9002,"d4":"C1203","date":"__TODAY__","reason":"Gastric","status":"MC","startDate":"__TODAY__","endDate":"__TODAY__","inCamp":false},{"id":9003,"d4":"C1304","date":"__TODAY__","reason":"Sprained ankle","status":"Warded","startDate":"__TODAY__","endDate":"__TODAY__","inCamp":false},{"id":9004,"d4":"C2103","date":"__TODAY__","reason":"Knee pain","status":"LD","startDate":"__TODAY__","endDate":"__TODAY__","inCamp":false},{"id":9005,"d4":"C3101","date":"__TODAY__","reason":"Blister","status":"Excuse Boots","startDate":"__TODAY__","endDate":"__TODAY__","inCamp":false}],"attendance":[],"ippt":[],"rm":[],"soc":[],"polar":[],"conductDetail":[],"appointments":[],"leave":[{"id":8001,"d4":"C2202","type":"Annual Leave","reason":"Family","startDate":"__TODAY__","endDate":"__TODAY__","days":1}],"msk":[],"conducts":[{"id":"c001","name":"Orientation Run"},{"id":"c002","name":"Route March"}],"rev":{}},"cougar-programs":[{"key":"PTP","name":"PTP","platoons":["1","4"]},{"key":"BMT","name":"BMT","platoons":["2","3"]}],"cougar-seen-version":999};
+  const PRE_MOVE = {"Range":[0,1,3,6],"Cookhouse":[4,7,8],"Lecture Hall":[10,11,13]};
+
+  // Local-time helpers (mirror the app's todayISO / isoToDisplayDate so seeded
+  // dates line up with how the app parses them).
+  function todayISO() {
+    const d = new Date(), p = n => String(n).padStart(2,"0");
+    return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
+  }
+  function todayDisplay() {
+    const d = new Date();
+    const mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return d.getDate()+" "+mon[d.getMonth()]+" "+d.getFullYear();
+  }
+
+  function buildSeed() {
+    // Deep clone so re-runs start clean.
+    const seed = JSON.parse(JSON.stringify(SEED));
+    const data = seed["cougar-data-v2"];
+    const disp = todayDisplay(), iso = todayISO();
+    // Stamp today's date onto medical + leave placeholders so they're active now.
+    data.medical.forEach(m => { m.date = disp; m.startDate = disp; m.endDate = disp; });
+    data.leave.forEach(l => { l.startDate = disp; l.endDate = disp; });
+    // Pre-split a few in-camp recruits across locations for TODAY.
+    const recs = data.roster.filter(r => r.role === "Recruit").map(r => r.id);
+    Object.entries(PRE_MOVE).forEach(([loc, idxs]) => {
+      idxs.forEach(i => {
+        const r = data.roster.find(x => x.id === recs[i]);
+        if (r) { r.location = loc; r.locationSince = iso; }
+      });
+    });
+    // Tag a couple of ad-hoc groups so the Movement quick-pick shows group
+    // buttons (a spec often moves "the guard party" or "sick parade" as a unit).
+    const GROUPS = { "Guard Duty": [14, 16, 18, 22], "Sick Parade": [6, 9, 25] };
+    Object.entries(GROUPS).forEach(([name, idxs]) => {
+      idxs.forEach(i => {
+        const r = data.roster.find(x => x.id === recs[i]);
+        if (r) r.groups = [r.groups, name].filter(Boolean).join(", ");
+      });
+    });
+    // Seed the managed location list so the pre-moved locations exist as cards.
+    seed["cougar-locations"] = ["Main Body","Range","Cookhouse","Lecture Hall","Bunk","MO Office","Guardroom"];
+    return seed;
+  }
+
+  function loadDemo() {
+    const seed = buildSeed();
+    Object.entries(seed).forEach(([k,v]) => localStorage.setItem(k, JSON.stringify(v)));
+    document.getElementById("status").textContent = "✓ Demo loaded — opening app…";
+    setTimeout(() => location.href = "index.html", 350);
+  }
+
+  function resetAll() {
+    ["cougar-data-v2","cougar-data","cougar-programs","cougar-locations","cougar-filter","cougar-custom-statuses","cougar-ippt-agg","cougar-fitness-sent","cougar-dirty-tabs","cougar-seen-version","cougar-auth"].forEach(k => localStorage.removeItem(k));
+    document.getElementById("status").textContent = "✓ Cleared all local app data.";
+  }
+</script>
+</body>
+</html>

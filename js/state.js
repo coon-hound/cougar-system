@@ -17,7 +17,14 @@ const FITNESS_SENT_KEY = "cougar-fitness-sent";
 const DIRTY_KEY = "cougar-dirty-tabs";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
 const PROGRAMS_KEY = "cougar-programs";
+const LOCATIONS_KEY = "cougar-locations";
 const COMBINED_KEY = "cougar-combined-groups";
+
+// The implicit bucket for any in-camp recruit who hasn't been moved elsewhere
+// today. Movement is day-scoped (locationSince === todayISO()); a recruit with
+// no fresh location falls back to here, so everyone collapses to Main Body at
+// the start of each day with no cron or midnight write.
+const DEFAULT_LOCATION = "Main Body";
 
 // Sheet-tab-name → STATE-array-key lookup. The autoSync coalesce path uses
 // this when flushing a queued replace push: by the time the flush runs the
@@ -100,8 +107,8 @@ function savePrograms() {
 // helpers.js combinedMemberSet), so they track group/platoon changes with no
 // stored member list. Shape: [{ name, include:[token], exclude:[token] }] where
 // a token is "company" | "plt:N" | "prog:KEY" | "grp:NAME". Per-device config
-// like programs (own localStorage key); the underlying groups it references are
-// the shared, synced part.
+// like programs/locations (own localStorage key); the underlying groups it
+// references are the shared, synced part.
 function loadCombinedGroups() {
   try {
     const arr = JSON.parse(localStorage.getItem(COMBINED_KEY) || "[]");
@@ -117,6 +124,29 @@ function loadCombinedGroups() {
 }
 function saveCombinedGroups() {
   localStorage.setItem(COMBINED_KEY, JSON.stringify(STATE.combinedGroups || []));
+}
+
+// Managed list of in-camp location names for the Movement board, persisted
+// per-device. A named managed list (rather than free text per move) stops a
+// typo — "Cookhse" vs "Cookhouse" — from silently splitting one place into two
+// buckets. DEFAULT_LOCATION is always present and first. Lives in its own
+// localStorage key so a data-cache reset doesn't wipe it (same pattern as
+// programs / custom statuses).
+const DEFAULT_LOCATIONS = [DEFAULT_LOCATION, "Range", "Cookhouse", "Lecture Hall", "Bunk", "MO Office", "Guardroom"];
+function loadLocations() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(LOCATIONS_KEY) || "null");
+    if (!Array.isArray(arr)) return [...DEFAULT_LOCATIONS];
+    // Sanitize: strings only, trimmed, de-duped, DEFAULT_LOCATION pinned first.
+    const clean = [];
+    arr.map(l => String(l || "").trim()).forEach(l => {
+      if (l && l !== DEFAULT_LOCATION && !clean.includes(l)) clean.push(l);
+    });
+    return [DEFAULT_LOCATION, ...clean];
+  } catch { return [...DEFAULT_LOCATIONS]; }
+}
+function saveLocations() {
+  localStorage.setItem(LOCATIONS_KEY, JSON.stringify(STATE.locations || []));
 }
 
 // Reads the persisted "who got a fitness report and when" map.
@@ -190,8 +220,8 @@ const STATE = {
   // platoon→program mapping. See helpers.js (programOf, recruitsInProgram).
   filterProgram: "",
   // Ad-hoc recruit-group scope: "" = all. Filters every per-recruit view to one
-  // named group (e.g. "Guard Duty") or a combined group ("c:<name>"). Membership
-  // lives on the Roster row (`groups` column); the name list is derived. See helpers.js.
+  // named group (e.g. "Guard Duty"). Membership lives on the Roster row (`groups`
+  // column); the name list is derived from the roster. See helpers.js.
   filterGroup: "",
   // Editable platoon→program map (see loadPrograms). Drives the conduct
   // wizard's program scoping and the program badges/filters.
@@ -216,6 +246,9 @@ const STATE = {
   // User-created medical statuses (see loadCustomStatuses). Reusable in the
   // Report Sick form's status dropdown alongside the built-in vocabulary.
   customStatuses: loadCustomStatuses(),
+  // Managed in-camp location names for the Movement board (see loadLocations).
+  // The destinations a recruit can be moved to; DEFAULT_LOCATION is always [0].
+  locations: loadLocations(),
   // Per-tab server revision last seen by this device, keyed by SHEET name
   // ("Roster", "Medical", …). Sent as `baseRev` on every write so the server
   // can reject a stale overwrite, and compared against the lightweight revCheck
@@ -269,9 +302,16 @@ function normalizeRoster(roster) {
       // Manual "present" override (Book In on an otherwise-out recruit). Same
       // TRUE-text coercion; campInSince (the local YYYY-MM-DD) passes through ...rest.
       campIn: rest.campIn === true || String(rest.campIn).toUpperCase() === "TRUE",
+      // Movement board: current in-camp location + the local YYYY-MM-DD it was
+      // set. Day-scoped (only honored when locationSince === today). Defaulted
+      // here so every row carries the keys — a full writeTab re-push derives
+      // headers from Object.keys(data[0]) and would otherwise strip a column
+      // absent from the first row.
+      location: rest.location || "",
+      locationSince: rest.locationSince || "",
       // Ad-hoc group membership: comma-delimited group names (e.g. "Guard,Range
       // Party"). Persistent (not day-scoped). Defaulted so the column survives a
-      // full re-push (writeTab derives headers from the first row's keys).
+      // full re-push, same reason as location above.
       groups: rest.groups != null ? String(rest.groups) : ""
     };
   });

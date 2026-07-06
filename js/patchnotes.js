@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 115;
+const APP_VERSION = 116;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 116,
+    date: "4 Jul 2026",
+    title: "Movement board — where every body is right now",
+    intro: "A new Movement tab shows where each in-camp recruit is, and lets you move whole units around in a couple of taps.",
+    items: [
+      { t: "🚶 Live location board", d: "One card per location (Range, Cookhouse, …); every in-camp recruit sits in exactly one, and out-of-camp bodies show too, so the counts always reconcile to strength." },
+      { t: "⚡ Tap-to-move + quick-pick", d: "Tap recruits (or a whole platoon / program / group) then tap a destination. Recall All sends everyone back to Main Body; locations auto-reset next day." },
+      { t: "📊 Dashboard snapshot", d: "A distribution bar on the dashboard shows the whole company's spread at a glance and links straight into the board." },
+    ],
+  },
   {
     v: 115,
     date: "4 Jul 2026",

@@ -13,6 +13,16 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
   });
 });
 
+// Programmatic tab switch (used by cross-tab links, e.g. the dashboard
+// Movement widget). Mirrors the nav-button click: sync the active button,
+// set STATE.nav, render, and close the mobile sidebar.
+function gotoNav(key) {
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === key));
+  STATE.nav = key;
+  render();
+  closeMobileSidebar();
+}
+
 // ── Mobile sidebar toggle ────────────────────────────────
 function openMobileSidebar() {
   document.getElementById("sidebar")?.classList.add("open");
