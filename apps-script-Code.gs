@@ -801,7 +801,7 @@ function writeTab(tabName, data) {
   });
 
   if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+    setValuesAsText(sheet.getRange(2, 1, rows.length, headers.length), rows);
   }
 
   return {
@@ -817,6 +817,17 @@ function writeTab(tabName, data) {
 // silently dropped — the row-level writers only map to existing columns, which
 // otherwise loses a field until someone does a full re-push. Returns the
 // up-to-date trimmed header list.
+// Google Sheets auto-coerces strings like "12:30" (a 2.4km run time) or "26 Jun"
+// into time/date serials on write, silently corrupting them — the bad value then
+// round-trips back into the app and breaks parsing (e.g. the IPPT run-time charts
+// vanish because every run reads as 0). Forcing the target range to plain-text
+// number format BEFORE setValues makes Sheets store every value verbatim. The app
+// reads strings and parses them itself, so text storage is always correct here.
+function setValuesAsText(range, values) {
+  range.setNumberFormat("@");
+  range.setValues(values);
+}
+
 function ensureColumnsForKeys(sheet, keys) {
   var lastCol = sheet.getLastColumn();
   var headers = lastCol ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
@@ -845,7 +856,7 @@ function appendRow(tabName, rowData) {
     return val !== undefined && val !== null ? val : "";
   });
 
-  sheet.appendRow(newRow);
+  setValuesAsText(sheet.getRange(sheet.getLastRow() + 1, 1, 1, newRow.length), [newRow]);
 
   return {
     ok: true,
@@ -875,7 +886,7 @@ function appendMany(tabName, rows) {
   });
 
   var startRow = sheet.getLastRow() + 1;
-  sheet.getRange(startRow, 1, newRows.length, trimmed.length).setValues(newRows);
+  setValuesAsText(sheet.getRange(startRow, 1, newRows.length, trimmed.length), newRows);
 
   return {
     ok: true,
@@ -914,7 +925,7 @@ function upsertRow(tabName, rowData) {
           var val = rowData[h];
           return val !== undefined && val !== null ? val : "";
         });
-        sheet.getRange(sheetRow, 1, 1, trimmed.length).setValues([updatedRow]);
+        setValuesAsText(sheet.getRange(sheetRow, 1, 1, trimmed.length), [updatedRow]);
         return {
           ok: true,
           tab: tabName,
@@ -930,7 +941,7 @@ function upsertRow(tabName, rowData) {
     var val = rowData[h];
     return val !== undefined && val !== null ? val : "";
   });
-  sheet.appendRow(newRow);
+  setValuesAsText(sheet.getRange(sheet.getLastRow() + 1, 1, 1, newRow.length), [newRow]);
   return {
     ok: true,
     tab: tabName,
@@ -1000,7 +1011,7 @@ function updateRow(tabName, rowIndex, rowData) {
     return val !== undefined && val !== null ? val : "";
   });
 
-  sheet.getRange(sheetRow, 1, 1, headers.length).setValues([updatedRow]);
+  setValuesAsText(sheet.getRange(sheetRow, 1, 1, headers.length), [updatedRow]);
 
   return {
     ok: true,
