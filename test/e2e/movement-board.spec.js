@@ -132,6 +132,47 @@ test.describe("Movement Board", () => {
     expect((await cardOf(page, "Main Body")).count).toBe("3");
   });
 
+  test("find bar filters chips by name / 4D, keeps hidden picks, matches out-of-camp", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.click(`.nav-btn[data-nav="movement"]`);
+    // Spread the company so a lookup has several cards to search across.
+    await page.evaluate(() => { moveToLocation(["2401", "2402"], "Range"); });
+
+    // View mode: typing a name collapses the board to the card he's on — the
+    // card title IS the answer to "where is BRAVO ONE?".
+    await page.fill("#mv-find", "bravo one");
+    expect(await page.locator(".mv-chip:visible").count()).toBe(1);
+    expect(await page.locator(".mv-card:visible").count()).toBe(1);
+    expect(await page.locator(".mv-card:visible .mv-name").innerText()).toContain("Range");
+    // A 4D query matches too, and clearing restores the full board.
+    await page.fill("#mv-find", "1403");
+    expect(await page.locator(".mv-chip:visible").count()).toBe(1);
+    await page.fill("#mv-find", "");
+    expect(await page.locator(".mv-chip:visible").count()).toBe(6);
+
+    // Move mode: search → tap → search the next → tap, then ONE drop. The
+    // first pick stays selected while hidden by the second search.
+    await page.click('button:has-text("Move Bodies")');
+    await page.fill("#mv-find", "alpha one");
+    await page.click('.mv-chip[data-d4="1401"]');
+    await page.fill("#mv-find", "bravo two");
+    await page.click('.mv-chip[data-d4="2402"]');
+    expect(await page.locator('#mv-sel-count').innerText()).toBe("2");
+    await page.click('.mv-dest:has-text("Cookhouse")');
+    expect((await cardOf(page, "Cookhouse")).count).toBe("2");
+    await page.click('button:has-text("Done")');
+
+    // Out-of-camp bodies match too — the search answers "where is he?" even
+    // when the answer is "not in camp".
+    await page.evaluate(() => {
+      const today = isoToDisplayDate(todayISO());
+      STATE.medical.push({ id: nextId(), d4: "1402", date: today, reason: "Fever", status: "MC", startDate: today, endDate: today, inCamp: false });
+      saveLocal(); render();
+    });
+    await page.fill("#mv-find", "alpha two");
+    expect(await page.locator(".mv-card:visible .mv-name").innerText()).toContain("Out of Camp");
+  });
+
   test("dashboard hero shows a distribution bar that reconciles to strength", async ({ page }) => {
     await seedAndGoto(page);
     // Split a couple recruits so the hero shows more than one segment.

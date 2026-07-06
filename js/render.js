@@ -1183,6 +1183,16 @@ function renderMovement(el) {
       <div class="mv-dests">${dests}</div>
     </div>` : "";
 
+  // Find bar — locating ONE named body among 40 chips is the slow path on a
+  // phone (scroll + name-scan per recruit). Typing a few letters of a name or
+  // 4D collapses the board to just the matches (and the cards they're on, so
+  // it doubles as a "where is he?" lookup). Pure DOM filter — no re-render, so
+  // move-mode picks survive a search and the keyboard never loses focus.
+  const findbar = `
+    <div class="mv-findbar">
+      <input type="search" id="mv-find" class="mv-find" placeholder="🔍 Find name / 4D — type to filter the board" autocomplete="off" oninput="mvFindFilter(this.value)">
+    </div>`;
+
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <h2 style="font-size:18px;font-weight:700">🚶 Movement Board <span style="font-size:12px;color:var(--dim);font-weight:400">${isoToDisplayDate(today)}</span></h2>
@@ -1196,6 +1206,7 @@ function renderMovement(el) {
       <div class="stat"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCount}</div></div>
       <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${outCount}</div></div>
     </div>
+    ${findbar}
     <div class="mv-grid${picking ? " picking" : ""}">${cards}</div>
     ${movebar}
     <div style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.5">Movement is day-scoped — bodies auto-return to ${DEFAULT_LOCATION} tomorrow. Card counts sum to Recruits (${totalRecs}). Out-of-camp bodies (MC / leave / booked out) are managed from Medical / Leave / Book Out.</div>`;
@@ -1243,6 +1254,23 @@ function mvQuickPick(kind, val) {
   mvUpdateCount();
 }
 function mvQuickPickEl(el) { mvQuickPick(el.dataset.kind, el.dataset.val); }
+// Live find filter — hides chips that don't match the query (name or 4D) and
+// collapses cards left with no visible chips, so a match is on screen without
+// scrolling. Matches out-of-camp chips too (answers "where is he?" even when
+// the answer is "not here"). Selected-but-hidden chips stay selected — the
+// filter only touches visibility, never picks.
+function mvFindFilter(q) {
+  q = (q || "").trim().toLowerCase();
+  document.querySelectorAll(".mv-card").forEach(card => {
+    let hits = 0;
+    card.querySelectorAll(".mv-chip").forEach(chip => {
+      const hit = !q || chip.textContent.toLowerCase().includes(q);
+      chip.classList.toggle("mv-hide", !hit);
+      if (hit) hits++;
+    });
+    card.classList.toggle("mv-hide", !!q && !hits);
+  });
+}
 // Drop via a big destination button — explicit intent, so nudge if empty.
 function mvDropTo(loc) {
   const ids = mvSelectedIds();

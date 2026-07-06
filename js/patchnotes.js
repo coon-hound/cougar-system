@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 116;
+const APP_VERSION = 117;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,15 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 117,
+    date: "6 Jul 2026",
+    title: "Movement board — find a body fast",
+    intro: "Finding one recruit among 40 chips meant scrolling and scanning. Now you type instead.",
+    items: [
+      { t: "🔍 Find bar", d: "Type a few letters of a name or 4D and the board collapses to just the matches — the card they're on tells you where they are. Works while moving too: search, tap, search the next, then drop them all at once." },
+    ],
+  },
   {
     v: 116,
     date: "4 Jul 2026",
