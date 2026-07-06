@@ -365,6 +365,8 @@ tr:hover{background:var(--surface2)}
 .mv-from-label{font-size:11px;color:var(--muted);font-weight:600;margin-right:2px}
 .mv-from{padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--orange);background:var(--surface2);color:var(--text);white-space:nowrap}
 .mv-from:hover{filter:brightness(1.18)}
+.mv-undo{padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--orange);background:var(--surface2);color:var(--text);width:100%}
+.mv-undo:hover{filter:brightness(1.15)}
 .mv-dests{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
 .mv-dest{flex:0 0 auto;padding:8px 13px;border-radius:7px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text);white-space:nowrap}
 .mv-dest:hover{filter:brightness(1.18)}

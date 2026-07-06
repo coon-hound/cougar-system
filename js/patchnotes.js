@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 118;
+const APP_VERSION = 119;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,15 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 119,
+    date: "6 Jul 2026",
+    title: "Movement board — undo a wrong drop",
+    intro: "In move mode every location card is a drop target, so a stray tap while scrolling could send your whole selection to the wrong place — and putting a mixed pick back together from memory was slow and error-prone.",
+    items: [
+      { t: "↩ Undo last move", d: "One tap puts everyone from the last move back exactly where they were — each body to its own previous spot. Works for any move (drop bar, card tap, list picker, even Recall all). Tap again to redo." },
+    ],
+  },
   {
     v: 118,
     date: "6 Jul 2026",

@@ -1536,17 +1536,44 @@ function moveToLocation(d4s, location) {
   const outMap = outOfCampMap(today);
   const toDefault = !location || location === DEFAULT_LOCATION;
   const moved = [];
+  const prevEntries = [];
   ids.forEach(d4 => {
     const r = STATE.roster.find(x => x.id === d4);
     if (!r || r.role === "Commander" || outMap.has(d4)) return;
+    prevEntries.push({ d4: r.id, location: r.location || "", locationSince: r.locationSince || "" });
     if (toDefault) { r.location = ""; r.locationSince = ""; }
     else { r.location = location; r.locationSince = today; }
     moved.push(r);
   });
   if (!moved.length) return;
+  MV_UNDO = { day: today, desc: `${moved.length} → ${toDefault ? DEFAULT_LOCATION : location}`, redo: false, entries: prevEntries };
   saveLocal(); render();
   // N sequential row upserts through the per-tab queue. Fine for squad sizes;
   // the local update already landed so the UI never waits on the network.
+  if (STATE.apiUrl) moved.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+}
+
+// Undo the last movement (any path through moveToLocation: on-board drop,
+// card-tap misfire, list picker, recall). Restores each body's PREVIOUS
+// per-person location — a wrong drop of a mixed-source selection would
+// otherwise be a multi-leg memory reconstruction (measured >30s on a phone,
+// with silent-corruption risk when memory fails). The restore is itself
+// captured, so a second tap redoes the move. In-session and day-scoped only —
+// stale undo across a day boundary would resurrect yesterday's locations.
+let MV_UNDO = null;
+function mvUndoLastMove() {
+  if (!MV_UNDO || MV_UNDO.day !== todayISO()) { MV_UNDO = null; render(); return; }
+  const redoEntries = [];
+  const moved = [];
+  MV_UNDO.entries.forEach(e => {
+    const r = STATE.roster.find(x => x.id === e.d4);
+    if (!r || r.role === "Commander") return;
+    redoEntries.push({ d4: r.id, location: r.location || "", locationSince: r.locationSince || "" });
+    r.location = e.location; r.locationSince = e.locationSince;
+    moved.push(r);
+  });
+  MV_UNDO = moved.length ? { day: MV_UNDO.day, desc: MV_UNDO.desc, redo: !MV_UNDO.redo, entries: redoEntries } : null;
+  saveLocal(); render();
   if (STATE.apiUrl) moved.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
 }
 

@@ -1106,6 +1106,13 @@ function renderMovement(el) {
   const picking = MOVE_MODE;
   const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong></div>` : "";
 
+  // Undo safety net — in move mode every card surface is a drop target, so a
+  // scroll-tap misfire silently commits the whole selection. Without this,
+  // recovering a mixed-source selection is a per-person memory reconstruction.
+  const undoOk = MV_UNDO && MV_UNDO.day === today;
+  const undoLabel = undoOk ? `${MV_UNDO.redo ? "↻ Redo" : "↩ Undo"} last move (${escapeAttr(MV_UNDO.desc)})` : "";
+  const undoTitle = "Put everyone from the last move back where they were";
+
   const pips = byPlt => Object.keys(byPlt).sort().map(p =>
     `<span style="white-space:nowrap;margin-right:8px">${p === "?" ? "–" : "P" + p} <strong style="color:var(--text)">${byPlt[p]}</strong></span>`
   ).join("");
@@ -1144,6 +1151,7 @@ function renderMovement(el) {
        <button class="btn" onclick="openMoveForm()" title="Manual checklist picker (backup)">📋 List picker</button>`
     : `<button class="btn btn-primary" onclick="enterMoveMode()">🚶 Move Bodies</button>
        ${awayFromMain ? `<button class="btn btn-success" onclick="recallAll()" title="Send everyone in camp back to ${DEFAULT_LOCATION}">↩ Recall all (${awayFromMain})</button>` : ""}
+       ${undoOk ? `<button class="btn" onclick="mvUndoLastMove()" title="${undoTitle}">${undoLabel}</button>` : ""}
        <button class="btn" onclick="openLocationsForm()" title="Add / rename / remove locations">⚙ Locations</button>`;
 
   const banner = picking
@@ -1182,6 +1190,7 @@ function renderMovement(el) {
       </div>
       <div class="mv-sel-from" id="mv-sel-from" style="display:none"></div>
       <div class="mv-dests">${dests}</div>
+      ${undoOk ? `<button class="mv-undo" onclick="mvUndoLastMove()" title="${undoTitle}">${undoLabel}</button>` : ""}
     </div>` : "";
 
   // Find bar — locating ONE named body among 40 chips is the slow path on a
