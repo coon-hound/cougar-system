@@ -314,3 +314,83 @@ tr:hover{background:var(--surface2)}
   #content,.card{overflow-x:hidden}
   .table-wrap{overflow-x:auto}  /* re-assert — explicit > inherited */
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Movement board — on-board tap-to-move. Buttons reuse the standard
+   .btn sizing (no oversized variants). Fast path: quick-pick a unit
+   (platoon / program / group) → tap a destination.
+   ───────────────────────────────────────────────────────────── */
+.mv-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.mv-pick-banner{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5}
+
+/* Quick-pick unit bar (move mode) */
+.mv-quickpick{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}
+.mv-qp-label{font-size:11px;color:var(--muted);font-weight:600;margin-right:2px}
+.mv-qp{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text)}
+.mv-qp:hover{border-color:var(--accent);filter:brightness(1.15)}
+
+/* Find bar — live filter over the chips; .mv-hide is toggled by mvFindFilter */
+.mv-findbar{margin-top:12px}
+.mv-find{width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font:inherit;font-size:13px}
+.mv-find:focus{outline:none;border-color:var(--accent)}
+.mv-find::placeholder{color:var(--dim)}
+.mv-hide{display:none!important}
+
+/* Location cards */
+.mv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;margin-top:12px}
+.mv-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 14px 13px;position:relative;transition:border-color .12s,box-shadow .12s}
+.mv-card.mv-out{opacity:.92}
+.mv-grid.picking .mv-card:not(.mv-out){cursor:pointer}
+.mv-grid.picking .mv-card:not(.mv-out):hover{border-color:var(--accent);box-shadow:0 0 0 2px var(--accentDim)}
+.mv-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.mv-name{font-size:15px;font-weight:700;margin:0}
+.mv-count{font-size:28px;font-weight:800;line-height:.85;font-family:'JetBrains Mono',monospace}
+.mv-pips{font-size:11px;color:var(--muted);margin:6px 0 10px;display:flex;flex-wrap:wrap}
+.mv-selall{font-size:11px;font-weight:600;color:var(--accent);background:transparent;border:1px dashed var(--accent);border-radius:6px;padding:5px 9px;cursor:pointer;margin-bottom:10px}
+.mv-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mv-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer;user-select:none;white-space:nowrap}
+.mv-chip:hover{border-color:var(--accent)}
+.mv-chip-id{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent);font-size:11px}
+.mv-chip-sub{font-size:10px;color:var(--muted)}
+.mv-chip.mv-moved{border-style:dashed;border-color:var(--teal)}
+.mv-chip.mv-moved .mv-chip-sub{color:var(--teal)}
+.mv-chip.sel{background:var(--accentDim);border-color:var(--accent);color:#fff}
+.mv-chip.sel .mv-chip-id{color:#cfe4ff}
+.mv-empty{font-size:12px;color:var(--dim);padding:4px 0}
+
+/* Sticky drop bar (move mode) */
+.mv-movebar{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--accent);border-radius:10px;box-shadow:0 -6px 24px rgba(0,0,0,.45);padding:10px 12px;margin-top:16px;display:flex;flex-direction:column;gap:9px;z-index:20}
+.mv-movebar-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mv-movebar-count{font-size:13px;font-weight:700}
+.mv-movebar-count span{color:var(--accent)}
+.mv-sel-from{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.mv-from-label{font-size:11px;color:var(--muted);font-weight:600;margin-right:2px}
+.mv-from{padding:5px 10px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--orange);background:var(--surface2);color:var(--text);white-space:nowrap}
+.mv-from:hover{filter:brightness(1.18)}
+.mv-from-moved{border-color:var(--teal)}
+.mv-undo{padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--orange);background:var(--surface2);color:var(--text);width:100%}
+.mv-undo:hover{filter:brightness(1.15)}
+.mv-dests{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.mv-dest{flex:0 0 auto;padding:8px 13px;border-radius:7px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text);white-space:nowrap}
+.mv-dest:hover{filter:brightness(1.18)}
+
+/* Dashboard hero */
+.mv-hero{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--teal);border-radius:10px;padding:15px 18px;margin-bottom:16px}
+.mv-hero-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.mv-hero-title{font-size:15px;font-weight:700;margin:0}
+.mv-bar{display:flex;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--surface2)}
+.mv-seg{display:flex;align-items:center;justify-content:center;min-width:34px;color:#0D1117;font-weight:800;font-size:13px;cursor:pointer;overflow:hidden;white-space:nowrap;transition:filter .12s}
+.mv-seg:hover{filter:brightness(1.12)}
+.mv-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px}
+.mv-leg{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px}
+.mv-leg-dot{width:12px;height:12px;border-radius:3px;flex:0 0 auto}
+.mv-leg-c{font-weight:800;font-family:'JetBrains Mono',monospace}
+.mv-leg-n{color:var(--muted)}
+
+@media (max-width:640px){
+  .mv-grid{grid-template-columns:1fr;gap:10px}
+  .mv-count{font-size:26px}
+  .mv-chip{padding:8px 13px;font-size:13px}
+  .mv-dest{padding:10px 14px}
+  .mv-qp{padding:8px 13px}
+}

@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 114;
+const APP_VERSION = 120;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,64 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 120,
+    date: "6 Jul 2026",
+    title: "Movement board — rotate stations safely",
+    intro: "Rotating groups between stations (Range → Cookhouse → Lecture → Range) had a trap: after the first drop, \"Pick all here\" also grabbed the bodies that JUST arrived, so the next drop dragged them along.",
+    items: [
+      { t: "↪ Just-moved marker", d: "While you're in move mode, anyone you've already moved shows a ↪ on their chip — so a station's originals and fresh arrivals are distinguishable at a glance." },
+      { t: "✂ Shed arrivals in one tap", d: "When a pick includes just-moved bodies, the drop bar splits them out (e.g. ✕ Cookhouse · 9 and ✕ ↪ Cookhouse · 7 just moved). Tap the ↪ token to keep only the station's originals, then drop — rotation done, in any order." },
+    ],
+  },
+  {
+    v: 119,
+    date: "6 Jul 2026",
+    title: "Movement board — undo a wrong drop",
+    intro: "In move mode every location card is a drop target, so a stray tap while scrolling could send your whole selection to the wrong place — and putting a mixed pick back together from memory was slow and error-prone.",
+    items: [
+      { t: "↩ Undo last move", d: "One tap puts everyone from the last move back exactly where they were — each body to its own previous spot. Works for any move (drop bar, card tap, list picker, even Recall all). Tap again to redo." },
+    ],
+  },
+  {
+    v: 118,
+    date: "6 Jul 2026",
+    title: "Movement board — split a unit safely",
+    intro: "Quick-pick grabs a unit wherever its bodies currently sit — handy, but a \"rest of P1\" tap could silently re-pick the party you just dropped at the Range.",
+    items: [
+      { t: "📍 Picked-from breakdown", d: "When your picks span more than one location, the drop bar now lists where they're from (e.g. Main Body · 4, Range · 6). Tap a location's ✕ to shed its picks — so \"the rest of P1\" is quick-pick P1, shed Range, drop." },
+    ],
+  },
+  {
+    v: 117,
+    date: "6 Jul 2026",
+    title: "Movement board — find a body fast",
+    intro: "Finding one recruit among 40 chips meant scrolling and scanning. Now you type instead.",
+    items: [
+      { t: "🔍 Find bar", d: "Type a few letters of a name or 4D and the board collapses to just the matches — the card they're on tells you where they are. Works while moving too: search, tap, search the next, then drop them all at once." },
+    ],
+  },
+  {
+    v: 116,
+    date: "4 Jul 2026",
+    title: "Movement board — where every body is right now",
+    intro: "A new Movement tab shows where each in-camp recruit is, and lets you move whole units around in a couple of taps.",
+    items: [
+      { t: "🚶 Live location board", d: "One card per location (Range, Cookhouse, …); every in-camp recruit sits in exactly one, and out-of-camp bodies show too, so the counts always reconcile to strength." },
+      { t: "⚡ Tap-to-move + quick-pick", d: "Tap recruits (or a whole platoon / program / group) then tap a destination. Recall All sends everyone back to Main Body; locations auto-reset next day." },
+      { t: "📊 Dashboard snapshot", d: "A distribution bar on the dashboard shows the whole company's spread at a glance and links straight into the board." },
+    ],
+  },
+  {
+    v: 115,
+    date: "4 Jul 2026",
+    title: "Book a whole group back IN",
+    intro: "Book In now works by scope too, mirroring Book Out.",
+    items: [
+      { t: "↩ Book In by scope", d: "The dashboard's Currently Out of Camp panel has a Book In button - pick a platoon / program / group / combined group (each shows its out-of-camp count) and book them all back in one tap." },
+      { t: "🔁 Same rules as one-at-a-time", d: "Clears a manual book-out, or counts an MC/leave recruit present for today (auto-resets tomorrow). Only affects recruits currently out of camp." },
+    ],
+  },
   {
     v: 114,
     date: "4 Jul 2026",

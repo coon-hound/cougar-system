@@ -1379,8 +1379,21 @@ function bookOutTargets(scope) {
   return [];
 }
 
-// Bulk book-out for TODAY — optimistic local update, then one row-scoped upsert
-// per changed recruit. Only recruits currently IN camp are affected; anyone already out (MC/
+// Inverse of bookOutTargets: recruits in the scope who are currently OUT of camp
+// (the ones a bulk Book In can act on). Same scope grammar.
+function bookInTargets(scope) {
+  const outMap = outOfCampMap(todayISO());
+  const out = STATE.roster.filter(r => r.role !== "Commander" && outMap.has(r.id));
+  if (scope === "company") return out;
+  if (scope && scope.indexOf("plt:") === 0) { const p = scope.slice(4); return out.filter(r => getPlt(r) === p); }
+  if (scope && scope.indexOf("prog:") === 0) { const k = scope.slice(5); return out.filter(r => programOf(r) === k); }
+  if (scope && scope.indexOf("grp:") === 0) { const g = scope.slice(4); return out.filter(r => recruitInGroup(r, g)); }
+  if (scope && scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return out.filter(r => set.has(r.id)); }
+  return [];
+}
+
+// Bulk book-out for TODAY — mirrors moveToLocation's optimistic + N-upsert
+// pattern. Only recruits currently IN camp are affected; anyone already out (MC/
 // leave/booked out) is skipped so we never stamp a manual reason over a record.
 // Day-scoped (outSince === today) so the whole batch auto-clears tomorrow.
 function bookOutMany(d4s, reason) {
@@ -1404,33 +1417,72 @@ function bookOutMany(d4s, reason) {
   return booked.length;
 }
 
-// Ad-hoc "book out" picker (dashboard "+ Book Out"): book out a single recruit,
-// or a whole company / platoon / training program in one tap. Scope options show
-// the live count of in-camp recruits they'd affect.
-function openBookOutPicker() {
+// Bulk book-IN for TODAY (inverse of bookOutMany) — only recruits currently OUT
+// are affected. Clears a manual book-out; for an MC/leave recruit it sets the
+// day-scoped present-override so they count in camp today (same as the per-
+// recruit Book In). Auto-resets tomorrow.
+function bookInMany(d4s) {
+  const ids = Array.isArray(d4s) ? d4s : [d4s];
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const changed = [];
+  ids.forEach(d4 => {
+    const r = STATE.roster.find(x => x.id === d4);
+    if (!r || r.role === "Commander" || !outMap.has(d4)) return;
+    r.outOfCamp = false;
+    r.outReason = "";
+    r.outSince = "";
+    if (derivedCampOut(d4, today)) { r.campIn = true; r.campInSince = today; }
+    else { r.campIn = false; r.campInSince = ""; }
+    changed.push(r);
+  });
+  if (!changed.length) return 0;
+  saveLocal(); render();
+  if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+  return changed.length;
+}
+
+// Ad-hoc book out / in picker (dashboard buttons): act on a single recruit, or a
+// whole company / platoon / program / group / combined group in one tap. `dir`
+// is "out" (default) or "in". Counts show the live number of recruits each scope
+// would affect — in-camp for book-out, out-of-camp for book-in.
+function openBookOutPicker(dir) {
+  dir = dir === "in" ? "in" : "out";
   const outMap = outOfCampMap(todayISO());
-  const inCamp = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
-  const platoons = [...new Set(inCamp.map(getPlt).filter(Boolean))].sort();
-  const progs = (STATE.programs || []).filter(pr => inCamp.some(r => programOf(r) === pr.key));
-  const groups = allGroupNames().filter(g => inCamp.some(r => recruitInGroup(r, g)));
-  const inCampIds = new Set(inCamp.map(r => r.id));
-  const combined = allCombinedNames();
+  // The pool a direction can act on: in-camp recruits for book-out, out-of-camp
+  // recruits for book-in.
+  const pool = STATE.roster.filter(r => r.role !== "Commander" && (dir === "in" ? outMap.has(r.id) : !outMap.has(r.id)));
+  const poolIds = new Set(pool.map(r => r.id));
+  const platoons = [...new Set(pool.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => pool.some(r => programOf(r) === pr.key));
+  const groups = allGroupNames().filter(g => pool.some(r => recruitInGroup(r, g)));
+  const combined = allCombinedNames().filter(n => [...combinedMemberSet(n)].some(d => poolIds.has(d)));
+  const cnt = pred => pool.filter(pred).length;
   const scopeOpts = [
     `<option value="recruit">One recruit…</option>`,
-    `<option value="company">Whole company (${inCamp.length})</option>`,
-    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${inCamp.filter(r => getPlt(r) === p).length})</option>`),
-    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${inCamp.filter(r => programOf(r) === pr.key).length})</option>`),
-    ...groups.map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${inCamp.filter(r => recruitInGroup(r, g)).length})</option>`),
-    ...combined.map(n => { const c = [...combinedMemberSet(n)].filter(d => inCampIds.has(d)).length; return `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${c})</option>`; })
+    `<option value="company">Whole company (${pool.length})</option>`,
+    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt(r => getPlt(r) === p)})</option>`),
+    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt(r => programOf(r) === pr.key)})</option>`),
+    ...groups.map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt(r => recruitInGroup(r, g))})</option>`),
+    ...combined.map(n => { const set = combinedMemberSet(n); return `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt(r => set.has(r.id))})</option>`; })
   ].join("");
-  openModal("Book Out of Camp", `
-    <form onsubmit="event.preventDefault(); submitBookOut(); return false">
+  const title = dir === "in" ? "Book In to Camp" : "Book Out of Camp";
+  const info = dir === "in"
+    ? "Books recruits back IN for today — clears a manual book-out, or counts an MC/leave recruit present (auto-resets tomorrow). Only affects recruits currently out of camp."
+    : "Marks recruits out of camp for today (auto-clears tomorrow). Recruits already out (MC / leave / booked out) are skipped. For multi-day absences, log a Leave instead.";
+  const reasonField = dir === "in" ? "" : formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`);
+  const btn = dir === "in"
+    ? `<button type="submit" class="btn btn-success">↩ Book In</button>`
+    : `<button type="submit" class="btn btn-danger">🚪 Book Out</button>`;
+  openModal(title, `
+    <form onsubmit="event.preventDefault(); submitBookOut('${dir}'); return false">
+      <input type="hidden" id="f-bo-dir" value="${dir}">
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-size:11px;color:var(--muted)">Marks recruits out of camp for today (auto-clears tomorrow). Recruits already out (MC / leave / booked out) are skipped. For multi-day absences, log a Leave instead.</div>
+        <div style="font-size:11px;color:var(--muted)">${info}</div>
         <div class="form-group"><label>Scope</label><select id="f-bo-scope" class="topbar-select" style="width:100%" onchange="onBookOutScopeChange()">${scopeOpts}</select></div>
         <div class="form-group" id="f-bo-recruit-wrap"><label>Recruit</label>${rosterSelect("f-bo-d4", false, "")}</div>
-        ${formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`)}
-        <button type="submit" class="btn btn-danger">🚪 Book Out</button>
+        ${reasonField}
+        ${btn}
       </div>
     </form>`);
   onBookOutScopeChange();
@@ -1440,32 +1492,239 @@ function onBookOutScopeChange() {
   const wrap = document.getElementById("f-bo-recruit-wrap");
   if (wrap) wrap.style.display = gv("f-bo-scope") === "recruit" ? "" : "none";
 }
-function submitBookOut() {
+function submitBookOut(dir) {
+  dir = (dir || gv("f-bo-dir")) === "in" ? "in" : "out";
   const scope = gv("f-bo-scope") || "recruit";
-  const reason = gv("f-bo-reason") || "Out of camp";
   if (scope === "recruit") {
     const d4 = gv("f-bo-d4");
     if (!d4) { alert("Pick a recruit first."); return; }
-    bookOutToggle(d4, true, reason);
+    bookOutToggle(d4, dir === "out", dir === "out" ? (gv("f-bo-reason") || "Out of camp") : undefined);
     closeModal();
     return;
   }
-  const targets = bookOutTargets(scope).map(r => r.id);
-  if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
   const label = scope === "company" ? "the whole company"
     : scope.indexOf("plt:") === 0 ? "Platoon " + scope.slice(4)
     : scope.indexOf("grp:") === 0 ? scope.slice(4)
     : scope.indexOf("comb:") === 0 ? scope.slice(5)
     : programLabel(scope.slice(5));
+  if (dir === "in") {
+    const targets = bookInTargets(scope).map(r => r.id);
+    if (!targets.length) { alert("No out-of-camp recruits to book in in that scope."); return; }
+    if (!confirm(`Book in ${targets.length} recruit${targets.length === 1 ? "" : "s"} in ${label}?`)) return;
+    bookInMany(targets);
+    closeModal();
+    return;
+  }
+  const reason = gv("f-bo-reason") || "Out of camp";
+  const targets = bookOutTargets(scope).map(r => r.id);
+  if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
   if (!confirm(`Book out ${targets.length} in-camp recruit${targets.length === 1 ? "" : "s"} in ${label}?\nReason: ${reason}`)) return;
   bookOutMany(targets, reason);
   closeModal();
 }
 
+// ── Movement board mutations + forms ─────────────────────────
+// Move one or more recruits to an in-camp location for TODAY. Day-scoped
+// (locationSince === today) exactly like a manual book-out, so it auto-clears
+// tomorrow with no cron. Optimistic: STATE + render() update instantly, then
+// each Roster row upserts (row-scoped, cross-device-safe). Moving to
+// DEFAULT_LOCATION clears the fields. A body that's OUT of camp isn't on the
+// in-camp board, so it's skipped — movement never touches out-of-camp state.
+function moveToLocation(d4s, location) {
+  const ids = Array.isArray(d4s) ? d4s : [d4s];
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const toDefault = !location || location === DEFAULT_LOCATION;
+  const moved = [];
+  const prevEntries = [];
+  ids.forEach(d4 => {
+    const r = STATE.roster.find(x => x.id === d4);
+    if (!r || r.role === "Commander" || outMap.has(d4)) return;
+    prevEntries.push({ d4: r.id, location: r.location || "", locationSince: r.locationSince || "" });
+    if (toDefault) { r.location = ""; r.locationSince = ""; }
+    else { r.location = location; r.locationSince = today; }
+    moved.push(r);
+  });
+  if (!moved.length) return;
+  MV_UNDO = { day: today, desc: `${moved.length} → ${toDefault ? DEFAULT_LOCATION : location}`, redo: false, entries: prevEntries };
+  // In move mode, remember who just moved — the ↪ chip marker + split
+  // picked-from token need it to tell a station's originals from arrivals.
+  if (MOVE_MODE) moved.forEach(r => MV_SESSION_MOVED.add(r.id));
+  saveLocal(); render();
+  // N sequential row upserts through the per-tab queue. Fine for squad sizes;
+  // the local update already landed so the UI never waits on the network.
+  if (STATE.apiUrl) moved.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+}
+
+// Undo the last movement (any path through moveToLocation: on-board drop,
+// card-tap misfire, list picker, recall). Restores each body's PREVIOUS
+// per-person location — a wrong drop of a mixed-source selection would
+// otherwise be a multi-leg memory reconstruction (measured >30s on a phone,
+// with silent-corruption risk when memory fails). The restore is itself
+// captured, so a second tap redoes the move. In-session and day-scoped only —
+// stale undo across a day boundary would resurrect yesterday's locations.
+let MV_UNDO = null;
+function mvUndoLastMove() {
+  if (!MV_UNDO || MV_UNDO.day !== todayISO()) { MV_UNDO = null; render(); return; }
+  const wasRedo = MV_UNDO.redo;
+  const redoEntries = [];
+  const moved = [];
+  MV_UNDO.entries.forEach(e => {
+    const r = STATE.roster.find(x => x.id === e.d4);
+    if (!r || r.role === "Commander") return;
+    redoEntries.push({ d4: r.id, location: r.location || "", locationSince: r.locationSince || "" });
+    r.location = e.location; r.locationSince = e.locationSince;
+    moved.push(r);
+  });
+  // Keep the ↪ just-moved session set truthful: an undo puts the bodies back
+  // (no longer arrivals), a redo re-applies the move.
+  moved.forEach(r => { if (wasRedo) MV_SESSION_MOVED.add(r.id); else MV_SESSION_MOVED.delete(r.id); });
+  MV_UNDO = moved.length ? { day: MV_UNDO.day, desc: MV_UNDO.desc, redo: !MV_UNDO.redo, entries: redoEntries } : null;
+  saveLocal(); render();
+  if (STATE.apiUrl) moved.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+}
+
+// One-tap automation: send everyone currently in camp back to DEFAULT_LOCATION
+// (end-of-activity recall). Out-of-camp bodies are untouched. The manual per-
+// move flow remains the backup for anything finer-grained.
+function recallAll() {
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const ids = STATE.roster
+    .filter(r => r.role !== "Commander" && !outMap.has(r.id) && r.locationSince === today && r.location && r.location !== DEFAULT_LOCATION)
+    .map(r => r.id);
+  if (!ids.length) { alert(`Everyone in camp is already at ${DEFAULT_LOCATION}.`); return; }
+  if (!confirm(`Recall all ${ids.length} recruit${ids.length === 1 ? "" : "s"} back to ${DEFAULT_LOCATION}?`)) return;
+  moveToLocation(ids, DEFAULT_LOCATION);
+}
+
+// Toggle every checkbox in a platoon group (or all, when plt === "*").
+function moveToggleGroup(master, plt) {
+  const sel = plt === "*"
+    ? "#move-recruit-list input[type=checkbox][data-d4]"
+    : `#move-recruit-list input[type=checkbox][data-plt="${CSS.escape(plt)}"]`;
+  document.querySelectorAll(sel).forEach(el => { el.checked = master.checked; });
+}
+
+// Primary movement input: pick a destination + check who's moving. In-camp
+// recruits only (out-of-camp bodies are managed by medical/leave/book-out),
+// grouped by platoon with per-group select-all so a whole squad moves in a tap.
+// `preselectId` pre-checks one recruit for the per-card quick-move path.
+function openMoveForm(preselectId) {
+  const today = todayISO();
+  const outMap = outOfCampMap(today);
+  const recruits = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
+  if (!recruits.length) {
+    openModal("🚶 Move Bodies", `<div class="empty-state" style="padding:16px;font-size:12px">No in-camp recruits to move — everyone is out of camp or the roster is empty.</div>`);
+    return;
+  }
+  const curLoc = r => (r.locationSince === today && r.location) ? r.location : DEFAULT_LOCATION;
+  const byPlt = {};
+  recruits.forEach(r => { const p = getPlt(r) || "?"; (byPlt[p] = byPlt[p] || []).push(r); });
+  const groups = Object.keys(byPlt).sort().map(p => {
+    const rows = byPlt[p].sort((a, b) => String(a.id).localeCompare(String(b.id))).map(r => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;background:var(--surface2)">
+        <input type="checkbox" data-d4="${r.id}" data-plt="${escapeAttr(p)}" ${r.id === preselectId ? "checked" : ""} style="width:14px;height:14px;cursor:pointer">
+        <span class="mono" style="font-weight:700;color:var(--accent);font-size:11px;min-width:34px">${displayId(r.id)}</span>
+        <span style="font-size:12px;flex:1">${displayPersonLabel(r.id)}</span>
+        <span style="font-size:10px;color:var(--muted)">${curLoc(r)}</span>
+      </label>`).join("");
+    return `
+      <div style="margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;cursor:pointer">
+          <input type="checkbox" onchange="moveToggleGroup(this, '${escapeAttr(p)}')" style="width:14px;height:14px;cursor:pointer"> Platoon ${p} <span style="font-weight:400">(${byPlt[p].length})</span>
+        </label>
+        <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+      </div>`;
+  }).join("");
+
+  openModal("🚶 Move Bodies", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Pick who's moving and where to. Movement is for <strong>today</strong> only — everyone auto-returns to ${DEFAULT_LOCATION} tomorrow. Out-of-camp recruits (MC / leave / booked out) aren't shown.</div>
+      ${formSelect("f-move-loc", "Move to", STATE.locations, false, DEFAULT_LOCATION)}
+      ${formField("f-move-new", "…or a new location", "text", "e.g. Parade Square", `maxlength="40"`)}
+      <div id="move-recruit-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px;cursor:pointer">
+          <input type="checkbox" onchange="moveToggleGroup(this, '*')" style="width:14px;height:14px;cursor:pointer"> Select all in camp (${recruits.length})
+        </label>
+        ${groups}
+      </div>
+      <button class="btn btn-primary" onclick="submitMove()">Move selected</button>
+    </div>`);
+}
+function submitMove() {
+  const ids = [...document.querySelectorAll("#move-recruit-list input[type=checkbox][data-d4]:checked")].map(el => el.dataset.d4);
+  if (!ids.length) { alert("Pick at least one recruit to move."); return; }
+  const dest = ((gv("f-move-new") || "").trim()) || gv("f-move-loc") || DEFAULT_LOCATION;
+  if (/^out of camp$/i.test(dest)) { alert('"Out of Camp" is managed automatically — pick or type an in-camp location.'); return; }
+  // Register a brand-new location name so it's reusable next time.
+  if (dest !== DEFAULT_LOCATION && !(STATE.locations || []).includes(dest)) {
+    STATE.locations.push(dest); saveLocations();
+  }
+  moveToLocation(ids, dest);
+  closeModal();
+}
+
+// Manage the named location list. Rename → recruits follow; remove → recruits
+// return to DEFAULT_LOCATION; DEFAULT_LOCATION itself is protected.
+function openLocationsForm() {
+  const rows = (STATE.locations || []).map(loc => {
+    if (loc === DEFAULT_LOCATION) {
+      return `<div data-loc-row style="display:flex;align-items:center;gap:8px">
+        <input data-orig="${escapeAttr(loc)}" value="${escapeAttr(loc)}" readonly style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:12px">
+        <span style="font-size:10px;color:var(--dim);min-width:44px;text-align:right">default</span></div>`;
+    }
+    return `<div data-loc-row style="display:flex;align-items:center;gap:8px">
+      <input data-orig="${escapeAttr(loc)}" value="${escapeAttr(loc)}" maxlength="40" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px">
+      <button type="button" class="btn btn-danger" style="padding:4px 10px" onclick="this.closest('[data-loc-row]').remove()">✕</button></div>`;
+  }).join("");
+  openModal("⚙ Manage Locations", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Rename a location and its recruits move with it. Remove one (✕) and its recruits return to ${DEFAULT_LOCATION}. ${DEFAULT_LOCATION} is the default and can't be removed.</div>
+      <div id="loc-list" style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+      ${formField("f-loc-new", "Add a location", "text", "e.g. Parade Square", `maxlength="40"`)}
+      <button class="btn btn-primary" onclick="submitLocations()">Save locations</button>
+    </div>`);
+}
+function submitLocations() {
+  const inputs = [...document.querySelectorAll("#loc-list [data-loc-row] input[data-orig]")];
+  const newList = [DEFAULT_LOCATION];
+  const renameMap = {};   // orig name → new name (kept rows only)
+  for (const inp of inputs) {
+    const orig = inp.dataset.orig;
+    const val = (inp.value || "").trim();
+    if (orig === DEFAULT_LOCATION) continue;   // fixed, already seeded
+    if (!val) continue;                        // emptied → treated as removed
+    if (/^out of camp$/i.test(val)) { alert('"Out of Camp" is reserved.'); return; }
+    if (!newList.includes(val)) newList.push(val);
+    renameMap[orig] = val;
+  }
+  const add = (gv("f-loc-new") || "").trim();
+  if (add) {
+    if (/^out of camp$/i.test(add)) { alert('"Out of Camp" is reserved.'); return; }
+    if (!newList.includes(add)) newList.push(add);
+  }
+  // Migrate recruits whose current (fresh) location was renamed or removed.
+  const today = todayISO();
+  const changed = [];
+  STATE.roster.forEach(r => {
+    if (r.role === "Commander" || r.locationSince !== today || !r.location || r.location === DEFAULT_LOCATION) return;
+    const renamed = renameMap[r.location];
+    if (renamed && renamed !== r.location) { r.location = renamed; changed.push(r); }
+    else if (!newList.includes(r.location)) { r.location = ""; r.locationSince = ""; changed.push(r); }
+  });
+  STATE.locations = newList; saveLocations();
+  if (changed.length) {
+    saveLocal();
+    if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
+  }
+  closeModal(); render();
+}
+
 // ── Recruit groups: mutations + management UI ────────────────
 // A group's membership is stored on each recruit's `groups` tag. Setting the
-// FULL membership in one batch: optimistic local update, then N row-scoped
-// upserts. Persistent (NOT day-scoped) — a group assignment
+// FULL membership in one batch mirrors moveToLocation (optimistic local update,
+// then N row-scoped upserts). Persistent (NOT day-scoped) — a group assignment
 // stays until changed. Commanders are never grouped (strength convention).
 function setGroupMembers(name, d4s) {
   name = String(name || "").trim();
