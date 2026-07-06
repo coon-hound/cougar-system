@@ -1082,6 +1082,13 @@ function mvColor(location, idx) {
 // preserves scroll across a move-mode re-render (render() resets it to top).
 let MOVE_MODE = false;
 let _mvScroll = 0;
+// Bodies moved during the CURRENT move-mode session (cleared on entering move
+// mode; moveToLocation adds, undo removes). Powers the ↪ "just moved" chip
+// marker + the split picked-from token: in a station rotation (Range→Cookhouse→
+// Lecture→Range) every "Pick all here" after the first drop also grabs the
+// just-arrived bodies, and for a CYCLE no drop order avoids it — without this,
+// the only correct path is a per-chip memory audit (measured >50s on a phone).
+let MV_SESSION_MOVED = new Set();
 
 // Movement board — where every in-camp body is right now. One card per location
 // (big count + per-platoon pips + name chips). A read-only "Out of Camp" card so
@@ -1127,7 +1134,10 @@ function renderMovement(el) {
         return `<span class="mv-chip" style="cursor:default" title="${escapeAttr(info.reason || "")}"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)} <span class="mv-chip-sub">${outKindLabel(info.kind)}</span></span>`;
       }
       if (picking) {
-        return `<span class="mv-chip" data-d4="${r.id}" onclick="mvChipToggle(this, event)"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)}</span>`;
+        // ↪ marks a body that already moved this session — at pick-all time it
+        // is the only way to tell a station's originals from fresh arrivals.
+        const justMoved = MV_SESSION_MOVED.has(r.id);
+        return `<span class="mv-chip${justMoved ? " mv-moved" : ""}" data-d4="${r.id}" onclick="mvChipToggle(this, event)"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)}${justMoved ? ` <span class="mv-chip-sub" title="Moved earlier in this move session">↪</span>` : ""}</span>`;
       }
       return `<span class="mv-chip" onclick="openPerson('${r.id}')"><span class="mv-chip-id">${displayId(r.id) || "·"}</span>${displayPersonLabel(r.id)}</span>`;
     }).join("");
@@ -1226,7 +1236,7 @@ function renderMovement(el) {
 }
 
 // ── Move-mode interactions (pure DOM — no re-render until a drop commits) ──
-function enterMoveMode() { MOVE_MODE = true; render(); }
+function enterMoveMode() { MOVE_MODE = true; MV_SESSION_MOVED = new Set(); render(); }
 function exitMoveMode() { MOVE_MODE = false; render(); }
 function mvChipToggle(chip, ev) { ev.stopPropagation(); chip.classList.toggle("sel"); mvUpdateCount(); }
 function mvSelectedIds() { return [...document.querySelectorAll(".mv-chip.sel[data-d4]")].map(c => c.dataset.d4); }
@@ -1246,10 +1256,17 @@ function mvUpdateCount() {
 function mvUpdateSelFrom(sel) {
   const wrap = document.getElementById("mv-sel-from");
   if (!wrap) return;
-  const by = new Map();
+  // Per location, split the picks into settled bodies vs ↪ just-moved arrivals
+  // (moved earlier this session). A station rotation's pick-all sweeps both up
+  // as ONE location — the split token is what lets a user shed the arrivals
+  // without a per-chip memory audit.
+  const by = new Map();   // loc -> {settled, moved}
   sel.forEach(c => {
     const loc = c.closest(".mv-card")?.dataset.loc;
-    if (loc) by.set(loc, (by.get(loc) || 0) + 1);
+    if (!loc) return;
+    const g = by.get(loc) || { settled: 0, moved: 0 };
+    g[c.classList.contains("mv-moved") ? "moved" : "settled"]++;
+    by.set(loc, g);
   });
   wrap.innerHTML = "";
   wrap.style.display = by.size ? "" : "none";
@@ -1258,19 +1275,29 @@ function mvUpdateSelFrom(sel) {
   label.className = "mv-from-label";
   label.textContent = "picked from:";
   wrap.appendChild(label);
-  by.forEach((n, loc) => {
+  const token = (loc, n, moved) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "mv-from";
-    b.textContent = `✕ ${loc} · ${n}`;
-    b.title = `Remove the ${n} picked at ${loc} from the selection`;
-    b.onclick = () => mvDeselectLoc(loc);
+    b.className = "mv-from" + (moved ? " mv-from-moved" : "");
+    b.textContent = moved ? `✕ ↪ ${loc} · ${n} just moved` : `✕ ${loc} · ${n}`;
+    b.title = moved
+      ? `Remove the ${n} at ${loc} who already moved this session (e.g. keep a station's originals when rotating)`
+      : `Remove the ${n} picked at ${loc} from the selection`;
+    b.onclick = () => mvDeselectLoc(loc, moved);
     wrap.appendChild(b);
+  };
+  by.forEach((g, loc) => {
+    if (g.settled) token(loc, g.settled, false);
+    if (g.moved) token(loc, g.moved, true);
   });
 }
-function mvDeselectLoc(loc) {
+// Deselect a location's picks. `moved` narrows to one subgroup (true = only the
+// ↪ just-moved arrivals, false = only the settled originals); omitted = all.
+function mvDeselectLoc(loc, moved) {
   const card = [...document.querySelectorAll(".mv-card")].find(c => c.dataset.loc === loc);
-  if (card) card.querySelectorAll(".mv-chip.sel[data-d4]").forEach(c => c.classList.remove("sel"));
+  if (card) card.querySelectorAll(".mv-chip.sel[data-d4]").forEach(c => {
+    if (moved === undefined || c.classList.contains("mv-moved") === moved) c.classList.remove("sel");
+  });
   mvUpdateCount();
 }
 function mvSelectAllInCard(loc, ev) {

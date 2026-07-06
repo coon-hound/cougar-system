@@ -1547,6 +1547,9 @@ function moveToLocation(d4s, location) {
   });
   if (!moved.length) return;
   MV_UNDO = { day: today, desc: `${moved.length} → ${toDefault ? DEFAULT_LOCATION : location}`, redo: false, entries: prevEntries };
+  // In move mode, remember who just moved — the ↪ chip marker + split
+  // picked-from token need it to tell a station's originals from arrivals.
+  if (MOVE_MODE) moved.forEach(r => MV_SESSION_MOVED.add(r.id));
   saveLocal(); render();
   // N sequential row upserts through the per-tab queue. Fine for squad sizes;
   // the local update already landed so the UI never waits on the network.
@@ -1563,6 +1566,7 @@ function moveToLocation(d4s, location) {
 let MV_UNDO = null;
 function mvUndoLastMove() {
   if (!MV_UNDO || MV_UNDO.day !== todayISO()) { MV_UNDO = null; render(); return; }
+  const wasRedo = MV_UNDO.redo;
   const redoEntries = [];
   const moved = [];
   MV_UNDO.entries.forEach(e => {
@@ -1572,6 +1576,9 @@ function mvUndoLastMove() {
     r.location = e.location; r.locationSince = e.locationSince;
     moved.push(r);
   });
+  // Keep the ↪ just-moved session set truthful: an undo puts the bodies back
+  // (no longer arrivals), a redo re-applies the move.
+  moved.forEach(r => { if (wasRedo) MV_SESSION_MOVED.add(r.id); else MV_SESSION_MOVED.delete(r.id); });
   MV_UNDO = moved.length ? { day: MV_UNDO.day, desc: MV_UNDO.desc, redo: !MV_UNDO.redo, entries: redoEntries } : null;
   saveLocal(); render();
   if (STATE.apiUrl) moved.forEach(r => autoSync("Roster", { type: "upsert", row: r }));

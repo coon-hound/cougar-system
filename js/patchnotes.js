@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 119;
+const APP_VERSION = 120;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 120,
+    date: "6 Jul 2026",
+    title: "Movement board — rotate stations safely",
+    intro: "Rotating groups between stations (Range → Cookhouse → Lecture → Range) had a trap: after the first drop, \"Pick all here\" also grabbed the bodies that JUST arrived, so the next drop dragged them along.",
+    items: [
+      { t: "↪ Just-moved marker", d: "While you're in move mode, anyone you've already moved shows a ↪ on their chip — so a station's originals and fresh arrivals are distinguishable at a glance." },
+      { t: "✂ Shed arrivals in one tap", d: "When a pick includes just-moved bodies, the drop bar splits them out (e.g. ✕ Cookhouse · 9 and ✕ ↪ Cookhouse · 7 just moved). Tap the ↪ token to keep only the station's originals, then drop — rotation done, in any order." },
+    ],
+  },
   {
     v: 119,
     date: "6 Jul 2026",
