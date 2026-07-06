@@ -132,6 +132,43 @@ test.describe("Movement Board", () => {
     expect((await cardOf(page, "Main Body")).count).toBe("3");
   });
 
+  test("drop bar shows a picked-from breakdown when picks span locations; ✕ sheds one location's picks", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.click(`.nav-btn[data-nav="movement"]`);
+    await page.click('button:has-text("Move Bodies")');
+
+    // Split-unit scenario: 2 of P1 already sent to the Range earlier.
+    await page.click('.mv-chip[data-d4="1401"]');
+    await page.click('.mv-chip[data-d4="1402"]');
+    await page.click('.mv-dest:has-text("Range")');
+
+    // Nothing picked: no breakdown row. A single-card pick shows one token,
+    // which doubles as the clear-selection affordance.
+    await expect(page.locator("#mv-sel-from")).toBeHidden();
+    await page.click('.mv-chip[data-d4="2401"]');
+    await expect(page.locator('.mv-from:has-text("Main Body")')).toContainText("1");
+    await page.click('.mv-from:has-text("Main Body")');   // clears the selection
+    expect(await page.locator("#mv-sel-count").innerText()).toBe("0");
+    await expect(page.locator("#mv-sel-from")).toBeHidden();
+
+    // The trap: quick-pick P1 for "the rest of P1" re-picks the Range party too.
+    await page.click('.mv-qp[data-kind="plt"][data-val="1"]');
+    expect(await page.locator("#mv-sel-count").innerText()).toBe("3");
+    await expect(page.locator("#mv-sel-from")).toBeVisible();
+    await expect(page.locator('.mv-from:has-text("Range")')).toContainText("2");
+    await expect(page.locator('.mv-from:has-text("Main Body")')).toContainText("1");
+
+    // One tap sheds the Range contingent; its token disappears.
+    await page.click('.mv-from:has-text("Range")');
+    expect(await page.locator("#mv-sel-count").innerText()).toBe("1");
+    await expect(page.locator('.mv-from:has-text("Range")')).toHaveCount(0);
+
+    // Drop moves ONLY the remaining pick — the Range party stays put.
+    await page.click('.mv-dest:has-text("Cookhouse")');
+    expect((await cardOf(page, "Cookhouse")).count).toBe("1");
+    expect((await cardOf(page, "Range")).count).toBe("2");
+  });
+
   test("find bar filters chips by name / 4D, keeps hidden picks, matches out-of-camp", async ({ page }) => {
     await seedAndGoto(page);
     await page.click(`.nav-btn[data-nav="movement"]`);

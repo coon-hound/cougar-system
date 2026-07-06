@@ -1180,6 +1180,7 @@ function renderMovement(el) {
         <div class="mv-movebar-count"><span id="mv-sel-count">0</span> picked — drop them at:</div>
         <button class="btn" onclick="exitMoveMode()">✕ Cancel</button>
       </div>
+      <div class="mv-sel-from" id="mv-sel-from" style="display:none"></div>
       <div class="mv-dests">${dests}</div>
     </div>` : "";
 
@@ -1221,8 +1222,47 @@ function exitMoveMode() { MOVE_MODE = false; render(); }
 function mvChipToggle(chip, ev) { ev.stopPropagation(); chip.classList.toggle("sel"); mvUpdateCount(); }
 function mvSelectedIds() { return [...document.querySelectorAll(".mv-chip.sel[data-d4]")].map(c => c.dataset.d4); }
 function mvUpdateCount() {
+  const sel = document.querySelectorAll(".mv-chip.sel[data-d4]");
   const el = document.getElementById("mv-sel-count");
-  if (el) el.textContent = document.querySelectorAll(".mv-chip.sel[data-d4]").length;
+  if (el) el.textContent = sel.length;
+  mvUpdateSelFrom(sel);
+}
+// "picked from:" breakdown in the drop bar. Quick-pick grabs a unit WHEREVER
+// it currently sits, so a "rest of P1" tap silently re-picks the party already
+// dropped elsewhere — dropping would yank them along. Listing each source
+// location as a ✕-token makes that visible right above the destinations, and
+// one tap sheds a location's picks (with one location picked, the token is
+// also the only clear-selection affordance). Built with createElement —
+// location names aren't attribute-safe.
+function mvUpdateSelFrom(sel) {
+  const wrap = document.getElementById("mv-sel-from");
+  if (!wrap) return;
+  const by = new Map();
+  sel.forEach(c => {
+    const loc = c.closest(".mv-card")?.dataset.loc;
+    if (loc) by.set(loc, (by.get(loc) || 0) + 1);
+  });
+  wrap.innerHTML = "";
+  wrap.style.display = by.size ? "" : "none";
+  if (!by.size) return;
+  const label = document.createElement("span");
+  label.className = "mv-from-label";
+  label.textContent = "picked from:";
+  wrap.appendChild(label);
+  by.forEach((n, loc) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mv-from";
+    b.textContent = `✕ ${loc} · ${n}`;
+    b.title = `Remove the ${n} picked at ${loc} from the selection`;
+    b.onclick = () => mvDeselectLoc(loc);
+    wrap.appendChild(b);
+  });
+}
+function mvDeselectLoc(loc) {
+  const card = [...document.querySelectorAll(".mv-card")].find(c => c.dataset.loc === loc);
+  if (card) card.querySelectorAll(".mv-chip.sel[data-d4]").forEach(c => c.classList.remove("sel"));
+  mvUpdateCount();
 }
 function mvSelectAllInCard(loc, ev) {
   ev.stopPropagation();

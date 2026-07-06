@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 117;
+const APP_VERSION = 118;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,15 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 118,
+    date: "6 Jul 2026",
+    title: "Movement board — split a unit safely",
+    intro: "Quick-pick grabs a unit wherever its bodies currently sit — handy, but a \"rest of P1\" tap could silently re-pick the party you just dropped at the Range.",
+    items: [
+      { t: "📍 Picked-from breakdown", d: "When your picks span more than one location, the drop bar now lists where they're from (e.g. Main Body · 4, Range · 6). Tap a location's ✕ to shed its picks — so \"the rest of P1\" is quick-pick P1, shed Range, drop." },
+    ],
+  },
   {
     v: 117,
     date: "6 Jul 2026",
