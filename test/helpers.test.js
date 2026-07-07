@@ -89,4 +89,49 @@ module.exports = async function run() {
     ok(!h.isBookedOut({ outOfCamp: true, outSince: YESTERDAY }, DATE), "stale day");
     ok(!h.isBookedOut({ outOfCamp: false, outSince: DATE }, DATE), "not booked");
   });
+
+  suite("helpers: IPPT multi-attempt series (drives the cross-conduct charts)");
+
+  // 1101 improves 60→70→85; 1102 misses IPPT 2 and declines 80→70; 1103 is a
+  // YTT (all-zero) row; 1104 has a score but no run time (incomplete run).
+  const IPPT_ROWS = [
+    { d4: "1101", attempt: 1, pushups: 20, situps: 22, runTime: "13:30", score: 60 },
+    { d4: "1101", attempt: 2, pushups: 28, situps: 30, runTime: "12:40", score: 70 },
+    { d4: "1101", attempt: 3, pushups: 40, situps: 42, runTime: "11:10", score: 85 },
+    { d4: "1102", attempt: 1, pushups: 36, situps: 38, runTime: "11:40", score: 80 },
+    { d4: "1102", attempt: 3, pushups: 28, situps: 30, runTime: "12:40", score: 70 },
+    { d4: "1103", attempt: 1, pushups: 0,  situps: 0,  runTime: "0:00",  score: 0 },
+    { d4: "1104", attempt: 2, pushups: 30, situps: 30, runTime: "0:00",  score: 75 }
+  ];
+
+  await test("ipptSeriesByRecruit: valid scores keyed by attempt; YTT + zero-run rows excluded", () => {
+    const h = loadHelpers(baseState());
+    const series = h.ipptSeriesByRecruit(IPPT_ROWS);
+    const byD4 = Object.fromEntries(series.map(r => [r.d4, r.byAttempt]));
+    eq(JSON.stringify(byD4["1101"]), JSON.stringify({ 1: 60, 2: 70, 3: 85 }));
+    eq(JSON.stringify(byD4["1102"]), JSON.stringify({ 1: 80, 3: 70 }), "missed attempt just absent");
+    ok(!byD4["1103"], "all-zero YTT row contributes nothing");
+    ok(!byD4["1104"], "zero run time excluded (same rule as the trend chart)");
+  });
+
+  await test("ipptPairedCohort: only recruits with BOTH attempts, for any pair", () => {
+    const h = loadHelpers(baseState());
+    const series = h.ipptSeriesByRecruit(IPPT_ROWS);
+    const p13 = h.ipptPairedCohort(series, 1, 3);
+    eq(p13.length, 2);
+    const p1101 = p13.find(p => p.d4 === "1101");
+    eq(p1101.s1, 60); eq(p1101.s2, 85); eq(p1101.delta, 25);
+    eq(p13.find(p => p.d4 === "1102").delta, -10);
+    // 1102 has no IPPT 2, so the 2→3 cohort is 1101 alone.
+    const p23 = h.ipptPairedCohort(series, 2, 3);
+    eq(p23.length, 1);
+    eq(p23[0].d4, "1101");
+  });
+
+  await test("ipptNetDelta: latest taken vs first taken; single attempt = 0", () => {
+    const h = loadHelpers(baseState());
+    eq(h.ipptNetDelta({ byAttempt: { 1: 60, 2: 70, 3: 85 } }), 25);
+    eq(h.ipptNetDelta({ byAttempt: { 1: 80, 3: 70 } }), -10, "gap bridged: last vs first");
+    eq(h.ipptNetDelta({ byAttempt: { 2: 75 } }), 0);
+  });
 };

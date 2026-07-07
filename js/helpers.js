@@ -776,6 +776,39 @@ function computeIPPTStats(entries) {
   return stats;
 }
 
+// ─── IPPT: multi-attempt score series (IPPT 1..N) ─────────────
+// One row per recruit holding every VALID score they posted, keyed by attempt
+// number: { d4, byAttempt: { 1: 68, 2: 74, 3: 81 } }. Valid = non-YTT with a
+// real run time (the same rule the trend chart uses). Every cross-attempt
+// visualization reads this so they all agree on who counts.
+function ipptSeriesByRecruit(entries) {
+  const byD4 = new Map();
+  for (const e of entries) {
+    const n = +e.attempt;
+    if (!(n > 0) || isYTT(e) || parseRunTimeToSeconds(e.runTime) <= 0) continue;
+    if (!byD4.has(e.d4)) byD4.set(e.d4, { d4: e.d4, byAttempt: {} });
+    byD4.get(e.d4).byAttempt[n] = +e.score || 0;
+  }
+  return [...byD4.values()];
+}
+
+// Paired cohort for any two attempts a → b: recruits with a valid score in
+// BOTH. Returns [{d4, s1, s2, delta}] with s1 = score at a, s2 = score at b.
+function ipptPairedCohort(series, a, b) {
+  return series
+    .filter(r => r.byAttempt[a] != null && r.byAttempt[b] != null)
+    .map(r => ({ d4: r.d4, s1: r.byAttempt[a], s2: r.byAttempt[b], delta: r.byAttempt[b] - r.byAttempt[a] }));
+}
+
+// Net direction of a recruit's whole journey: latest taken attempt vs their
+// first. Drives the progression chart's line colour. Returns 0 for a recruit
+// with fewer than two valid attempts.
+function ipptNetDelta(row) {
+  const ns = Object.keys(row.byAttempt).map(Number).sort((a, b) => a - b);
+  if (ns.length < 2) return 0;
+  return row.byAttempt[ns[ns.length - 1]] - row.byAttempt[ns[0]];
+}
+
 // BMI = kg / m². Height is stored in cm in the roster sheet.
 // Categories follow the standard WHO bands. Returns null when either field
 // is missing so callers can render an em-dash instead of NaN.
