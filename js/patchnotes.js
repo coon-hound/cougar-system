@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 114;
+const APP_VERSION = 121;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 121,
+    date: "7 Jul 2026",
+    title: "IPPT charts that cover IPPT 3 (and beyond)",
+    intro: "With IPPT 3 recorded, the old fixed \"IPPT 1 vs IPPT 2\" charts stopped telling the story. The comparison charts now span every conduct.",
+    items: [
+      { t: "📈 Score Progression", d: "One line per recruit across all IPPTs - green went up, red went down, with the bold company average on top. Missed conducts are bridged, so a 1 → 3 journey still draws." },
+      { t: "🔀 Compare any two conducts", d: "The improved/declined scatter now has pair buttons (IPPT 1 → 2, 1 → 3, 2 → 3, …) and defaults to first vs latest. Below it: the most improved recruits and the biggest drops for that pair." },
+      { t: "🏅 Award Mix by Conduct", d: "One stacked %-bar per IPPT showing the Fail / Pass / Silver / Gold / Gold★ mix, so tier movement is visible even when different people took each conduct." },
+    ],
+  },
   {
     v: 114,
     date: "4 Jul 2026",

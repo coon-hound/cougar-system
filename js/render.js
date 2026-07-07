@@ -1294,6 +1294,12 @@ function renderMedical(el) {
 let _ipptAttemptFilter = "";
 function setIpptAttemptFilter(v) { _ipptAttemptFilter = v; render(); }
 
+// Which two conducts the comparison scatter + movers list put side by side.
+// Defaults to first vs latest conduct with data (set in renderIPPT when the
+// stored pair is invalid — e.g. after new data arrives). View-only state.
+let _ipptCmpA = "", _ipptCmpB = "";
+function setIpptCompare(a, b) { _ipptCmpA = a; _ipptCmpB = b; render(); }
+
 function renderIPPT(el) {
   const visible = visibleD4Set();
   const scoped = STATE.ippt.filter(i => passesFilter(i.d4, visible));
@@ -1334,19 +1340,35 @@ function renderIPPT(el) {
     };
   }).filter(r => r.count > 0);
 
-  // Paired IPPT 1 → IPPT 2 cohort: recruits in scope with a non-YTT result in
-  // BOTH attempts. Drives the delta histogram, scatter, and slope charts.
-  const p1 = new Map(), p2 = new Map();
-  scoped.forEach(e => {
-    // Skip YTT and anyone with a 0 run time (incomplete run).
-    if (isYTT(e) || parseRunTimeToSeconds(e.runTime) <= 0) return;
-    if (+e.attempt === 1) p1.set(e.d4, e);
-    else if (+e.attempt === 2) p2.set(e.d4, e);
-  });
-  const paired = [...p1.keys()].filter(d4 => p2.has(d4)).map(d4 => {
-    const s1 = +p1.get(d4).score || 0, s2 = +p2.get(d4).score || 0;
-    return { d4, s1, s2, delta: s2 - s1 };
-  });
+  // Per-recruit score series across every conduct — the shared cohort model
+  // for all the cross-attempt visualizations below (progression lines,
+  // comparison scatter, movers, award mix). Independent of the attempt filter.
+  const series = ipptSeriesByRecruit(scoped);
+  const progression = series.filter(r => Object.keys(r.byAttempt).length >= 2);
+
+  // Comparison pair: any two conducts, defaulting to first vs latest so the
+  // full journey shows by default (the old fixed IPPT 1 vs 2 stopped meaning
+  // anything once IPPT 3 landed). Falls back when the stored pair is stale.
+  let cmpA = attempts.includes(+_ipptCmpA) ? +_ipptCmpA : attempts[0];
+  let cmpB = attempts.includes(+_ipptCmpB) ? +_ipptCmpB : attempts[attempts.length - 1];
+  if (cmpA >= cmpB) { cmpA = attempts[0]; cmpB = attempts[attempts.length - 1]; }
+  const cmpPairs = [];
+  for (let i = 0; i < attempts.length; i++)
+    for (let j = i + 1; j < attempts.length; j++) cmpPairs.push([attempts[i], attempts[j]]);
+  const paired = attempts.length >= 2 ? ipptPairedCohort(series, cmpA, cmpB) : [];
+  const movers = paired.slice().sort((x, y) => y.delta - x.delta);
+  const improvedN = paired.filter(p => p.delta > 0).length;
+  const declinedN = paired.filter(p => p.delta < 0).length;
+
+  // Award mix per conduct: tier tally over everyone with a valid score in that
+  // conduct. Rendered as 100% stacked bars so a different taker count per
+  // conduct can't masquerade as a tier shift.
+  const awardMix = attempts.map(n => {
+    const scores = series.filter(r => r.byAttempt[n] != null).map(r => r.byAttempt[n]);
+    const tally = { "Fail": 0, "Pass": 0, "Silver": 0, "Gold": 0, "Gold★": 0 };
+    scores.forEach(s => { tally[getAward(s)] = (tally[getAward(s)] || 0) + 1; });
+    return { n, count: scores.length, tally };
+  }).filter(r => r.count > 0);
 
   // Top performers: aggregated, sorted by score desc, YTT excluded.
   const topPerformers = aggregated
@@ -1445,13 +1467,39 @@ function renderIPPT(el) {
       <div class="chart-box" style="height:380px"><canvas id="chart-ippt-trend"></canvas></div>
     </div>` : ""}
 
-    ${paired.length >= 2 ? `<div class="card" style="margin-bottom:16px">
-      <h3 style="font-size:15px">IPPT 1 vs IPPT 2 <span style="color:var(--muted);font-weight:400;font-size:11px">above the line = improved · ${paired.length} took both</span></h3>
+    ${attempts.length >= 2 && progression.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="progression">
+      <h3 style="font-size:15px">Score Progression <span style="color:var(--muted);font-weight:400;font-size:11px">one line per recruit across all IPPTs · <span style="color:var(--green)">green</span> up / <span style="color:var(--red)">red</span> down vs their first · bold line = company avg</span></h3>
+      <div class="chart-box" style="height:420px"><canvas id="chart-ippt-progress"></canvas></div>
+    </div>` : ""}
+
+    ${attempts.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="compare">
+      <h3 style="font-size:15px">Compare Conducts: IPPT ${cmpA} → IPPT ${cmpB} <span style="color:var(--muted);font-weight:400;font-size:11px">${paired.length} took both · <span style="color:var(--green)">${improvedN} up</span> · <span style="color:var(--red)">${declinedN} down</span></span></h3>
+      <div class="filter-role-group" style="margin:8px 0 10px">
+        ${cmpPairs.map(([a, b]) => `<button class="role-btn ${a === cmpA && b === cmpB ? "active" : ""}" onclick="setIpptCompare(${a}, ${b})">IPPT ${a} → ${b}</button>`).join("")}
+      </div>
+      ${paired.length >= 2 ? `
       <div class="chart-box" style="height:460px"><canvas id="chart-ippt-scatter"></canvas></div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <h3 style="font-size:15px">Award Distribution: IPPT 1 → IPPT 2 <span style="color:var(--muted);font-weight:400;font-size:11px">how the tier mix shifted · ${paired.length} took both</span></h3>
-      <div class="chart-box" style="height:360px"><canvas id="chart-ippt-awardchange"></canvas></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px">
+        <div style="flex:1;min-width:220px">
+          <h3 style="font-size:12px;color:var(--green)">▲ Most improved</h3>
+          ${movers.filter(p => p.delta > 0).slice(0, 5).map(p => `<div onclick="openPerson('${p.d4}')" style="cursor:pointer;font-size:11px;padding:5px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+            <span>${displayId(p.d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(p.d4)}</span> ` : ""}${displayPersonLabel(p.d4)}</span>
+            <span class="mono" style="white-space:nowrap">${p.s1} → ${p.s2} <strong style="color:var(--green)">+${p.delta}</strong></span>
+          </div>`).join("") || `<div style="color:var(--muted);font-size:11px;padding:4px">No one improved</div>`}
+        </div>
+        <div style="flex:1;min-width:220px">
+          <h3 style="font-size:12px;color:var(--red)">▼ Biggest drops</h3>
+          ${movers.filter(p => p.delta < 0).slice(-5).reverse().map(p => `<div onclick="openPerson('${p.d4}')" style="cursor:pointer;font-size:11px;padding:5px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+            <span>${displayId(p.d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(p.d4)}</span> ` : ""}${displayPersonLabel(p.d4)}</span>
+            <span class="mono" style="white-space:nowrap">${p.s1} → ${p.s2} <strong style="color:var(--red)">${p.delta}</strong></span>
+          </div>`).join("") || `<div style="color:var(--muted);font-size:11px;padding:4px">No one dropped 🎉</div>`}
+        </div>
+      </div>` : `<div style="color:var(--muted);font-size:12px;padding:8px">Fewer than 2 recruits took both IPPT ${cmpA} and IPPT ${cmpB}.</div>`}
+    </div>` : ""}
+
+    ${awardMix.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="awardmix">
+      <h3 style="font-size:15px">Award Mix by Conduct <span style="color:var(--muted);font-weight:400;font-size:11px">% of takers per tier · ${awardMix.map(r => `IPPT ${r.n}: ${r.count}`).join(" · ")}</span></h3>
+      <div class="chart-box" style="height:360px"><canvas id="chart-ippt-awardmix"></canvas></div>
     </div>` : ""}
 
     ${attemptScoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th>Name</th><th>#</th><th>Date</th><th>PU</th><th>SU</th><th>2.4km</th><th>Score</th><th>Award</th><th></th></tr></thead><tbody>
@@ -1463,45 +1511,120 @@ function renderIPPT(el) {
   buildIPPTAwardsChart(stats);
   buildIPPTDistributionChart(buckets);
   buildIPPTTrendChart(ipptTrend);
-  buildIPPTScatterChart(paired);
-  buildIPPTAwardChangeChart(paired);
+  buildIPPTProgressChart(progression, attempts);
+  buildIPPTScatterChart(paired, cmpA, cmpB);
+  buildIPPTAwardMixChart(awardMix);
 }
 
-// Award distribution at IPPT 1 vs IPPT 2 over the paired cohort — grouped bars
-// per tier (Fail / Pass / Silver / Gold; Gold★ folded into Gold). Shows how the
-// company's award mix shifted between the two tests.
-function buildIPPTAwardChangeChart(paired) {
-  const canvas = document.getElementById("chart-ippt-awardchange");
-  if (!canvas || !paired || paired.length < 2) return;
-  const tiers = ["Fail", "Pass", "Silver", "Gold"];
-  const tierOf = score => { const a = getAward(+score || 0); return a === "Gold★" ? "Gold" : a; };
-  const count = sel => tiers.map(t => paired.filter(p => tierOf(sel(p)) === t).length);
-  STATE.charts.ipptAwardChange = new Chart(canvas, {
+// Award mix per conduct — 100% stacked bars, one bar per IPPT, segmented by
+// tier. Percent-of-takers (not raw counts) so a smaller IPPT 3 cohort still
+// compares honestly against IPPT 1/2; tooltips carry the raw counts.
+function buildIPPTAwardMixChart(awardMix) {
+  const canvas = document.getElementById("chart-ippt-awardmix");
+  if (!canvas || typeof Chart === "undefined" || !awardMix || awardMix.length < 2) return;
+  const tiers = [
+    { key: "Fail",   color: "#F85149" },
+    { key: "Pass",   color: "#3FB950" },
+    { key: "Silver", color: "#58A6FF" },
+    { key: "Gold",   color: "#E3B341" },
+    { key: "Gold★",  color: "#BC8CFF" }
+  ];
+  STATE.charts.ipptAwardMix = new Chart(canvas, {
     type: "bar",
     data: {
-      labels: tiers,
-      datasets: [
-        { label: "IPPT 1", data: count(p => p.s1), backgroundColor: "#58A6FF", borderRadius: 4 },
-        { label: "IPPT 2", data: count(p => p.s2), backgroundColor: "#3FB950", borderRadius: 4 }
-      ]
+      labels: awardMix.map(r => "IPPT " + r.n),
+      datasets: tiers.map(t => ({
+        label: t.key,
+        data: awardMix.map(r => r.count ? +(r.tally[t.key] / r.count * 100).toFixed(1) : 0),
+        counts: awardMix.map(r => r.tally[t.key]),
+        backgroundColor: t.color,
+        borderColor: "#161B22",
+        borderWidth: 1
+      }))
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: "top", labels: { color: "#8B949E", font: { size: 12 } } } },
+      plugins: {
+        legend: { position: "top", labels: { color: "#8B949E", font: { size: 12 }, usePointStyle: true } },
+        tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: {
+          label: ctx => `${ctx.dataset.label}: ${ctx.dataset.counts[ctx.dataIndex]} (${ctx.parsed.y}%)`
+        } }
+      },
       scales: {
-        y: { beginAtZero: true, title: { display: true, text: "Recruits", color: "#8B949E" }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", stepSize: 1, font: { size: 12 } } },
-        x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 13 } } }
+        y: { stacked: true, min: 0, max: 100, title: { display: true, text: "% of takers", color: "#8B949E" }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 }, callback: v => v + "%" } },
+        x: { stacked: true, grid: { display: false }, ticks: { color: "#8B949E", font: { size: 14 } } }
       }
     }
   });
 }
 
-// Scatter of IPPT 1 (x) vs IPPT 2 (y) with a y=x reference line. Dots above the
-// line improved (green), below declined (red). Reveals whether weak or strong
-// recruits grew most.
-function buildIPPTScatterChart(paired) {
+// Per-recruit score progression — one thin line per recruit across every IPPT
+// conduct, coloured by their net journey (latest taken vs first taken): green
+// improved, red declined, grey flat. A bold accent line carries the company
+// average so the individual spread reads against the trend. Gaps (missed a
+// conduct) are bridged by spanGaps.
+function buildIPPTProgressChart(progression, attempts) {
+  const canvas = document.getElementById("chart-ippt-progress");
+  if (!canvas || typeof Chart === "undefined" || !progression || progression.length < 2 || attempts.length < 2) return;
+  const lineColor = r => { const d = ipptNetDelta(r); return d > 0 ? "#3FB95066" : d < 0 ? "#F8514966" : "#8B949E55"; };
+  const avg = attempts.map(n => {
+    const xs = progression.filter(r => r.byAttempt[n] != null).map(r => r.byAttempt[n]);
+    return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
+  });
+  STATE.charts.ipptProgress = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: attempts.map(n => "IPPT " + n),
+      datasets: [
+        ...progression.map(r => ({
+          label: r.d4,
+          data: attempts.map(n => r.byAttempt[n] != null ? r.byAttempt[n] : null),
+          borderColor: lineColor(r),
+          backgroundColor: lineColor(r),
+          borderWidth: 1.5,
+          tension: 0.25,
+          pointRadius: 2.5,
+          pointHoverRadius: 6,
+          spanGaps: true
+        })),
+        {
+          label: "Company avg",
+          data: avg,
+          borderColor: "#58A6FF",
+          backgroundColor: "#58A6FF",
+          borderWidth: 3.5,
+          tension: 0.25,
+          pointRadius: 5,
+          pointHoverRadius: 8,
+          spanGaps: true
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: {
+          label: ctx => ctx.dataset.label === "Company avg"
+            ? `Company avg: ${ctx.parsed.y}`
+            : `${displayId(ctx.dataset.label) || ctx.dataset.label} ${getName(ctx.dataset.label)}: ${ctx.parsed.y}`
+        } }
+      },
+      scales: {
+        y: { title: { display: true, text: "Score", color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } },
+        x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 14 } } }
+      }
+    }
+  });
+}
+
+// Scatter of IPPT a (x) vs IPPT b (y) with a y=x reference line — the pair is
+// user-selectable (defaults to first vs latest). Dots above the line improved
+// (green), below declined (red). Reveals whether weak or strong recruits grew
+// most between the two conducts.
+function buildIPPTScatterChart(paired, cmpA, cmpB) {
   const canvas = document.getElementById("chart-ippt-scatter");
-  if (!canvas || !paired || paired.length < 2) return;
+  if (!canvas || typeof Chart === "undefined" || !paired || paired.length < 2) return;
   const all = paired.flatMap(p => [p.s1, p.s2]);
   const lo = Math.max(0, Math.floor((Math.min(...all) - 5) / 5) * 5);
   const hi = Math.min(100, Math.ceil((Math.max(...all) + 5) / 5) * 5);
@@ -1536,21 +1659,20 @@ function buildIPPTScatterChart(paired) {
         tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: { label: ctx => ctx.raw.d4 ? `${displayId(ctx.raw.d4) || ctx.raw.d4}: ${ctx.raw.x} → ${ctx.raw.y}` : "" } }
       },
       scales: {
-        x: { min: lo, max: hi, title: { display: true, text: "IPPT 1 score", color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } },
-        y: { min: lo, max: hi, title: { display: true, text: "IPPT 2 score", color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } }
+        x: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpA} score`, color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } },
+        y: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpB} score`, color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } }
       }
     }
   });
 }
 
-// Slope chart: one faint line per recruit from their IPPT 1 to IPPT 2 score.
 // Company-wide IPPT trend — one line per station across the IPPT conducts.
 // Push-ups and sit-ups (reps) share the left axis; 2.4km time uses a right axis
 // in seconds (rendered mm:ss) since its scale and direction differ — lower is
 // better there, so a falling run line means improvement.
 function buildIPPTTrendChart(trend) {
   const canvas = document.getElementById("chart-ippt-trend");
-  if (!canvas || !trend || trend.length < 2) return;
+  if (!canvas || typeof Chart === "undefined" || !trend || trend.length < 2) return;
   STATE.charts.ipptTrend = new Chart(canvas, {
     type: "line",
     data: {
@@ -1583,7 +1705,7 @@ function buildIPPTTrendChart(trend) {
 
 function buildIPPTAwardsChart(stats) {
   const canvas = document.getElementById("chart-ippt-awards");
-  if (!canvas) return;
+  if (!canvas || typeof Chart === "undefined") return;
   // Order high → low so the legend reads top-to-bottom intuitively.
   // Only include non-zero slices so the chart isn't cluttered with empty tiers.
   const labels = [], data = [], colors = [];
@@ -1604,7 +1726,7 @@ function buildIPPTAwardsChart(stats) {
 
 function buildIPPTDistributionChart(buckets) {
   const canvas = document.getElementById("chart-ippt-distribution");
-  if (!canvas) return;
+  if (!canvas || typeof Chart === "undefined") return;
   // buckets: [YTT, Fail 0–60, Pass 61–74, Silver 75–84, Gold 85–89, Gold★ 90+]
   STATE.charts.ipptDistribution = new Chart(canvas, {
     type: "bar",
