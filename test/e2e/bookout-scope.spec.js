@@ -33,8 +33,8 @@ test("bulk book-out by platoon / program / company", async ({ page }) => {
   expect(res.r1401.kind).toBe("bookedout");
   expect(res.r1401.reason).toBe("Outfield");
 
-  // Picker UI: scope options include company + platoon + program with counts,
-  // and the single-recruit dropdown hides for a bulk scope.
+  // Book Out modal UI: scope options include company + platoon + program with
+  // counts, and the single-person dropdown hides for a bulk scope.
   await page.click(`.nav-btn[data-nav="dashboard"]`);
   await page.click("text=+ Book Out");
   const opts = await page.$$eval("#f-bo-scope option", els => els.map(e => e.textContent));
@@ -43,6 +43,6 @@ test("bulk book-out by platoon / program / company", async ({ page }) => {
   expect(opts.some(o => /BMT/.test(o))).toBe(true);
   await page.selectOption("#f-bo-scope", "company");
   await page.waitForTimeout(50);
-  const recruitHidden = await page.$eval("#f-bo-recruit-wrap", el => el.style.display === "none");
+  const recruitHidden = await page.$eval("#f-bo-person-wrap", el => el.style.display === "none");
   expect(recruitHidden).toBe(true);
 });

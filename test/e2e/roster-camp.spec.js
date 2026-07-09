@@ -1,8 +1,9 @@
 // Feature spec for the Roster "Camp" column. It must read the SHARED out-of-camp
 // definition (outOfCampMap) so it can never disagree with the dashboard / parade
-// strength — medical + leave count as out, not just manual book-outs — while the
-// manual Book out / Book in lever stays available on EVERY row so a SPEC can
-// control in-camp strength (e.g. send out a recruit consuming MC in camp).
+// strength — medical + leave count as out, not just manual book-outs — while a
+// state-specific manual lever stays available on EVERY row so a SPEC can control
+// in-camp strength: Book out (in camp), Book in (booked out), Book in anyway
+// (MC/leave), Undo book-in (kept in camp manually).
 const { test, expect } = require("@playwright/test");
 const { seedAndGoto } = require("./support");
 
@@ -42,10 +43,10 @@ test.describe("Roster Camp column = shared out-of-camp status + manual lever", (
     const c1403 = await campOf(page, "1403");
     const c2401 = await campOf(page, "2401");
 
-    // The lever always offers the opposite of the effective state.
-    // Out via medical -> "Out · Medical", button offers Book in.
+    // The lever is state-specific.
+    // Out via medical -> "Out · Medical", button offers Book in anyway (override).
     expect(c1401.campBadge).toContain("Medical");
-    expect(c1401.campBtn).toContain("Book in");
+    expect(c1401.campBtn).toContain("Book in anyway");
     // MC consumed in camp -> present ("In camp"), button offers Book out.
     expect(c1402.campBadge).toBe("In camp");
     expect(c1402.campBtn).toContain("Book out");
@@ -79,7 +80,7 @@ test.describe("Roster Camp column = shared out-of-camp status + manual lever", (
     await page.click(`.nav-btn[data-nav="roster"]`);
     const c1401b = await campOf(page, "1401");
     expect(c1401b.campBadge).toContain("manual");
-    expect(c1401b.campBtn).toContain("Book out");
+    expect(c1401b.campBtn).toContain("Undo book-in");
 
     // The override is day-scoped: yesterday's Book In does NOT carry over, so the
     // recruit reverts to "Out · Medical" the next day with no cron.
