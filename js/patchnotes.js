@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 121;
+const APP_VERSION = 123;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 123,
+    date: "9 Jul 2026",
+    title: "One Book Out flow for book-outs and leave",
+    intro: "Booking out and logging leave used to be two separate forms for the same idea. Now there is one Book Out flow: say who, out for how long, and why.",
+    items: [
+      { t: "🚪 One Book Out button everywhere", d: "Dashboard, Roster and the person view all open the same form. \"Today only\" is the classic book-out that books back in automatically tomorrow; \"Date range (leave)\" logs a proper Leave record - no more picking the right form first." },
+      { t: "🏥 Appointment book-outs built in", d: "Pick someone with an outside appointment today and the reason is prefilled from the appointment. The one-tap 🚪 Out on the appointment row still works too." },
+      { t: "📅 Out / Leave tab shows everything", d: "The renamed Out / Leave tab now also lists today's manual book-outs and manual book-ins above the timeline, so \"who is not here and why\" has a single answer." },
+      { t: "↩ Book in vs ✓ Book in anyway", d: "Book in used to mean two different things. Now: Book in simply reverses a book-out, while Book in anyway (with a confirm) counts someone on MC/leave as in camp for today. A manual book-in gets its own ✕ Undo." },
+    ],
+  },
   {
     v: 121,
     date: "7 Jul 2026",
