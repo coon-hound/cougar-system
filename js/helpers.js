@@ -110,12 +110,13 @@ function scopeTokenMembers(token) {
   if (token.indexOf("grp:") === 0) { const g = token.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
   return [];
 }
-// Human label for a token, e.g. "P4", "PTP", "⦿ Guard Duty", "Company".
+// Human label for a token, e.g. "P4", "PTP", "⦿ Guard Duty", "▣ Night Ex".
 function scopeTokenLabel(token) {
   if (token === "company") return "Company";
   if (token.indexOf("plt:") === 0) return "P" + token.slice(4);
   if (token.indexOf("prog:") === 0) return programLabel(token.slice(5));
   if (token.indexOf("grp:") === 0) return "⦿ " + token.slice(4);
+  if (token.indexOf("comb:") === 0) return "▣ " + token.slice(5);
   return token;
 }
 const combinedByName = name => (STATE.combinedGroups || []).find(c => c.name === name) || null;
@@ -152,6 +153,23 @@ function scopeRecruits(scope) {
   if (scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return recruits.filter(r => set.has(r.id)).map(r => r.id); }
   return [];
 }
+
+// ── Conduct scope (program key OR scope token) ───────────────────
+// Conduct records historically store a bare program key ("PTP"/"BMT"/
+// "Combined") in their `program` field. Group-scoped conducts widen that
+// value domain to scope tokens ("plt:N"/"grp:NAME"/"comb:NAME") — the field
+// name, sheet column and dedup tuple stay unchanged, old rows stay byte-
+// identical. "prog:KEY" is never written (it would alias the bare key and
+// break dedup against existing rows).
+const isConductScopeToken = v => typeof v === "string" && /^(plt|grp|comb):/.test(v);
+// Roster objects (commanders excluded) in a conduct's scope value.
+function conductScopeRoster(v) {
+  if (!isConductScopeToken(v)) return recruitsInProgram(v);
+  const ids = new Set(scopeRecruits(v));
+  return STATE.roster.filter(r => ids.has(r.id));
+}
+const conductScopeLabel = v => isConductScopeToken(v) ? scopeTokenLabel(v) : programLabel(v);
+const conductScopeColor = v => isConductScopeToken(v) ? "var(--purple)" : programColor(v);
 
 const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram || STATE.filterGroup);
 
@@ -690,6 +708,11 @@ const badge = (text, cls) => `<span class="badge badge-${cls}">${text}</span>`;
 const programBadge = key => {
   const col = programColor(key);
   return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${programLabel(key)}</span>`;
+};
+// Same pill for a conduct's scope value: program key OR scope token.
+const conductScopeBadge = v => {
+  const col = conductScopeColor(v);
+  return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${conductScopeLabel(v)}</span>`;
 };
 const statusBadge = s => badge(s, s === "Active" ? "green" : s === "Warded" ? "red" : "orange");
 const typeBadge = t => badge(t, t === "RSI" ? "orange" : t === "Injury" ? "red" : "yellow");

@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 123;
+const APP_VERSION = 124;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 124,
+    date: "9 Jul 2026",
+    title: "Log Conduct wizard: groups, filters, easier ticking",
+    intro: "The Log Conduct wizard now works for any slice of the company, and the Status Personnel checklist is built for thumbs.",
+    items: [
+      { t: "⦿ Log a conduct for a group", d: "Below the PTP/BMT/Combined buttons there is now a scope dropdown: pick a platoon, group or combined group and the status list + total strength follow it. The scope shows on the attendance table and in the chat-format message." },
+      { t: "👆 Tap anywhere on a status row", d: "The whole row toggles not-participating - no more hunting for the tiny checkbox. Rows highlight when ticked." },
+      { t: "🔎 Status filters + smarter order", d: "Chips filter the checklist by status type (MC, LD, Excuse …) and by participating vs not. Rows sort needs-attention first, then by severity. Hidden rows still count in the totals." },
+      { t: "💤 Fallout / Report Sick by group", d: "+ Add group logs a whole platoon / program / group in one row with one shared reason - it expands to one record per member on save." },
+    ],
+  },
   {
     v: 123,
     date: "9 Jul 2026",

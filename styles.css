@@ -122,6 +122,25 @@ tr:hover{background:var(--surface2)}
 /* Inline edit button on table rows */
 .btn-icon{padding:2px 8px;font-size:14px;line-height:1.2;min-width:0}
 
+/* ── Log Conduct wizard: Status Personnel checklist ────────
+   Each row is a <label> so the WHOLE row toggles its checkbox — the bare
+   checkbox alone was too small a tap target. Base presentation lives here
+   (not inline) so the .np "not participating" state can restyle the row. */
+.lc-wiz-status-row{display:grid;grid-template-columns:28px 48px minmax(0,1.4fr) minmax(80px,auto) minmax(0,1fr);gap:8px;align-items:center;min-height:44px;padding:6px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);box-sizing:border-box;cursor:pointer;user-select:none;-webkit-user-select:none}
+.lc-wiz-status-row:hover{border-color:var(--dim)}
+.lc-wiz-status-row.np{background:#D2992211;border-color:#D2992244}
+.lc-wiz-status-row>input[type="checkbox"]{width:20px;height:20px;cursor:pointer;accent-color:var(--orange);flex-shrink:0}
+.lc-wiz-status-row>.mono{font-weight:700;color:var(--accent);font-size:12px}
+.lc-wiz-status-name{font-size:12px;min-width:0;line-height:1.3}
+.lc-wiz-status-tag{font-size:10px;color:var(--orange);font-weight:600;line-height:1.4;background:#D2992222;border:1px solid #D2992244;border-radius:10px;padding:3px 9px;white-space:normal;justify-self:start}
+.lc-wiz-status-row>input[type="text"]{min-width:0;width:100%;padding:5px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font:inherit;font-size:11px;box-sizing:border-box;cursor:text;user-select:text;-webkit-user-select:text}
+
+/* Filter chips above the checklist (participation segment + status families).
+   Pill-shaped like the combined-group builder chips, ≥36px tap height. */
+.lc-wiz-filter-chip{padding:7px 12px;min-height:36px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2}
+.lc-wiz-filter-chip:hover{filter:brightness(1.2)}
+.lc-wiz-filter-chip.active{background:#58A6FF22;border-color:var(--accent);color:var(--accent)}
+
 /* ── Mobile (≤768px) ───────────────────────────────────────
    Sidebar slides in from the left over the content, triggered by the
    hamburger. Backdrop catches taps outside the menu to close. Topbar
@@ -244,15 +263,16 @@ tr:hover{background:var(--surface2)}
   /* Status personnel rows: tighter ID strip on top, chip-style status tag
      that wraps if a recruit has multiple statuses, reason field below. */
   .lc-wiz-status-row{
-    grid-template-columns:18px 50px 1fr!important;
+    grid-template-columns:32px 50px 1fr!important;
     grid-template-areas:
       "check d4 name"
       "tag tag tag"
       "reason reason reason"!important;
     gap:6px 8px!important;
     padding:10px 12px!important;
+    min-height:48px;
   }
-  .lc-wiz-status-row > input[type="checkbox"]{grid-area:check;justify-self:start;align-self:center;width:18px!important;height:18px!important}
+  .lc-wiz-status-row > input[type="checkbox"]{grid-area:check;justify-self:start;align-self:center;width:24px!important;height:24px!important}
   .lc-wiz-status-row > span:nth-child(2){grid-area:d4;font-size:13px}
   .lc-wiz-status-row > span:nth-child(3){grid-area:name;font-size:13px!important;overflow:visible!important;text-overflow:clip!important;white-space:normal!important;line-height:1.3}
   .lc-wiz-status-row > span:nth-child(4){

@@ -741,6 +741,7 @@ function openAttendanceForm(id) {
         <div class="form-group">
           <label>Program</label>
           <select id="f-program" class="topbar-select" style="width:100%">
+            ${isConductScopeToken(progKey(e || {})) ? `<option value="${escapeAttr(progKey(e))}" selected>${escapeAttr(conductScopeLabel(progKey(e)))}</option>` : ""}
             ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => `<option value="${escapeAttr(key)}" ${progKey(e || {}) === key ? "selected" : ""}>${escapeAttr(programLabel(key))}</option>`).join("")}
           </select>
         </div>
@@ -1167,6 +1168,7 @@ function openConductDetailForm(id) {
         <div class="form-group">
           <label>Program</label>
           <select id="f-program" class="topbar-select" style="width:100%">
+            ${isConductScopeToken(progKey(e || {})) ? `<option value="${escapeAttr(progKey(e))}" selected>${escapeAttr(conductScopeLabel(progKey(e)))}</option>` : ""}
             ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => `<option value="${escapeAttr(key)}" ${progKey(e || {}) === key ? "selected" : ""}>${escapeAttr(programLabel(key))}</option>`).join("")}
           </select>
         </div>
@@ -1758,7 +1760,7 @@ function submitGroupNames() {
     const orig = inp.dataset.orig;
     const val = (inp.value || "").trim();
     if (!val) { alert("Group names can't be empty — use ✕ to delete a group."); return; }
-    if (val.indexOf(",") !== -1) { alert("Group names can't contain a comma."); return; }
+    if (/[,|]/.test(val)) { alert("Group names can't contain a comma or a | character."); return; }
     if (val !== orig) renameGroup(orig, val);
   }
   closeModal(); render();
@@ -1766,7 +1768,7 @@ function submitGroupNames() {
 function createGroupThenPick() {
   const name = (gv("f-grp-new") || "").trim();
   if (!name) { alert("Enter a group name first."); return; }
-  if (name.indexOf(",") !== -1) { alert("Group names can't contain a comma."); return; }
+  if (/[,|]/.test(name)) { alert("Group names can't contain a comma or a | character."); return; }
   if (allGroupNames().includes(name)) { alert("That group already exists."); return; }
   openGroupMembersForm(name);
 }
@@ -1872,7 +1874,10 @@ function submitCombined() {
   const b = _combBuilder;
   if (!b.include.size) { alert("Tap at least one chip to INCLUDE (green +) first."); return; }
   let name = (b.name || "").trim() || combinedFormula({ include: [...b.include], exclude: [...b.exclude] }).replace(/⦿ /g, "");
-  name = name.replace(/,/g, "").trim();
+  // Commas break the roster `groups` column; `|` breaks the conduct-detail
+  // filter key (date|time|conductId|scope) once a group name lands in a
+  // conduct's scope token.
+  name = name.replace(/[,|]/g, "").trim();
   if (!name) { alert("Give the combined group a name."); return; }
   const list = STATE.combinedGroups || [];
   const def = { name, include: [...b.include], exclude: [...b.exclude] };
@@ -3796,17 +3801,25 @@ function refreshLmsFromPolar() {
 //     date,                    // ISO "2026-05-29"
 //     time,                    // "0730" — empty until conduct picked
 //     conductId,               // c001 etc.
-//     program,                 // "PTP" / "BMT" / "Combined" — part of the key
+//     program,                 // scope: "PTP"/"BMT"/"Combined" program key OR a
+//                              // "plt:N"/"grp:NAME"/"comb:NAME" token — part of the key
 //     totalOverride,           // null = derive from roster, else explicit number
 //     remarks,                 // free text
 //     status: [                // pre-existing-status checklist
-//       { d4, statusTag, reason, notParticipating }
+//       { d4, statusTag, families, sevRank, defaultNP, reason, notParticipating }
 //     ],
 //     rsi:        [{ d4, reason }],   // reported sick at FP (no participation)
-//     fallout:    [{ d4, reason }],   // dropped out mid-conduct, didn't go to MO
-//     reportSick: [{ d4, reason }]    // dropped out mid-conduct AND went to MO
+//     fallout:    [{ d4, reason } | { scope, reason }],   // dropped out mid-conduct, didn't go to MO
+//     reportSick: [{ d4, reason } | { scope, reason }]    // dropped out mid-conduct AND went to MO
 //   }
+// Group rows ({ scope, reason }) fan out to one detail row per scope member on
+// save, all sharing the row's single reason (see wizSectionD4s).
 let _logConduct = null;
+
+// Ephemeral view state for the Status Personnel checklist — filters only.
+// Never saved and reset on every open. `fams` = multi-select of base status
+// families (empty = all); `part` = "all" | "np" | "part".
+let _wizStatusView = { fams: new Set(), part: "all" };
 
 // Default program for a NEW conduct: honour the active topbar program scope if
 // one is set, else "Combined". Editing an existing conduct loads the row's own
@@ -3818,6 +3831,7 @@ function defaultWizardProgram() {
 // Open the wizard. Pass an attendance row id to load it in edit mode.
 function openLogConductWizard(attendanceId) {
   const a = attendanceId ? STATE.attendance.find(x => x.id === attendanceId) : null;
+  _wizStatusView = { fams: new Set(), part: "all" };
   _logConduct = {
     attendanceId: a?.id || null,
     date: a ? displayDateToISO(a.date) || todayISO() : todayISO(),
@@ -3932,11 +3946,11 @@ function rebuildLogConductStatus() {
   const hasExistingDetail = !!_logConduct.attendanceId || (_logConduct.originalDetailIds || []).length > 0;
   const dateIso = _logConduct.date;
   // Commanders are not tracked in conduct attendance — exclude them. Also scope
-  // to the selected program's platoons so a PTP conduct only lists PTP recruits
-  // on status (Combined lists everyone).
-  const programD4s = new Set(recruitsInProgram(program).map(r => r.id));
+  // to the selected scope's members so a PTP conduct only lists PTP recruits
+  // on status (Combined lists everyone; a group scope lists only its members).
+  const scopeD4s = new Set(conductScopeRoster(program).map(r => r.id));
   const effective = currentMedicalEffectiveAll(dateIso)
-    .filter(({ d4 }) => !isCommander(d4) && programD4s.has(d4));
+    .filter(({ d4 }) => !isCommander(d4) && scopeD4s.has(d4));
   _logConduct.status = effective.map(({ d4, statuses }) => {
     // Pick the most-severe active status as the canonical tag/reason.
     const top = statuses[0];
@@ -3950,14 +3964,123 @@ function rebuildLogConductStatus() {
       d4,
       // Concatenate every active status so the user sees "MC + Excuse Heavy Load"
       statusTag: statuses.map(s => s.tag).join(" + "),
+      // Filter/sort metadata, frozen at rebuild so toggling never reshuffles
+      // rows or changes which filter chips exist mid-edit.
+      families: statuses.map(s => medStatusBaseFamily(s.tag)),
+      sevRank: medSeverityRank(statuses[0].tag),
+      defaultNP,
       reason: prev ? prev.reason : (existingPxByD4[d4] ?? top.record.reason ?? ""),
       // First-time defaults from the per-status participation flag. When backed
       // by existing detail rows (edit or recovery), honor whether a PX row exists.
       notParticipating: prev ? prev.notParticipating
         : (hasExistingDetail ? (d4 in existingPxByD4) : defaultNP)
     };
-  }).sort((a, b) => a.d4.localeCompare(b.d4));
+  }).sort((a, b) =>
+    // Needs-attention first (default not-participating), then most severe
+    // status, then d4 (which already encodes platoon order).
+    (b.defaultNP - a.defaultNP) || (b.sevRank - a.sevRank) || a.d4.localeCompare(b.d4)
+  );
 }
+
+// One Status Personnel row. A <label> so the WHOLE row is the tap target for
+// the not-participating checkbox — the reason <input> is interactive content,
+// so browsers don't forward its clicks to the checkbox (stopPropagation as
+// belt-and-braces). Presentation lives in styles.css (.lc-wiz-status-row) so
+// the .np checked state can restyle the row.
+const wizStatusRowHtml = s => `
+  <label class="lc-wiz-status-row${s.notParticipating ? " np" : ""}" data-d4="${s.d4}">
+    <input type="checkbox" ${s.notParticipating ? "checked" : ""} onchange="wizToggleStatusNP('${s.d4}', this.checked, this)" title="Tick = not participating">
+    <span class="mono">${displayId(s.d4)}</span>
+    <span class="lc-wiz-status-name" title="${escapeAttr(getName(s.d4))}">${escapeAttr(getName(s.d4))}</span>
+    <span class="lc-wiz-status-tag" title="${escapeAttr(s.statusTag)}">${escapeAttr(s.statusTag)}</span>
+    <input type="text" value="${escapeAttr(s.reason)}" placeholder="reason (optional)" onclick="event.stopPropagation()" oninput="wizUpdateStatusReason('${s.d4}', this.value)">
+  </label>`;
+
+// Does a status row pass the active checklist filters?
+function wizStatusRowVisible(s) {
+  const v = _wizStatusView;
+  if (v.part === "np" && !s.notParticipating) return false;
+  if (v.part === "part" && s.notParticipating) return false;
+  if (v.fams.size && !s.families.some(f => v.fams.has(f))) return false;
+  return true;
+}
+
+function wizStatusRowsHtml() {
+  const w = _logConduct;
+  if (!w.status.length) return `<div style="color:var(--muted);font-size:11px;padding:8px 10px;background:var(--surface);border:1px dashed var(--border);border-radius:6px;text-align:center">No recruits on medical status for this date.</div>`;
+  const visible = w.status.filter(wizStatusRowVisible);
+  const rows = visible.map(wizStatusRowHtml).join("")
+    || `<div style="color:var(--muted);font-size:11px;padding:8px 10px;background:var(--surface);border:1px dashed var(--border);border-radius:6px;text-align:center">No status personnel match the filters.</div>`;
+  // Totals always compute from the full state list, never from what's visible —
+  // say so whenever the filters are hiding rows.
+  const hiddenNote = visible.length < w.status.length
+    ? `<div style="font-size:10px;color:var(--dim);padding:2px 2px 0">Showing ${visible.length} of ${w.status.length} — hidden rows still count in the totals.</div>`
+    : "";
+  return rows + hiddenNote;
+}
+
+// Filter chips above the checklist: a participation segment (All / Not
+// participating / Participating) + one chip per base status family present
+// (multi-select, most severe first). Counts come from the full state list.
+function wizStatusFiltersHtml() {
+  const w = _logConduct;
+  if (!w.status.length) return "";
+  const v = _wizStatusView;
+  const chip = (label, active, onclick) => `<button type="button" class="lc-wiz-filter-chip${active ? " active" : ""}" onclick="${onclick}">${label}</button>`;
+  const np = w.status.filter(s => s.notParticipating).length;
+  const seg = [
+    chip(`All (${w.status.length})`, v.part === "all", "wizSetStatusPart('all')"),
+    chip(`Not participating (${np})`, v.part === "np", "wizSetStatusPart('np')"),
+    chip(`Participating (${w.status.length - np})`, v.part === "part", "wizSetStatusPart('part')")
+  ].join("");
+  const famCounts = {};
+  w.status.forEach(s => [...new Set(s.families)].forEach(f => { famCounts[f] = (famCounts[f] || 0) + 1; }));
+  const fams = Object.keys(famCounts).sort((a, b) => medSeverityRank(b) - medSeverityRank(a) || a.localeCompare(b));
+  // A single family present filters nothing — skip the row of one useless chip.
+  const famChips = fams.length > 1
+    ? fams.map(f => chip(`${escapeAttr(f)} (${famCounts[f]})`, v.fams.has(f), `wizToggleStatusFam('${escapeAttr(f)}')`)).join("")
+    : "";
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px">${seg}</div>`
+    + (famChips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${famChips}</div>` : "");
+}
+
+// Options for the wizard's "narrower scope" dropdown: platoons / groups /
+// combined groups with live member counts. Programs are covered by the pill
+// row and "company" by Combined, so neither appears here.
+function conductScopeExtraOptions(selected) {
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
+  const cnt = s => scopeRecruits(s).length;
+  const opt = (v, label) => `<option value="${escapeAttr(v)}" ${v === selected ? "selected" : ""}>${label} (${cnt(v)})</option>`;
+  return [
+    `<option value="">Narrower scope… (platoon / group / combined)</option>`,
+    ...platoons.map(p => opt("plt:" + p, `Platoon ${p}`)),
+    ...allGroupNames().map(g => opt("grp:" + g, "⦿ " + escapeAttr(g))),
+    ...allCombinedNames().map(n => opt("comb:" + n, "▣ " + escapeAttr(n)))
+  ].join("");
+}
+
+// Options for a bulk-section group row. Unlike the wizard scope these are
+// never stored — they expand to per-member rows on save — so programs are
+// safe to offer as "prog:KEY" tokens here.
+function wizGroupRowOptions(selected) {
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
+  const cnt = s => scopeRecruits(s).length;
+  const opt = (v, label) => `<option value="${escapeAttr(v)}" ${v === selected ? "selected" : ""}>${label} (${cnt(v)})</option>`;
+  return [
+    `<option value="">Pick group / scope…</option>`,
+    ...platoons.map(p => opt("plt:" + p, `Platoon ${p}`)),
+    ...progs.map(pr => opt("prog:" + pr.key, escapeAttr(pr.name || pr.key))),
+    ...allGroupNames().map(g => opt("grp:" + g, "⦿ " + escapeAttr(g))),
+    ...allCombinedNames().map(n => opt("comb:" + n, "▣ " + escapeAttr(n)))
+  ].join("");
+}
+
+const wizGroupRowHint = scope => scope
+  ? `${scopeRecruits(scope).length} members — the reason applies to all of them`
+  : "pick a group — one row per member is created on save";
 
 // Builds the modal HTML and opens it. Re-rendering is full-replace; row-level
 // mutations that wouldn't change focus or scroll position update DOM directly
@@ -3975,32 +4098,31 @@ function renderLogConductWizard() {
       ? `<div style="font-size:11px;color:var(--accent);background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:6px 10px;margin-bottom:4px">↩ Recovered ${w._recoveredCount} existing detail row${w._recoveredCount === 1 ? "" : "s"} for this conduct/date that had no attendance summary. Saving keeps them and adds the missing summary.</div>`
       : "");
 
-  const statusRows = w.status.length ? w.status.map(s => `
-    <div class="lc-wiz-status-row" style="display:grid;grid-template-columns:18px 48px minmax(0,1.4fr) minmax(80px,auto) minmax(0,1fr);gap:8px;align-items:center;padding:6px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);box-sizing:border-box">
-      <input type="checkbox" ${s.notParticipating ? "checked" : ""} onchange="wizToggleStatusNP('${s.d4}', this.checked)" style="width:16px;height:16px;cursor:pointer" title="Tick = not participating">
-      <span class="mono" style="font-weight:700;color:var(--accent);font-size:12px">${displayId(s.d4)}</span>
-      <span style="font-size:12px;min-width:0;line-height:1.3" title="${escapeAttr(getName(s.d4))}">${escapeAttr(getName(s.d4))}</span>
-      <span style="font-size:10px;color:var(--orange);font-weight:600;line-height:1.4;background:#D2992222;border:1px solid #D2992244;border-radius:10px;padding:3px 9px;white-space:normal;justify-self:start" title="${escapeAttr(s.statusTag)}">${escapeAttr(s.statusTag)}</span>
-      <input type="text" value="${escapeAttr(s.reason)}" placeholder="reason (optional)" oninput="wizUpdateStatusReason('${s.d4}', this.value)" style="min-width:0;width:100%;padding:5px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font:inherit;font-size:11px;box-sizing:border-box">
-    </div>
-  `).join("") : `<div style="color:var(--muted);font-size:11px;padding:8px 10px;background:var(--surface);border:1px dashed var(--border);border-radius:6px;text-align:center">No recruits on medical status for this date.</div>`;
-
   const sectionList = (key, label, helpText, color) => {
-    const rows = (w[key] || []).map((row, i) => `
+    const rows = (w[key] || []).map((row, i) => {
+      // Group row: scope select + shared reason. Person row: recruit + reason.
+      const picker = row.scope !== undefined
+        ? `<select id="wiz-${key}-scope-${i}" class="topbar-select" style="width:100%" onchange="wizUpdateRowScope('${key}', ${i}, this.value)">${wizGroupRowOptions(row.scope)}</select>
+           <div id="wiz-${key}-scopehint-${i}" style="font-size:10px;color:var(--dim);margin-top:2px">${wizGroupRowHint(row.scope)}</div>`
+        : rosterSelect(`wiz-${key}-d4-${i}`, true, row.d4, "Recruit", { onchange: `wizUpdateRowD4('${key}', ${i}, this.value)` });
+      return `
       <div class="lc-wiz-bulk-row" style="display:grid;grid-template-columns:28px minmax(0,1fr) minmax(0,1fr) 32px;gap:8px;align-items:center;padding:8px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);box-sizing:border-box">
-        <span class="mono" style="color:var(--muted);font-size:12px;font-weight:700">${String(i + 1).padStart(2, "0")}</span>
-        <div style="min-width:0">${rosterSelect(`wiz-${key}-d4-${i}`, true, row.d4, "Recruit", { onchange: `wizUpdateRowD4('${key}', ${i}, this.value)` })}</div>
-        <input type="text" value="${escapeAttr(row.reason)}" placeholder="reason" oninput="wizUpdateRowReason('${key}', ${i}, this.value)" style="min-width:0;width:100%;padding:7px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box">
+        <span class="mono" style="color:var(--muted);font-size:12px;font-weight:700">${row.scope !== undefined ? "⦿" : String(i + 1).padStart(2, "0")}</span>
+        <div style="min-width:0">${picker}</div>
+        <input type="text" value="${escapeAttr(row.reason)}" placeholder="${row.scope !== undefined ? "reason (applies to every member)" : "reason"}" oninput="wizUpdateRowReason('${key}', ${i}, this.value)" style="min-width:0;width:100%;padding:7px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box">
         <button type="button" class="btn btn-icon btn-danger" onclick="wizRemoveRow('${key}', ${i})" title="Remove" style="padding:4px 8px">✕</button>
-      </div>
-    `).join("");
+      </div>`;
+    }).join("");
     return `<div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap">
         <div style="flex:1;min-width:0">
-          <strong style="color:${color};font-size:13px">${label}</strong> <span style="color:var(--muted);font-size:11px">(${w[key].length})</span>
+          <strong style="color:${color};font-size:13px">${label}</strong> <span style="color:var(--muted);font-size:11px" id="wiz-${key}-count">(${wizSectionD4s(key).length})</span>
           <div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.45">${helpText}</div>
         </div>
-        <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddRow('${key}')">+ Add</button>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddRow('${key}')">+ Add</button>
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddGroupRow('${key}')" title="Add a whole platoon / program / group / combined group — expands to one row per member on save, all with the same reason">+ Add group</button>
+        </div>
       </div>
       ${rows ? `<div style="display:flex;flex-direction:column;gap:6px">${rows}</div>` : ""}
     </div>`;
@@ -4026,7 +4148,7 @@ function renderLogConductWizard() {
           </div>
         </div>
         <div class="form-group" style="margin-top:8px;margin-bottom:0">
-          <label>Program</label>
+          <label>Program / Scope</label>
           <div class="lc-wiz-program" style="display:flex;gap:6px;flex-wrap:wrap">
             ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => {
               const active = (w.program || PROGRAM_COMBINED) === key;
@@ -4034,16 +4156,20 @@ function renderLogConductWizard() {
               return `<button type="button" onclick="wizSetProgram('${escapeAttr(key)}')" style="flex:1;min-width:90px;padding:8px 10px;border-radius:6px;border:1px solid ${active ? col : "var(--border)"};background:${active ? col + "22" : "var(--surface)"};color:${active ? col : "var(--muted)"};font-weight:${active ? 700 : 500};font-size:12px;cursor:pointer">${escapeAttr(programLabel(key))}</button>`;
             }).join("")}
           </div>
-          <div style="font-size:10px;color:var(--dim);margin-top:4px;line-height:1.45">Which training program this conduct is for. PTP/BMT scope the status list + total strength to that program's platoons; Combined = both programs together.</div>
+          <select id="wiz-scope-extra" class="topbar-select" style="width:100%;margin-top:6px" onchange="if(this.value) wizSetProgram(this.value)">
+            ${conductScopeExtraOptions(isConductScopeToken(w.program) ? w.program : "")}
+          </select>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px;line-height:1.45">Who this conduct is for — a training program (PTP/BMT = that program's platoons, Combined = everyone) or a narrower scope from the dropdown. The scope drives the status list + total strength.</div>
         </div>
       </div>
 
       <div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
         <div style="margin-bottom:8px">
           <strong style="color:var(--accent);font-size:13px">⚕️ Status Personnel</strong> <span style="color:var(--muted);font-size:11px">(${w.status.length} on status today)</span>
-          <div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.45">Tick to mark as not participating. Untick if a status-personnel is actually participating in this conduct.</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.45">Tap a row to mark that person as not participating; tap again if they actually take part in this conduct despite the status.</div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">${statusRows}</div>
+        <div id="wiz-status-filters" style="margin-bottom:8px">${wizStatusFiltersHtml()}</div>
+        <div id="wiz-status-list" style="display:flex;flex-direction:column;gap:6px">${wizStatusRowsHtml()}</div>
       </div>
 
       ${sectionList("reportSick", "📋 Report Sick", "Dropped out mid-conduct AND went to MO afterward. Auto-creates a Pending Medical row — update with MC/LD/etc. once MO clears.", "var(--orange)")}
@@ -4106,11 +4232,12 @@ function wizSetConductId(v) {
   renderLogConductWizard();
 }
 function wizSetProgram(v) {
+  // v = a program key OR a "plt:/grp:/comb:" scope token from the dropdown.
   _logConduct.program = v || PROGRAM_COMBINED;
-  // Different program → different roster scope, so the derived Total Str changes.
-  // Drop any manual override so it re-derives from the new program's headcount.
+  // Different scope → different roster, so the derived Total Str changes.
+  // Drop any manual override so it re-derives from the new scope's headcount.
   _logConduct.totalOverride = null;
-  // Force orphan-recovery to re-evaluate against the new program key.
+  // Force orphan-recovery to re-evaluate against the new scope key.
   _logConduct._orphanKey = null;
   wizRefreshFromTuple();
   renderLogConductWizard();
@@ -4120,17 +4247,45 @@ function wizSetTotalOverride(v) {
   _logConduct.totalOverride = Number.isFinite(n) && n >= 0 ? n : null;
   recomputeLogConductFooter();
 }
-function wizToggleStatusNP(d4, checked) {
+function wizToggleStatusNP(d4, checked, el) {
   const row = _logConduct.status.find(s => s.d4 === d4);
   if (row) row.notParticipating = !!checked;
+  // Restyle the row + refresh the chip counts in place — deliberately NOT a
+  // list re-render, so the row stays visible (and scroll stays put) even when
+  // it no longer matches an active participation filter.
+  el?.closest(".lc-wiz-status-row")?.classList.toggle("np", !!checked);
+  const filters = document.getElementById("wiz-status-filters");
+  if (filters) filters.innerHTML = wizStatusFiltersHtml();
   recomputeLogConductFooter();
 }
 function wizUpdateStatusReason(d4, v) {
   const row = _logConduct.status.find(s => s.d4 === d4);
   if (row) row.reason = v;
 }
+function wizSetStatusPart(mode) {
+  _wizStatusView.part = mode;
+  refreshWizStatusSection();
+}
+function wizToggleStatusFam(fam) {
+  const fams = _wizStatusView.fams;
+  fams.has(fam) ? fams.delete(fam) : fams.add(fam);
+  refreshWizStatusSection();
+}
+// Rebuild just the filter chips + row list (not the whole modal), so the modal
+// scroll position and every other input stay untouched. Lossless: reason edits
+// flow into state per keystroke, and a chip tap has already blurred any input.
+function refreshWizStatusSection() {
+  const filters = document.getElementById("wiz-status-filters");
+  const list = document.getElementById("wiz-status-list");
+  if (filters) filters.innerHTML = wizStatusFiltersHtml();
+  if (list) list.innerHTML = wizStatusRowsHtml();
+}
 function wizAddRow(section) {
   _logConduct[section].push({ d4: "", reason: "" });
+  renderLogConductWizard();
+}
+function wizAddGroupRow(section) {
+  _logConduct[section].push({ scope: "", reason: "" });
   renderLogConductWizard();
 }
 function wizRemoveRow(section, idx) {
@@ -4140,6 +4295,16 @@ function wizRemoveRow(section, idx) {
 function wizUpdateRowD4(section, idx, v) {
   if (!_logConduct[section][idx]) return;
   _logConduct[section][idx].d4 = v;
+  // A person can duplicate a group row's member — dedupe can change the counts.
+  recomputeLogConductFooter();
+  updateLogConductOverlapWarning();
+}
+function wizUpdateRowScope(section, idx, v) {
+  if (!_logConduct[section][idx]) return;
+  _logConduct[section][idx].scope = v;
+  const hint = document.getElementById(`wiz-${section}-scopehint-${idx}`);
+  if (hint) hint.textContent = wizGroupRowHint(v);
+  recomputeLogConductFooter();
   updateLogConductOverlapWarning();
 }
 function wizUpdateRowReason(section, idx, v) {
@@ -4149,16 +4314,36 @@ function wizUpdateRowReason(section, idx, v) {
 
 // === Totals / overlap helpers ===========================================
 
+// Expand a bulk section (fallout / reportSick) to per-recruit entries: person
+// rows pass through, group rows fan out to every scope member with the group's
+// SHARED reason. Deduped by d4 (first occurrence wins) so a person listed both
+// individually and via a group only counts/saves once. Single source of truth
+// for the footer counts, the overlap warning and the save expansion.
+function wizSectionD4s(key) {
+  const seen = new Set();
+  const out = [];
+  (_logConduct[key] || []).forEach(r => {
+    const entries = r.scope ? scopeRecruits(r.scope).map(d4 => ({ d4, reason: r.reason || "" })) : [r];
+    entries.forEach(e => {
+      if (!e.d4 || seen.has(e.d4)) return;
+      seen.add(e.d4);
+      out.push(e);
+    });
+  });
+  return out;
+}
+
 function computeLogConductTotals() {
   const w = _logConduct;
   const statusCount = w.status.filter(s => s.notParticipating).length;
   const rsiCount = w.rsi.length;
-  const falloutCount = w.fallout.length;
-  const reportSickCount = w.reportSick.length;
-  // Default total: recruits in this conduct's program (commanders excluded —
+  const falloutCount = wizSectionD4s("fallout").length;
+  const reportSickCount = wizSectionD4s("reportSick").length;
+  // Default total: recruits in this conduct's scope (commanders excluded —
   // they don't typically appear in conduct attendance numbers). Combined =
-  // every recruit; PTP/BMT = only that program's platoons.
-  const defaultTotal = recruitsInProgram(w.program).length;
+  // every recruit; PTP/BMT = only that program's platoons; a group scope =
+  // only its members.
+  const defaultTotal = conductScopeRoster(w.program).length;
   const total = w.totalOverride != null ? w.totalOverride : defaultTotal;
   const participating = Math.max(0, total - statusCount - rsiCount - falloutCount - reportSickCount);
   return { total, statusCount, rsiCount, falloutCount, reportSickCount, participating };
@@ -4173,6 +4358,9 @@ function recomputeLogConductFooter() {
   set("wiz-stat-fallout", t.falloutCount);
   set("wiz-stat-reportSick", t.reportSickCount);
   set("wiz-stat-participating", t.participating);
+  // Section headers show the same expanded counts (group rows fan out).
+  set("wiz-fallout-count", `(${t.falloutCount})`);
+  set("wiz-reportSick-count", `(${t.reportSickCount})`);
   const totalInput = document.getElementById("wiz-total");
   if (totalInput && _logConduct.totalOverride == null) totalInput.value = t.total;
 }
@@ -4180,9 +4368,9 @@ function recomputeLogConductFooter() {
 function updateLogConductOverlapWarning() {
   const el = document.getElementById("wiz-overlap-warning");
   if (!el) return;
-  const w = _logConduct;
-  const falloutSet = new Set(w.fallout.map(r => r.d4).filter(Boolean));
-  const overlap = w.reportSick.map(r => r.d4).filter(d => d && falloutSet.has(d));
+  // Expanded sets so group rows are checked member-by-member.
+  const falloutSet = new Set(wizSectionD4s("fallout").map(r => r.d4));
+  const overlap = wizSectionD4s("reportSick").map(r => r.d4).filter(d => falloutSet.has(d));
   if (!overlap.length) { el.innerHTML = ""; return; }
   el.innerHTML = `
     <div style="background:#D2992222;border:1px solid #D2992266;border-radius:6px;padding:10px 12px;font-size:11px;color:var(--orange);line-height:1.55">
@@ -4199,12 +4387,12 @@ async function saveLogConductWizard() {
   const w = _logConduct;
   if (!w.conductId) { alert("Pick a conduct first."); return; }
   if (!w.date) { alert("Pick a date first."); return; }
-  // Validate every list row has a recruit selected.
+  // Validate every list row has a recruit (person rows) or a scope (group rows).
   const bad = ["fallout", "reportSick"].flatMap(k =>
-    w[k].map((r, i) => r.d4 ? null : `${k} row ${i + 1}`).filter(Boolean)
+    w[k].map((r, i) => (r.scope !== undefined ? r.scope : r.d4) ? null : `${k} row ${i + 1}`).filter(Boolean)
   );
   if (bad.length) {
-    alert(`Some rows have no recruit picked:\n  • ${bad.join("\n  • ")}\nPick a recruit or remove the row.`);
+    alert(`Some rows have no recruit or group picked:\n  • ${bad.join("\n  • ")}\nPick one or remove the row.`);
     return;
   }
 
@@ -4235,8 +4423,12 @@ async function saveLogConductWizard() {
   w.status.filter(s => s.notParticipating).forEach(s => {
     detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: s.d4, type: "PX", reason: s.reason || "" });
   });
-  w.fallout.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: r.d4, type: "Fallout", reason: r.reason || "" }));
-  w.reportSick.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: r.d4, type: "ReportSick", reason: r.reason || "" }));
+  // Fallout / Report Sick expand group rows to one detail row per member,
+  // each carrying the group's shared reason (deduped via wizSectionD4s).
+  const falloutEntries = wizSectionD4s("fallout");
+  const reportSickEntries = wizSectionD4s("reportSick");
+  falloutEntries.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: r.d4, type: "Fallout", reason: r.reason || "" }));
+  reportSickEntries.forEach(r => detailRows.push({ id: nextId(), date: displayDate, time, conductId: w.conductId, program, d4: r.d4, type: "ReportSick", reason: r.reason || "" }));
 
   // Auto-create a "Pending" Medical row for each Report Sick that doesn't
   // already have a medical entry on this date. Pending = waiting for MO
@@ -4245,7 +4437,7 @@ async function saveLogConductWizard() {
   // duplicate, and so a sergeant who already manually fixed the status
   // (e.g. "Pending" → "2D LD") isn't reverted back to Pending.
   const newMedicalRows = [];
-  w.reportSick.forEach(r => {
+  reportSickEntries.forEach(r => {
     if (!r.d4) return;
     const existing = STATE.medical.find(m => m.d4 === r.d4 && m.date === displayDate);
     if (existing) return;
@@ -4374,7 +4566,7 @@ function buildConductChatFormat(attendanceId) {
     return `${label}: ${String(rows.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
   };
 
-  const header = `${ddmmyy} ${fmtHrs(time)} ${conductLabel} (${programLabel(program)})\nTotal strength: ${a.total}\nParticipating: ${a.participating}\nStatus: ${String(byType.PX.length).padStart(2, "0")}\nReport sick: ${String(byType.ReportSick.length).padStart(2, "0")}\nFallout: ${String(byType.Fallout.length).padStart(2, "0")}`;
+  const header = `${ddmmyy} ${fmtHrs(time)} ${conductLabel} (${conductScopeLabel(program)})\nTotal strength: ${a.total}\nParticipating: ${a.participating}\nStatus: ${String(byType.PX.length).padStart(2, "0")}\nReport sick: ${String(byType.ReportSick.length).padStart(2, "0")}\nFallout: ${String(byType.Fallout.length).padStart(2, "0")}`;
 
   const parts = [header];
   parts.push(section("STATUS", byType.PX, /*includeStatusBlock*/ true));
