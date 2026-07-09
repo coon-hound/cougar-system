@@ -711,7 +711,7 @@ function renderDashLeaveOut(visible, todayIso) {
 
   const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
     <h3 style="font-size:13px;color:var(--muted);margin:0">🪖 Out today / This week <span style="color:var(--dim);font-weight:400">(${onToday.length} now · ${upcoming.length} upcoming)</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openLeaveForm()">+ Log</button>
+    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm()">+ Log</button>
   </div>`;
 
   if (!onToday.length && !upcoming.length) {
@@ -733,6 +733,10 @@ function renderDashLeaveOut(visible, todayIso) {
   </tbody></table></div>`;
 }
 
+// The unified absence view: everything "not in camp" in one place. Durable
+// Leave records (timeline + entries table) PLUS today's ephemeral book-outs
+// and present-overrides, which live on the Roster flags and auto-clear
+// tomorrow - shown here so "who is not here and why" has a single answer.
 function renderLeave(el) {
   const visible = visibleD4Set();
   const today = todayISO();
@@ -750,18 +754,44 @@ function renderLeave(el) {
 
   const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Annual Leave" ? "teal" : t === "Compassionate" ? "red" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
+  // Today's ephemeral roster flags (same helpers the dashboard/parade read).
+  const bookedOutToday = STATE.roster.filter(r => isBookedOut(r, today) && passesFilter(r.id, visible));
+  const overridesToday = STATE.roster
+    .filter(r => isForcedIn(r, today) && passesFilter(r.id, visible))
+    .map(r => ({ r, why: derivedCampOut(r.id, today) }));
+  const bookedOutSection = (bookedOutToday.length || overridesToday.length) ? `
+    <div class="card" style="margin-bottom:12px">
+      <h3>🚪 Booked out today <span style="color:var(--dim);font-weight:400;font-size:11px">(manual, auto-clears tomorrow)</span></h3>
+      ${bookedOutToday.length ? `<div class="table-wrap" style="margin-top:8px"><table><thead><tr><th style="text-align:left">Name</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
+        ${bookedOutToday.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">
+          <td style="text-align:left;font-weight:600">${displayPersonLabel(r.id)}</td>
+          <td style="text-align:left;font-size:11px;color:var(--muted)">${escapeAttr(r.outReason || "")}</td>
+          <td style="white-space:nowrap"><button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button></td>
+        </tr>`).join("")}
+      </tbody></table></div>` : ""}
+      ${overridesToday.length ? `<div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+        ${overridesToday.map(({ r, why }) => `<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)">
+          <span style="color:var(--teal);font-weight:600">${displayPersonLabel(r.id)}</span>
+          <span>kept in camp today${why ? `, would be out: ${escapeAttr(why.reason || "")}` : ""}</span>
+          <button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="clearPresentOverride('${r.id}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>
+        </div>`).join("")}
+      </div>` : ""}
+    </div>` : "";
+
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 style="font-size:18px;font-weight:700">📅 Leave / Out${titleSuffix}</h2>
+      <h2 style="font-size:18px;font-weight:700">📅 Out / Leave${titleSuffix}</h2>
       <div style="display:flex;gap:8px">
         <button class="btn btn-success" onclick="pushTab('Leave',STATE.leave)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
-        <button class="btn btn-primary" onclick="openLeaveForm()">+ Log</button>
+        <button class="btn btn-primary" onclick="openBookOutForm()">+ Log</button>
       </div>
     </div>
     <div class="stats-row">
       <div class="stat"><label>Total entries</label><div class="val">${scoped.length}</div></div>
-      <div class="stat"><label>Out today</label><div class="val" style="color:var(--orange)">${onTodayCount}</div></div>
+      <div class="stat"><label>On leave today</label><div class="val" style="color:var(--orange)">${onTodayCount}</div></div>
+      <div class="stat"><label>Booked out today</label><div class="val" style="color:var(--yellow)">${bookedOutToday.length}</div></div>
     </div>
+    ${bookedOutSection}
     ${renderLeaveTimeline(scoped, today)}
     ${rows.length ? `<h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px">All entries</h3><div class="table-wrap"><table><thead><tr><th style="text-align:left">Name</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
     ${rows.map(l => `<tr onclick="openPerson('${l.d4}')" style="cursor:pointer"><td style="text-align:left;font-weight:600">${displayPersonLabel(l.d4)}</td><td>${badge(l.type, typeColor(l.type))}</td><td>${l.startDate || ""}</td><td>${l.endDate || ""}</td><td class="mono" style="font-weight:700">${l.days || ""}</td><td style="text-align:left;font-size:11px;color:var(--muted);max-width:240px;white-space:normal">${l.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openLeaveForm(${l.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('leave', ${l.id}, 'leave record')" title="Delete">✕</button></td></tr>`).join("")}
@@ -844,15 +874,15 @@ function renderLeaveTimeline(scoped, todayIso) {
 
 // "Currently Out of Camp" panel — everyone counted out today (the same shared
 // set that drives the strength tiles + parade). Booked-out rows get a one-tap
-// Book In; medical/leave rows are managed by their own records. A "+ Book Out"
-// button opens the ad-hoc picker.
+// Book in (plain undo); medical/leave rows get "Book in anyway" (override). A
+// "+ Book Out" button opens the unified Book Out modal (today or a date range).
 function renderDashOutOfCamp(scoped, outMap) {
   const rows = scoped.filter(r => outMap.has(r.id));
   const color = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
   const label = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
   const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
     <h3 style="font-size:13px;color:var(--muted);margin:0">🚪 Currently Out of Camp <span style="color:var(--dim);font-weight:400">(${rows.length})</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutPicker()">+ Book Out</button>
+    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm()">+ Book Out</button>
   </div>`;
   if (!rows.length) return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">Everyone in scope is in camp.</div>`;
   const body = rows.map(r => {
@@ -864,8 +894,8 @@ function renderDashOutOfCamp(scoped, outMap) {
       <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${c}22;color:${c}">${label[info.kind] || info.kind}</span></td>
       <td style="text-align:left;font-size:11px;color:var(--muted)">${escapeAttr(info.reason || "")}</td>
       <td style="white-space:nowrap">${info.kind === "bookedout"
-        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book back in">↩ Book In</button>`
-        : `<span style="font-size:10px;color:var(--dim)">via ${info.kind}</span>`}</td>
+        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
+        : `<button class="btn btn-icon" style="font-size:10px;padding:3px 8px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${info.kind} record (resets tomorrow)">✓ Book in anyway</button> <span style="font-size:10px;color:var(--dim)">via ${info.kind}</span>`}</td>
     </tr>`;
   }).join("");
   return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Why</th><th style="text-align:left">Detail</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
@@ -906,7 +936,7 @@ function renderDashAppointments(visible, todayIso) {
     const bookedOut = r && isBookedOut(r, todayIso);
     const bookBtn = (a.outOfCamp && isToday)
       ? (bookedOut
-        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', false)" title="Book back in">↩ In</button> `
+        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); undoBookOut('${a.d4}')" title="Removes today's book-out">↩ Book in</button> `
         : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', true, ${JSON.stringify('Appt: ' + (a.reason || 'appointment'))})" title="Book out of camp">🚪 Out</button> `)
       : "";
     return `<tr onclick="openPerson('${a.d4}')" style="cursor:pointer${isToday ? ';background:#F8514911' : ''}">
@@ -1004,11 +1034,12 @@ function renderRoster(el) {
       const statusCell = (effStatuses && effStatuses.length)
         ? effStatuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("")
         : statusBadge("Active");
-      // CAMP cell = effective status (why they're out, or "In camp") + a book
-      // out/in lever that ALWAYS offers the opposite of their current state.
-      // Out (any reason) → Book in, which counts them present for today (an MC/
-      // leave recruit becomes a manual "In camp"); in camp → Book out. The badge
-      // reads outOfCampMap, so it can never disagree with the dashboard.
+      // CAMP cell = effective status (why they're out, or "In camp") + a state-
+      // specific lever: in camp → Book out (unified modal, today or a range);
+      // booked out → Book in (plain undo); out via MC/leave record → Book in
+      // anyway (campIn override, self-confirms); manual book-in active → Undo
+      // book-in. The badge reads outOfCampMap, so it can never disagree with
+      // the dashboard.
       const outInfo = campOutMap.get(r.id);
       const forcedIn = !outInfo && isForcedIn(r, rosterToday) && derivedCampOut(r.id, rosterToday);
       const campBadge = outInfo
@@ -1017,8 +1048,12 @@ function renderRoster(el) {
           ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#39D2C022;color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
           : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#3FB95018;color:var(--green)">In camp</span>`;
       const campToggle = outInfo
-        ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', false)" title="Book in — count as in camp today (resets tomorrow)">↩ Book in</button>`
-        : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); bookOutToggle('${r.id}', true, 'Out of camp')" title="Book out of camp (controls in-camp strength)">🚪 Book out</button>`;
+        ? (outInfo.kind === "bookedout"
+          ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
+          : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${outInfo.kind} record (resets tomorrow)">✓ Book in anyway</button>`)
+        : forcedIn
+          ? `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); clearPresentOverride('${r.id}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
+          : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); openBookOutForm({ d4: '${r.id}' })" title="Book out of camp for today or a date range">🚪 Book out</button>`;
       const campCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${campBadge}${campToggle}</div>`;
       return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}

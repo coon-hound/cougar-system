@@ -46,21 +46,28 @@ function openPerson(d4) {
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`
     : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}${prog ? " " + programBadge(prog) : ""}</div>`;
 
-  // ── In/out-of-camp status + Book Out / Book In ───────
-  // Reflects the shared out-of-camp computation. The lever always offers the
-  // opposite of the effective state: out (any reason, incl. MC/leave) → Book In,
-  // which counts them present for today; in camp → Book Out. A present-override
-  // over an MC/leave reason shows as a teal "IN CAMP (MANUAL)" pill.
+  // ── In/out-of-camp status + Book Out / Book In ────────
+  // Reflects the shared out-of-camp computation. The lever is state-specific:
+  // in camp → Book Out (unified modal); booked out → Book in (plain undo); out
+  // via an MC/leave record → Book in anyway (campIn override, self-confirms);
+  // present-override active → Undo book-in.
   const campInfo = outOfCampMap(todayISO()).get(d4);
   const forcedInHere = !campInfo && isForcedIn(p, todayISO()) && derivedCampOut(d4, todayISO());
   const pill = (txt, bg) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:${bg}22;color:${bg}">${txt}</span>`;
+  const campBtn = campInfo
+    ? (campInfo.kind === "bookedout"
+      ? `<button class="btn btn-success" style="font-size:11px;padding:4px 10px" onclick="undoBookOut('${d4}'); openPerson('${d4}')" title="Removes today's book-out">↩ Book in</button>`
+      : `<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--teal)" onclick="markPresentToday('${d4}'); openPerson('${d4}')" title="Count as present today despite the ${campInfo.kind} record (resets tomorrow)">✓ Book in anyway</button>`)
+    : forcedInHere
+      ? `<button class="btn" style="font-size:11px;padding:4px 10px" onclick="clearPresentOverride('${d4}'); openPerson('${d4}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
+      : `<button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm({ d4: '${d4}', after: () => openPerson('${d4}') })" title="Book out for today or a date range">🚪 Book out</button>`;
   html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
     ${campInfo ? pill("OUT OF CAMP", "#F85149") : forcedInHere ? pill("IN CAMP (MANUAL)", "#39D2C0") : pill("IN CAMP", "#3FB950")}
     ${campInfo ? `<span style="font-size:11px;color:var(--muted)">${escapeAttr(campInfo.reason || "")}</span>` : ""}
     ${campInfo && campInfo.kind !== "bookedout"
-      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record — Book In counts them present today)</span>`
+      ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
       : forcedInHere ? `<span style="font-size:10px;color:var(--dim)">(would be out: ${escapeAttr(forcedInHere.reason || "")}; resets tomorrow)</span>` : ""}
-    <button class="btn ${campInfo ? "btn-success" : "btn-danger"}" style="font-size:11px;padding:4px 10px" onclick="bookOutToggle('${d4}', ${campInfo ? "false" : "true"}, 'Out of camp'); openPerson('${d4}')">${campInfo ? "↩ Book In" : "🚪 Book Out"}</button>
+    ${campBtn}
   </div>`;
 
   // ── Profile section ──────────────────────────────────
@@ -1367,6 +1374,51 @@ function bookOutToggle(d4, on, reason) {
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
 }
 
+// Undo TODAY's manual book-out only. Never touches the campIn present-override,
+// so it is always a plain reversal - unlike the legacy Book In (bookOutToggle
+// off), which silently creates an override for someone also out on MC/leave.
+function undoBookOut(d4) {
+  const r = STATE.roster.find(x => x.id === d4);
+  if (!r) return;
+  r.outOfCamp = false;
+  r.outReason = "";
+  r.outSince = "";
+  saveLocal(); render();
+  if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
+}
+
+// Count an MC/leave person as present for today (the campIn override), behind a
+// confirm since it flips parade strength against their records. Also clears any
+// stale manual book-out so no orphaned outSince remains. Field writes mirror
+// bookOutToggle's book-in branch so isForcedIn / parade "(kept in camp)" behave
+// identically. No underlying out-reason -> just an undo.
+function markPresentToday(d4) {
+  const r = STATE.roster.find(x => x.id === d4);
+  if (!r) return;
+  const today = todayISO();
+  const why = derivedCampOut(d4, today);
+  if (!why) { undoBookOut(d4); return; }
+  if (!confirm(`Book in ${displayPersonLabel(d4)} for today?\nThey are out: ${why.reason}.\nThey will be counted in camp today; this resets tomorrow.`)) return;
+  r.outOfCamp = false;
+  r.outReason = "";
+  r.outSince = "";
+  r.campIn = true;
+  r.campInSince = today;
+  saveLocal(); render();
+  if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
+}
+
+// Remove a mistaken present-override so the person returns to their derived
+// out state. Previously the only way out of an override was booking them out.
+function clearPresentOverride(d4) {
+  const r = STATE.roster.find(x => x.id === d4);
+  if (!r) return;
+  r.campIn = false;
+  r.campInSince = "";
+  saveLocal(); render();
+  if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
+}
+
 // In-camp recruits (commanders excluded, anyone already out skipped) matching a
 // book-out scope: "company", "plt:<n>", or "prog:<key>". THE definition of who a
 // bulk book-out targets, shared by the picker's live counts and submit.
@@ -1406,62 +1458,210 @@ function bookOutMany(d4s, reason) {
   return booked.length;
 }
 
-// Ad-hoc "book out" picker (dashboard "+ Book Out"): book out a single recruit,
-// or a whole company / platoon / training program in one tap. Scope options show
-// the live count of in-camp recruits they'd affect.
-function openBookOutPicker() {
-  const outMap = outOfCampMap(todayISO());
-  const inCamp = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
-  const platoons = [...new Set(inCamp.map(getPlt).filter(Boolean))].sort();
-  const progs = (STATE.programs || []).filter(pr => inCamp.some(r => programOf(r) === pr.key));
-  const groups = allGroupNames().filter(g => inCamp.some(r => recruitInGroup(r, g)));
-  const inCampIds = new Set(inCamp.map(r => r.id));
-  const combined = allCombinedNames();
-  const scopeOpts = [
-    `<option value="recruit">One recruit…</option>`,
-    `<option value="company">Whole company (${inCamp.length})</option>`,
-    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${inCamp.filter(r => getPlt(r) === p).length})</option>`),
-    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${inCamp.filter(r => programOf(r) === pr.key).length})</option>`),
-    ...groups.map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${inCamp.filter(r => recruitInGroup(r, g)).length})</option>`),
-    ...combined.map(n => { const c = [...combinedMemberSet(n)].filter(d => inCampIds.has(d)).length; return `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${c})</option>`; })
+// ── Unified "Book Out" flow ──────────────────────────────
+// ONE entry point for every "this person is not here" action: pick who (one
+// person or a scope), until when (end of today vs a date range), and why.
+// "End of today" drives the ephemeral booked-out flag (auto-clears tomorrow);
+// a date range creates durable Leave record(s). Replaces the old separate
+// Book Out picker and the Leave form's add mode so users never have to choose
+// between two forms for the same concept.
+
+// Options carried from the opener to submit: { d4, reason, after }. `d4` locks
+// the modal to one person, `reason` prefills, `after` runs post-submit (e.g.
+// reopen the person modal). Always overwritten whole on open - merging could
+// leak a stale `after` callback into an unrelated Book Out.
+let _bookOutOpts = {};
+
+// Shared scope <option> list (person / company / platoon / program / group /
+// combined) with TOTAL member counts via scopeRecruits. The today-path's
+// in-camp-only count is shown at confirm time instead, so the option labels
+// don't have to rewrite themselves when the duration toggles.
+function bookOutScopeOptions() {
+  const recruits = STATE.roster.filter(r => r.role !== "Commander");
+  const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
+  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
+  const cnt = s => scopeRecruits(s).length;
+  return [
+    `<option value="person">One person…</option>`,
+    `<option value="company">Whole company (${recruits.length})</option>`,
+    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt("plt:" + p)})</option>`),
+    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt("prog:" + pr.key)})</option>`),
+    ...allGroupNames().map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt("grp:" + g)})</option>`),
+    ...allCombinedNames().map(n => `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt("comb:" + n)})</option>`)
   ].join("");
-  openModal("Book Out of Camp", `
-    <form onsubmit="event.preventDefault(); submitBookOut(); return false">
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-size:11px;color:var(--muted)">Marks recruits out of camp for today (auto-clears tomorrow). Recruits already out (MC / leave / booked out) are skipped. For multi-day absences, log a Leave instead.</div>
-        <div class="form-group"><label>Scope</label><select id="f-bo-scope" class="topbar-select" style="width:100%" onchange="onBookOutScopeChange()">${scopeOpts}</select></div>
-        <div class="form-group" id="f-bo-recruit-wrap"><label>Recruit</label>${rosterSelect("f-bo-d4", false, "")}</div>
-        ${formField("f-bo-reason", "Reason", "text", "MO / Appointment / Personal…", `value="Out of camp" maxlength="120"`)}
-        <button type="submit" class="btn btn-danger">🚪 Book Out</button>
-      </div>
-    </form>`);
-  onBookOutScopeChange();
 }
-// Show the single-recruit dropdown only when the "One recruit" scope is picked.
-function onBookOutScopeChange() {
-  const wrap = document.getElementById("f-bo-recruit-wrap");
-  if (wrap) wrap.style.display = gv("f-bo-scope") === "recruit" ? "" : "none";
-}
-function submitBookOut() {
-  const scope = gv("f-bo-scope") || "recruit";
-  const reason = gv("f-bo-reason") || "Out of camp";
-  if (scope === "recruit") {
-    const d4 = gv("f-bo-d4");
-    if (!d4) { alert("Pick a recruit first."); return; }
-    bookOutToggle(d4, true, reason);
-    closeModal();
-    return;
-  }
-  const targets = bookOutTargets(scope).map(r => r.id);
-  if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
-  const label = scope === "company" ? "the whole company"
+
+// Human label for a scope value, for confirm() texts.
+function bookOutScopeLabel(scope) {
+  return scope === "company" ? "the whole company"
     : scope.indexOf("plt:") === 0 ? "Platoon " + scope.slice(4)
     : scope.indexOf("grp:") === 0 ? scope.slice(4)
     : scope.indexOf("comb:") === 0 ? scope.slice(5)
-    : programLabel(scope.slice(5));
-  if (!confirm(`Book out ${targets.length} in-camp recruit${targets.length === 1 ? "" : "s"} in ${label}?\nReason: ${reason}`)) return;
-  bookOutMany(targets, reason);
+    : scope.indexOf("prog:") === 0 ? programLabel(scope.slice(5))
+    : scope;
+}
+
+const LEAVE_TYPE_OPTIONS = [["Off-in-Lieu", "Off-in-Lieu (counts toward quota)"], ["Annual Leave", "Annual Leave"], ["Compassionate", "Compassionate Leave"], ["Weekend", "Weekend"], ["Night's Out", "Night's Out (same-day, evening off-camp)"], ["Course", "Course"], ["Guard Duty", "Guard Duty"], ["NDP", "NDP"], ["Other", "Other"]];
+
+// Today's unresolved outside appointment for a person, if any. Used to prefill
+// the Book Out reason so appointment book-outs go through the same flow (the
+// one-tap 🚪 Out on the appointment row stays as the shortcut).
+function outsideApptToday(d4) {
+  if (!d4) return null;
+  const today = todayISO();
+  return STATE.appointments.find(a => !a.resolved && a.d4 === d4 && a.outOfCamp && displayDateToISO(a.date) === today) || null;
+}
+
+function openBookOutForm(opts) {
+  _bookOutOpts = opts || {};
+  const preset = _bookOutOpts.d4 ? STATE.roster.find(r => r.id === _bookOutOpts.d4) : null;
+  const todayIso = todayISO();
+  const whoRows = preset
+    ? `<div class="form-group"><label>Person</label><div style="font-size:13px;font-weight:600;padding:2px 0">${displayPersonLabel(preset.id)}</div></div>`
+    : `<div class="form-group"><label>Apply to</label><select id="f-bo-scope" class="topbar-select" style="width:100%" onchange="onBookOutScopeChange()">${bookOutScopeOptions()}</select></div>
+      <div class="form-group" id="f-bo-person-wrap"><label>Person</label>${rosterSelect("f-bo-d4", false, "", "", { onchange: "onBookOutPersonChange()" })}</div>`;
+  openModal("Book Out of Camp", `
+    <form onsubmit="event.preventDefault(); submitBookOut(); return false">
+      <input type="hidden" id="f-bo-mode" value="today">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${whoRows}
+        <div class="form-group"><label>Out of camp for</label>
+          <div class="filter-role-group" style="display:flex;width:100%">
+            <button type="button" id="f-bo-pill-today" class="role-btn active" style="flex:1;padding:10px 0" onclick="setBookOutMode('today')">Today only</button>
+            <button type="button" id="f-bo-pill-range" class="role-btn" style="flex:1;padding:10px 0" onclick="setBookOutMode('range')">Date range (leave)</button>
+          </div>
+        </div>
+        <div id="f-bo-hint" style="font-size:11px;color:var(--muted)"></div>
+        <div id="f-bo-range-wrap" style="display:none;flex-direction:column;gap:10px">
+          ${formSelect("f-bo-type", "Type", LEAVE_TYPE_OPTIONS, true, "")}
+          <div class="form-row">
+            ${formField("f-bo-start", "Start date", "date", "", `value="${todayIso}" min="2020-01-01" max="2099-12-31" onchange="recalcBookOutDays()"`)}
+            ${formField("f-bo-end", "End date", "date", "", `value="${todayIso}" min="2020-01-01" max="2099-12-31" onchange="recalcBookOutDays()"`)}
+          </div>
+          ${formField("f-bo-days", "Days (auto-calc - editable for half-days)", "number", "1", `min="0" max="365" step="0.5" value="1"`)}
+        </div>
+        <div id="f-bo-appt-note" style="display:none;font-size:11px;color:var(--accent)"></div>
+        ${formField("f-bo-reason", "Reason / notes", "text", "MO / Appointment / NDP rehearsal…", `maxlength="200" value="${escapeAttr(_bookOutOpts.reason || "")}"`)}
+        <button type="submit" id="f-bo-submit" class="btn btn-danger">🚪 Book out for today</button>
+      </div>
+    </form>`);
+  onBookOutScopeChange();
+  setBookOutMode("today");
+  onBookOutPersonChange();
+}
+
+// Show the single-person dropdown only for the "One person" scope.
+function onBookOutScopeChange() {
+  const wrap = document.getElementById("f-bo-person-wrap");
+  if (wrap) wrap.style.display = (gv("f-bo-scope") || "person") === "person" ? "" : "none";
+}
+
+// When the chosen person has an outside appointment today, prefill the reason
+// from it (same "Appt: ..." convention as the appointment row's 🚪 Out) and say
+// so. Only overwrites a reason this handler itself filled in, never the user's.
+function onBookOutPersonChange() {
+  const note = document.getElementById("f-bo-appt-note");
+  const reasonEl = document.getElementById("f-bo-reason");
+  if (!note || !reasonEl) return;
+  const appt = outsideApptToday(_bookOutOpts.d4 || gv("f-bo-d4"));
+  const wasAutofilled = reasonEl.value === (reasonEl.dataset.autofill || "");
+  if (appt) {
+    const autoReason = "Appt: " + (appt.reason || "appointment");
+    note.textContent = `📅 Outside appointment today: ${appt.reason || "appointment"}${appt.time ? " at " + fmtHrs(appt.time) : ""}. Reason prefilled.`;
+    note.style.display = "";
+    if (wasAutofilled) {
+      reasonEl.value = autoReason;
+      reasonEl.dataset.autofill = autoReason;
+    }
+  } else {
+    note.style.display = "none";
+    if (wasAutofilled && reasonEl.dataset.autofill) {
+      reasonEl.value = "";
+      reasonEl.dataset.autofill = "";
+    }
+  }
+}
+
+// Toggle between the ephemeral today mode and the Leave-record range mode:
+// pills, range fields, helper text and the submit button all switch together.
+function setBookOutMode(m) {
+  const mode = document.getElementById("f-bo-mode");
+  if (mode) mode.value = m;
+  document.getElementById("f-bo-pill-today")?.classList.toggle("active", m === "today");
+  document.getElementById("f-bo-pill-range")?.classList.toggle("active", m === "range");
+  const rangeWrap = document.getElementById("f-bo-range-wrap");
+  if (rangeWrap) rangeWrap.style.display = m === "range" ? "flex" : "none";
+  const hint = document.getElementById("f-bo-hint");
+  if (hint) hint.textContent = m === "today"
+    ? "A normal book-out: counted out of camp for the rest of today, automatically booked back in tomorrow. In bulk, people already out (MC / leave / booked out) are skipped."
+    : "For anything longer than today: logs a dated Leave / Out record (leave, course, guard duty...). Everyone in scope is included. Off-in-Lieu counts toward a commander's quota.";
+  const btn = document.getElementById("f-bo-submit");
+  if (btn) {
+    btn.className = m === "today" ? "btn btn-danger" : "btn btn-primary";
+    btn.textContent = m === "today" ? "🚪 Book out for today" : "📅 Log leave / out";
+  }
+}
+
+// Auto-recompute the days field from the range inputs; users override for
+// half-days after this fires (same rule as the leave edit form).
+function recalcBookOutDays() {
+  const s = document.getElementById("f-bo-start"), en = document.getElementById("f-bo-end"), d = document.getElementById("f-bo-days");
+  if (!s || !en || !d || !s.value || !en.value) return;
+  const diff = Math.round((new Date(en.value) - new Date(s.value)) / 86400000) + 1;
+  if (diff > 0) d.value = diff;
+}
+
+function submitBookOut() {
+  const scope = _bookOutOpts.d4 ? "person" : (gv("f-bo-scope") || "person");
+  const mode = gv("f-bo-mode") || "today";
+  const reason = gv("f-bo-reason");
+  const d4 = _bookOutOpts.d4 || gv("f-bo-d4");
+  if (mode === "today") {
+    if (scope === "person") {
+      if (!d4) { alert("Pick a person first."); return; }
+      // A manual today-flag on someone already out via a medical/leave record
+      // would be ignored by outOfCampMap - point at the real levers instead.
+      const info = outOfCampMap(todayISO()).get(d4);
+      if (info && info.kind !== "bookedout") {
+        alert(`${displayPersonLabel(d4)} is already out via ${info.kind}: ${info.reason}.\nUse "Book in anyway" to count them present, or pick Date range to log another record.`);
+        return;
+      }
+      bookOutToggle(d4, true, reason || "Out of camp");
+    } else {
+      const targets = bookOutTargets(scope).map(r => r.id);
+      if (!targets.length) { alert("No in-camp recruits to book out in that scope."); return; }
+      const skipped = scopeRecruits(scope).length - targets.length;
+      if (!confirm(`Book out ${targets.length} in-camp recruit${targets.length === 1 ? "" : "s"} in ${bookOutScopeLabel(scope)} for today?`
+        + (skipped ? `\n${skipped} already out will be skipped.` : "")
+        + `\nReason: ${reason || "Out of camp"}`)) return;
+      bookOutMany(targets, reason || "Out of camp");
+    }
+  } else {
+    const startIso = gv("f-bo-start"), endIso = gv("f-bo-end");
+    if (!startIso || !endIso) { alert("Pick a start and end date."); return; }
+    if (endIso < startIso) { alert("End date must be on or after start date."); return; }
+    const template = {
+      type: gv("f-bo-type"),
+      startDate: isoToDisplayDate(startIso),
+      endDate: isoToDisplayDate(endIso),
+      days: +gv("f-bo-days") || 0,
+      reason: reason || ""
+    };
+    if (scope === "person") {
+      if (!d4) { alert("Pick a person first."); return; }
+      const entry = { id: nextId(), d4, ...template };
+      STATE.leave.push(entry);
+      saveLocal(); render();
+      if (STATE.apiUrl) autoSync("Leave", { type: "upsert", row: entry });
+    } else {
+      const ids = scopeRecruits(scope);
+      if (!ids.length) { alert("No recruits in that scope."); return; }
+      if (!confirm(`Log ${template.type} for ${ids.length} recruit${ids.length === 1 ? "" : "s"} in ${bookOutScopeLabel(scope)}?`)) return;
+      leaveMany(ids, template);
+    }
+  }
   closeModal();
+  if (_bookOutOpts.after) _bookOutOpts.after();
 }
 
 // ── Recruit groups: mutations + management UI ────────────────
@@ -1749,44 +1949,34 @@ function submitCommander() {
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: entry });
 }
 
+// EDIT-ONLY since the unified Book Out flow took over adding: an edit is always
+// one person and always a date-range record, so it keeps this small dedicated
+// form instead of threading edit special-cases through the Book Out modal.
+// Calls without a valid id (legacy add-mode callers) land in openBookOutForm.
 function openLeaveForm(id) {
   const e = id ? STATE.leave.find(x => x.id === id) : null;
-  const startVal = e ? displayDateToISO(e.startDate) || todayISO() : todayISO();
-  const endVal = e ? displayDateToISO(e.endDate) || todayISO() : todayISO();
-  // Bulk scope options (add mode only): a whole platoon / program / group /
-  // combined group on leave in one entry. Counts are recruits in the scope.
-  const recruits = STATE.roster.filter(r => r.role !== "Commander");
-  const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
-  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
-  const cnt = s => scopeRecruits(s).length;
-  const scopeOpts = [
-    `<option value="person">One person…</option>`,
-    `<option value="company">Whole company (${recruits.length})</option>`,
-    ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt("plt:" + p)})</option>`),
-    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt("prog:" + pr.key)})</option>`),
-    ...allGroupNames().map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt("grp:" + g)})</option>`),
-    ...allCombinedNames().map(n => `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt("comb:" + n)})</option>`)
-  ].join("");
-  openModal(e ? "Edit Leave/Out Entry" : "Log Leave / Out", `
+  if (!e) { openBookOutForm(); return; }
+  const startVal = displayDateToISO(e.startDate) || todayISO();
+  const endVal = displayDateToISO(e.endDate) || todayISO();
+  openModal("Edit Leave/Out Entry", `
     <form onsubmit="event.preventDefault(); submitLeave(); return false">
-      <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
+      <input type="hidden" id="f-entry-id" value="${e.id}">
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${e ? editHint : ""}
+        ${editHint}
         <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.6">
           <div style="font-weight:600;color:var(--text);margin-bottom:4px">📋 Pick the type</div>
-          <div><strong>Off-in-Lieu</strong> — counts against the commander's quota.</div>
-          <div><strong>Leave / Compassionate / Course / Guard Duty / NDP / Other</strong> — tracked but doesn't decrement the off balance.</div>
+          <div><strong>Off-in-Lieu</strong> - counts against the commander's quota.</div>
+          <div><strong>Leave / Compassionate / Course / Guard Duty / NDP / Other</strong> - tracked but doesn't decrement the off balance.</div>
         </div>
-        ${e ? "" : `<div class="form-group"><label>Apply to</label><select id="f-leave-scope" class="topbar-select" style="width:100%" onchange="onLeaveScopeChange()">${scopeOpts}</select></div>`}
-        <div class="form-group" id="f-leave-person-wrap"><label>Person</label>${rosterSelect("f-d4", false, e?.d4 || "")}</div>
-        ${formSelect("f-type", "Type", [["Off-in-Lieu", "Off-in-Lieu (counts toward quota)"], ["Annual Leave", "Annual Leave"], ["Compassionate", "Compassionate Leave"], ["Weekend", "Weekend"], ["Night's Out", "Night's Out (same-day, evening off-camp)"], ["Course", "Course"], ["Guard Duty", "Guard Duty"], ["NDP", "NDP"], ["Other", "Other"]], true, e?.type || "")}
+        <div class="form-group" id="f-leave-person-wrap"><label>Person</label>${rosterSelect("f-d4", false, e.d4 || "")}</div>
+        ${formSelect("f-type", "Type", LEAVE_TYPE_OPTIONS, true, e.type || "")}
         <div class="form-row">
           ${formField("f-start", "Start date", "date", "", `required value="${startVal}" min="2020-01-01" max="2099-12-31" onchange="recalcLeaveDays()"`)}
           ${formField("f-end", "End date", "date", "", `required value="${endVal}" min="2020-01-01" max="2099-12-31" onchange="recalcLeaveDays()"`)}
         </div>
         ${formField("f-days", "Days (auto-calc — editable for half-days)", "number", "1", `required min="0" max="365" step="0.5" value="${e?.days ?? 1}"`)}
         ${formField("f-reason", "Reason / notes", "text", "APSC course / NDP rehearsal / Cleared leave balance…", `maxlength="200" value="${escapeAttr(e?.reason)}"`)}
-        <button type="submit" class="btn btn-primary">${e ? "Save" : "Log"}</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>`);
 }
@@ -1798,11 +1988,8 @@ function recalcLeaveDays() {
   const diff = Math.round((new Date(en.value) - new Date(s.value)) / 86400000) + 1;
   if (diff > 0) d.value = diff;
 }
-// Show the single-person picker only for the "One person" scope.
-function onLeaveScopeChange() {
-  const wrap = document.getElementById("f-leave-person-wrap");
-  if (wrap) wrap.style.display = (gv("f-leave-scope") || "person") === "person" ? "" : "none";
-}
+// Save a single edited (or, defensively, new) Leave row. Adding - single or
+// bulk - happens in submitBookOut now.
 function submitLeave() {
   const editId = +gv("f-entry-id");
   const startIso = gv("f-start");
@@ -1815,17 +2002,6 @@ function submitLeave() {
     days: +gv("f-days") || 0,
     reason: gv("f-reason") || ""
   };
-  // Bulk: one entry per recruit in the chosen scope (platoon / program / group /
-  // combined). Skipped for edits, which always target the single person.
-  const scope = editId ? "person" : (gv("f-leave-scope") || "person");
-  if (scope !== "person") {
-    const ids = scopeRecruits(scope);
-    if (!ids.length) { alert("No recruits in that scope."); return; }
-    if (!confirm(`Log ${template.type} for ${ids.length} recruit${ids.length === 1 ? "" : "s"}?`)) return;
-    leaveMany(ids, template);
-    closeModal();
-    return;
-  }
   const entry = { id: editId || nextId(), d4: gv("f-d4"), ...template };
   if (!entry.d4) { alert("Pick a person."); return; }
   if (editId) {
@@ -2340,6 +2516,9 @@ function onParadeTimeChange(type) {
 // Book-out checklist toggle (parade modal). Writes the PERSISTENT booked-out
 // flag (shared with the dashboard) rather than a session-only tick, so finalising
 // who's out at parade time also corrects the live strength board everywhere.
+// NOTE: relies on bookOutToggle's dual book-in semantics - unticking someone who
+// is also out on MC/leave creates a campIn present-override for the day, which
+// is what the parade checklist wants (count them present at parade).
 function toggleApptCamp(d4, checked, reason, type) {
   bookOutToggle(d4, checked, reason);   // bookOutToggle already re-renders + syncs
   renderApptCampSection(gv("rep-date"), type);
