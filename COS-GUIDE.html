@@ -190,7 +190,7 @@
 <p>The app is one page with a sidebar on the left. On your phone, tap <span class="ui-btn small">☰</span> to open it. You will live in five places:</p>
 <table class="ref">
   <tr><th>Tab</th><th>What you do there</th></tr>
-  <tr><td><strong>📊 Dashboard</strong></td><td>Generate the First / Last Parade State and the Medical Status List. See who is out of camp right now.</td></tr>
+  <tr><td><strong>📊 Dashboard</strong></td><td>Generate the First / Last Parade State and the Medical Status List. See who is out of camp right now. Book and track medical appointments.</td></tr>
   <tr><td><strong>👥 Roster</strong></td><td>Per-person book out / book in buttons. Manage <strong>⦿ Groups</strong>.</td></tr>
   <tr><td><strong>🏥 Medical</strong></td><td>The Report Sick Log. Log every report sick here. Edit the status when the MO outcome comes back.</td></tr>
   <tr><td><strong>📅 Out / Leave</strong></td><td>Every book-out and leave record. Edit book-in dates here.</td></tr>
@@ -382,9 +382,44 @@ REASON: Fever</pre>
   </ol>
 </div>
 
+<h3>3.3 Medical appointments</h3>
+<p>Appointments follow a fixed chain. The section commander receives the appointment request. He informs the COS. The COS logs it in the app at once. The parade state then carries it under <code>MEDICAL APPT</code> until the day itself. No appointment lives only in someone's head.</p>
+
+<div class="flow"><div class="lane">
+  <span class="ui-tab">Section comd gets appointment request</span><span class="arr">→</span>
+  <span class="ui-tab">informs COS</span><span class="arr">→</span>
+  <span class="ui-tab">📊 Dashboard</span><span class="arr">→</span>
+  <span class="ui-btn small">📅 Upcoming Appointments</span><span class="arr">→</span>
+  <span class="ui-btn primary press">+ Book</span>
+</div></div>
+
+<div class="ui-modal">
+  <div class="bar"><span>Book Appointment</span><span class="x">✕</span></div>
+  <div class="body">
+    <div class="ui-field"><div class="lab">Recruit</div><div class="val select">REC Dalson &middot; C1203</div></div>
+    <div class="ui-field"><div class="lab">Reason</div><div class="val">Knee specialist review</div><div class="hint">e.g. Knee specialist review / IPPT retake / Board…</div></div>
+    <div class="ui-field"><div class="lab">Date / Time</div><div class="val">22/05/2026 &middot; 0930</div></div>
+    <div class="ui-field"><div class="lab">Location</div><div class="val">CGH</div><div class="hint">e.g. MO Office / SAFTI MC / Camp HQ…</div></div>
+    <div class="ui-check press"><span class="box on">✓</span>Out of camp (recruit leaves camp for this appointment)</div>
+    <div><span class="press-note">← tick this if he will leave camp for it</span></div>
+    <div class="ui-check"><span class="box"></span>Mark as resolved (hides from dashboard + parade state)</div>
+    <div class="ui-footerbtns"><span class="ui-btn primary">Book</span></div>
+  </div>
+</div>
+
+<p>After you press <strong>Book</strong>:</p>
+<ul>
+  <li>The appointment shows on the Dashboard under <strong>📅 Upcoming Appointments</strong>, and in every parade state under <code>MEDICAL APPT</code>, until you resolve it.</li>
+  <li>On the day, the row gets a <strong>TODAY</strong> badge and a one-tap <span class="ui-btn small">🚪 Out</span> button. Press it when he leaves camp. It books him out with reason <code>Appt: &lt;reason&gt;</code>. In the parade state he moves to <code>OTHERS</code> as <code>&lt;reason&gt; (MA)</code>, with Location, Date, and Time.</li>
+  <li>When he returns, press <span class="ui-btn small">↩ Book in</span> on the same row.</li>
+  <li>After the appointment is over, press <span class="ui-btn small">✓</span> on the row. That marks it resolved and removes it from the dashboard and the parade state.</li>
+  <li>If the appointment gave him a new status, log it in the Medical tab (Section 2.3).</li>
+</ul>
+<p>The FP / LP modal also shows a checklist: <em>📅 Outside appointments today — tick = booked OUT of camp</em>. Use it to confirm who is really out at parade time.</p>
+
 <div class="scenario">
-  <div class="t">Recruit books out for a medical appointment</div>
-  <p>On the day: Roster → his row → <span class="ui-btn small">🚪 Book out</span>. If the appointment is in the app, the form shows <em>📅 Outside appointment today</em> and prefills the reason as <code>Appt: &lt;reason&gt;</code>. Keep <strong>Today only</strong> and submit. He shows in the parade state under <code>OTHERS</code> with an <code>(MA)</code> marker. When he books back in, press <span class="ui-btn small">↩ Book in</span>. If the appointment gave him a new status (an MC, a new excuse), log it in the Medical tab as in Section 2.3.</p>
+  <div class="t">Knee specialist appointment, start to finish</div>
+  <p>On 16/05, Dalson's section commander receives an appointment slip: knee specialist review at CGH, 22/05 at 0930H. He informs the COS the same day. The COS logs it at once: Dashboard → <span class="ui-btn small primary">+ Book</span>, with <strong>Out of camp</strong> ticked. From 16/05 to 22/05, every parade state lists the appointment under <code>MEDICAL APPT</code>. No one is surprised on the day. On 22/05 at 0830H, Dalson leaves camp. The COS presses <span class="ui-btn small">🚪 Out</span> on the appointment row. The morning parade state shows him under <code>OTHERS</code> as <em>Knee specialist review (MA)</em>. He returns at 1400H. The COS presses <span class="ui-btn small">↩ Book in</span>. The specialist gave him 2 weeks of Excuse Lower Limb, so the COS logs it in the Medical tab (Section 2.3). Last, the COS presses <span class="ui-btn small">✓</span> on the appointment row to resolve it.</p>
 </div>
 
 <div class="scenario">
@@ -535,7 +570,8 @@ OTHERS: ...          ← leave + book-outs (weekend, CGH, escort, appt)</pre>
   <tr><td>MO clears him with nothing</td><td>Medical → <strong>✎</strong> → status <strong>NIL</strong>. Sign out of book.</td></tr>
   <tr><td>MC consumed in camp</td><td>Status MC + tick <strong>Consume in camp</strong> (counts in strength, listed under MEDICAL STATUS).</td></tr>
   <tr><td>Sent out to hospital (CGH) from MO</td><td>Book out recruit <strong>Today only</strong> + book out escort commander. Later: ✎ medical entry to MC/Warded; <strong>↩ Book in</strong> the commander when back.</td></tr>
-  <tr><td>Medical appointment outside</td><td><strong>🚪 Book out</strong> (reason prefills <code>Appt:</code>), Today only. <strong>↩ Book in</strong> on return. Log any new status.</td></tr>
+  <tr><td>Appointment request received (via section comd)</td><td>Dashboard → <strong>📅 Upcoming Appointments</strong> → <strong>+ Book</strong>. Tick <strong>Out of camp</strong> if he leaves camp for it. Shows under MEDICAL APPT.</td></tr>
+  <tr><td>Appointment day</td><td>Press <strong>🚪 Out</strong> on the appointment row when he leaves. <strong>↩ Book in</strong> on return. <strong>✓</strong> to resolve after. Log any new status.</td></tr>
   <tr><td>Weekend book-out (partial company)</td><td>Out / Leave → <strong>+ Log</strong> → scope = the program/platoon/group going out → Date range → Type <strong>Weekend</strong>. Stayers: log nothing. Verify at book-in; ✎ records for stragglers.</td></tr>
   <tr><td>Person on leave/MC is physically in camp</td><td><strong>✓ Book in anyway</strong> (today only, shows In camp &middot; manual).</td></tr>
   <tr><td>Leave dates change (early/late book-in)</td><td>Out / Leave → <strong>✎</strong> → adjust End (and Days).</td></tr>
