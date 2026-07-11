@@ -75,6 +75,31 @@ tr:hover{background:var(--surface2)}
 .card h3{font-size:13px;color:var(--muted);margin-bottom:12px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 
+/* ── Dashboard progressive-disclosure sections ─────────────
+   Collapsed by default: the header row IS the summary (count in the title +
+   colored breakdown chips) so the closed dashboard reads like a one-screen
+   parade state. Tapping the header expands the body in place; open state
+   persists per device (localStorage cougar-dash-open). */
+.dash-sec{padding:0;margin-bottom:10px}
+.dash-sec-head{display:flex;align-items:center;gap:8px;padding-right:10px}
+.dash-sec-toggle{flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:6px 9px;min-width:0;min-height:46px;padding:12px;background:none;border:none;border-radius:8px;color:var(--text);font:inherit;cursor:pointer;text-align:left}
+.dash-sec-toggle:hover .dash-sec-title{color:var(--accent)}
+.dash-sec-chevron{color:var(--dim);font-size:9px;flex-shrink:0;transition:transform .15s}
+.dash-sec.open .dash-sec-chevron{transform:rotate(90deg)}
+.dash-sec-title{font-size:13px;font-weight:600;white-space:nowrap}
+.dash-sec-summary{display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+.dash-chip{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap}
+.dash-sec-note{font-size:11px;color:var(--muted);white-space:nowrap}
+.dash-sec.zero .dash-sec-title{color:var(--muted);font-weight:500}
+.dash-sec-body{padding:0 12px 12px}
+.dash-sec-action{font-size:11px;padding:4px 10px;flex-shrink:0;white-space:nowrap}
+/* Stat tiles that shortcut to a section. The › corner arrow is the
+   touch-visible affordance (hover/cursor/tooltip don't exist on phones). */
+.stat-link{cursor:pointer;transition:border-color .15s;position:relative}
+.stat-link::after{content:"›";position:absolute;top:6px;right:10px;color:var(--dim);font-size:14px;line-height:1}
+.stat-link:hover{border-color:var(--accent)}
+.stat-link:hover::after{color:var(--accent)}
+
 /* Forms */
 .form-group{display:flex;flex-direction:column;gap:4px}
 .form-group label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
@@ -198,6 +223,15 @@ tr:hover{background:var(--surface2)}
 
   /* Card spacing */
   .card{padding:12px;margin-bottom:12px}
+
+  /* Dashboard sections: thumb-sized headers, tighter body padding. The
+     chips wrap under the title when a row carries several counts. Header
+     action buttons get an EXPLICIT ≥44px target (don't rely on the generic
+     mobile .btn rule) so a missed tap doesn't toggle the section instead. */
+  .dash-sec{padding:0;margin-bottom:8px}
+  .dash-sec-toggle{min-height:52px;padding:12px}
+  .dash-sec-body{padding:0 10px 10px}
+  .btn.dash-sec-action{font-size:12px;padding:10px 14px;min-height:44px}
 
   /* Tables: horizontal scroll already enabled; tighten cell padding */
   th,td{padding:6px 8px;font-size:11px}

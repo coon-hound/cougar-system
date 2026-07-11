@@ -2,13 +2,23 @@
 // Each tab function may also (re)create charts; old chart instances are
 // destroyed at the top of render() to avoid Chart.js canvas reuse errors.
 
+let _lastRenderedCtx = null;
+
 function render() {
   Object.values(STATE.charts).forEach(c => c.destroy());
   STATE.charts = {};
 
-  // Reset scroll on tab switches so a long previous tab doesn't leave the
-  // next one looking pre-scrolled (and on mobile hiding the topbar).
-  document.getElementById("content")?.scrollTo(0, 0);
+  // Reset scroll only when the CONTEXT changed — the tab, or the topbar scope
+  // filter (both mean "you are looking at something new", so a long previous
+  // view shouldn't leave the next one pre-scrolled; on mobile that hides the
+  // topbar). Same-context re-renders (inline actions, dashboard section
+  // toggles) keep the user's scroll position instead of yanking them to the
+  // top. Explicit nav taps also scroll to top in main.js's click handler.
+  const renderCtx = `${STATE.nav}|${isFilterActive() ? filterLabel() : ""}`;
+  if (renderCtx !== _lastRenderedCtx) {
+    document.getElementById("content")?.scrollTo(0, 0);
+    _lastRenderedCtx = renderCtx;
+  }
 
   // Keep filter dropdown options in sync with the current roster — cheap to
   // rebuild a few <option>s and means we don't have to remember to call this
@@ -37,6 +47,60 @@ function render() {
     case "sync": renderSync(el); break;
     default: el.innerHTML = "";
   }
+}
+
+// ── Dashboard progressive disclosure ─────────────────────
+// The dashboard used to render every section fully expanded, which meant a
+// lot of scrolling once real data accumulated. Now the strength tiles are
+// the always-visible hero and every section below is a slim card whose
+// header IS the summary (count in the title + colored breakdown chips), so
+// the collapsed dashboard reads like a one-screen parade state. Tapping a
+// header expands that section in place; open state persists per device.
+const DASH_OPEN_KEY = "cougar-dash-open";
+let _dashOpen = (() => {
+  // Must be a plain object — a corrupt/primitive value here would make every
+  // toggle a silent no-op (property writes on primitives don't stick).
+  try {
+    const v = JSON.parse(localStorage.getItem(DASH_OPEN_KEY));
+    return (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+  } catch { return {}; }
+})();
+
+function toggleDashSection(key) {
+  _dashOpen[key] = !_dashOpen[key];
+  try { localStorage.setItem(DASH_OPEN_KEY, JSON.stringify(_dashOpen)); } catch {}
+  render();
+}
+
+// Stat-tile shortcut: expand the backing section and bring it into view.
+function openDashSection(key) {
+  if (!_dashOpen[key]) toggleDashSection(key);
+  document.getElementById(`dash-sec-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Small colored count pill for section headers (hex color, e.g. "#F85149").
+function dashChip(text, color) {
+  return `<span class="dash-chip" style="background:${color}22;color:${color}">${text}</span>`;
+}
+
+// One collapsible section card. `body` is a FUNCTION so closed sections
+// don't pay to build HTML nobody sees. `zero` dims the header when the
+// section is empty; it stays clickable (the empty state explains itself).
+// Header action buttons are siblings of the toggle <button> (never nested)
+// so tapping them can't also expand the section.
+function dashSectionHtml(s) {
+  const open = !!_dashOpen[s.key];
+  return `<div class="card dash-sec${open ? " open" : ""}${s.zero ? " zero" : ""}" id="dash-sec-${s.key}">
+    <div class="dash-sec-head">
+      <button type="button" class="dash-sec-toggle" onclick="toggleDashSection('${s.key}')" aria-expanded="${open}" aria-controls="dash-sec-${s.key}-body">
+        <span class="dash-sec-chevron" aria-hidden="true">▶</span>
+        <span class="dash-sec-title"><span aria-hidden="true">${s.icon}</span> ${s.title}</span>
+        <span class="dash-sec-summary">${s.summary || ""}</span>
+      </button>
+      ${s.actions || ""}
+    </div>
+    ${open ? `<div class="dash-sec-body" id="dash-sec-${s.key}-body">${s.body()}</div>` : ""}
+  </div>`;
 }
 
 function renderDashboard(el) {
@@ -108,6 +172,20 @@ function renderDashboard(el) {
     ? `<span style="font-size:55%;color:var(--muted);font-weight:400;margin-left:1px">/${rec}/${cmd}</span>`
     : "";
 
+  // Every section below the hero is a collapsible summary card. Order is
+  // operational: who's not here → medical → upcoming movement → injuries →
+  // analytics → static company info. MSK returns null when the scope has
+  // no MSK rows at all (same as the old dashboard, which hid the section).
+  const sections = [
+    dashSecOutOfCamp(scoped, outMap),
+    dashSecMedical(liveRows, recoveringRows, allByD4, today),
+    dashSecAppointments(visible, today),
+    dashSecLeaveOut(visible, today),
+    dashSecMSK(visible),
+    dashSecTrends(avgPart),
+    dashSecProfile(scoped),
+  ].filter(Boolean);
+
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;flex-wrap:wrap">
       <h2 style="font-size:18px;font-weight:700">Company Strength Board</h2>
@@ -125,45 +203,17 @@ function renderDashboard(el) {
     ${scopeBanner}
     <div class="stats-row" style="margin-top:12px">
       <div class="stat"><label>Total Str</label><div class="val">${scoped.length}${inlineBreakdown(recRows.length, cmdRows.length)}</div></div>
-      <div class="stat"><label>Active today</label><div class="val" style="color:var(--green)">${active}${inlineBreakdown(recActive, cmdActive)}</div></div>
-      <div class="stat"><label>Non-Active</label><div class="val" style="color:var(--red)">${liveRows.length}${inlineBreakdown(recLive.length, cmdLive.length)}</div></div>
-      <div class="stat"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCamp}${inlineBreakdown(recInCamp, cmdInCamp)}</div></div>
-      <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
-      <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
+      <div class="stat stat-link" onclick="openDashSection('medical')" title="See who is non-active"><label>Active today</label><div class="val" style="color:var(--green)">${active}${inlineBreakdown(recActive, cmdActive)}</div></div>
+      <div class="stat stat-link" onclick="openDashSection('medical')" title="See who is non-active"><label>Non-Active</label><div class="val" style="color:var(--red)">${liveRows.length}${inlineBreakdown(recLive.length, cmdLive.length)}</div></div>
+      <div class="stat stat-link" onclick="openDashSection('outofcamp')" title="See who is out of camp"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCamp}${inlineBreakdown(recInCamp, cmdInCamp)}</div></div>
+      <div class="stat stat-link" onclick="openDashSection('outofcamp')" title="See who is out of camp"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
+      <div class="stat stat-link" onclick="openDashSection('trends')" title="See the participation trend"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
     </div>
-    ${renderDashOutOfCamp(scoped, outMap)}
-    ${renderDashAppointments(visible, today)}
-    <div class="grid-2">
-      <div class="card"><h3>Status Breakdown (today)</h3><canvas id="chart-status" height="200"></canvas></div>
-      <div class="card"><h3>Participation Trend</h3><canvas id="chart-participation" height="200"></canvas></div>
-    </div>
-    ${renderDashProfileCards(scoped)}
-    <h3 style="font-size:13px;color:var(--muted);margin-bottom:8px">Non-Active Personnel <span style="color:var(--dim);font-weight:400">(live medical status on ${today})</span></h3>
-    ${liveRows.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Status today</th><th style="text-align:left">Reason</th><th style="text-align:left">Duration</th></tr></thead><tbody>
-    ${liveRows.map(r => {
-      const entry = allByD4[r.id];
-      const multi = entry.statuses.length > 1;
-      // Stack badges, reasons, and durations vertically so each cell aligns
-      // row-by-row across the three columns when a recruit has 2+ statuses.
-      const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
-      const reasonsCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.reason || '<span style="color:var(--dim)">—</span>'}</div>`).join("");
-      const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record)}</div>`).join("");
-      const multiHint = multi ? ` <span style="font-size:9px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px">×${entry.statuses.length}</span>` : "";
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}${multiHint}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;vertical-align:top">${reasonsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${durationsCell}</td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : `<div class="empty-state" style="padding:16px;font-size:12px">All scoped personnel are Active today.</div>`}
-    ${recoveringRows.length ? `<h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px">Recovering <span style="color:var(--dim);font-weight:400">(post-MC/LD ghost tag — back to training but monitor)</span></h3>
-    <div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Tag</th><th style="text-align:left">Original</th><th style="text-align:left">Cleared</th></tr></thead><tbody>
-    ${recoveringRows.map(r => {
-      const entry = allByD4[r.id];
-      const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
-      const originalCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.status} · ${s.record.reason || ''}</div>`).join("");
-      const clearedCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.endDate || ''}</div>`).join("");
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${originalCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${clearedCell}</td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : ""}
-    ${renderDashMSKCases(visible)}
-    ${renderDashLeaveOut(visible, today)}`;
+    ${sections.map(dashSectionHtml).join("")}`;
+
+  // Charts only exist while the Trends section is open. The Chart guard also
+  // keeps offline runs (CDN unavailable, e.g. Playwright) exception-free.
+  if (!_dashOpen.trends || typeof Chart === "undefined") return;
 
   // Status Breakdown chart: tally every active status (a recruit on MC +
   // Excuse contributes once to each slice). The "Active" slice is per-recruit
@@ -221,14 +271,85 @@ function renderDashboard(el) {
   });
 }
 
+// "Non-Active" section — live medical statuses today plus the post-status
+// Recovering (ghost tag) list. Header chips count recruits by their most-
+// severe tag so the closed row already answers "how many MC / LD / Excuse".
+function dashSecMedical(liveRows, recoveringRows, allByD4, today) {
+  const tagCounts = {};
+  liveRows.forEach(r => { const t = allByD4[r.id].statuses[0].tag; tagCounts[t] = (tagCounts[t] || 0) + 1; });
+  // Same family→color mapping as the Status Breakdown chart.
+  const chipColor = t => (t === "MC" || t === "Warded") ? "#F85149"
+    : (t === "LD" || t === "MC+1") ? "#D29922"
+    : (t === "LD+1" || t === "MC+2") ? "#E3B341"
+    : (t === "RMJ" || t.startsWith("Excuse")) ? "#58A6FF"
+    : "#8B949E";
+  const summary = (liveRows.length
+    ? Object.entries(tagCounts).map(([t, n]) => dashChip(`${n} ${t}`, chipColor(t))).join("")
+    : `<span class="dash-sec-note">all Active today</span>`)
+    + (recoveringRows.length ? `<span class="dash-sec-note">${recoveringRows.length} recovering</span>` : "");
+
+  const body = () => {
+    const liveTable = liveRows.length ? `<div style="font-size:10px;color:var(--dim);margin-bottom:6px">Live medical status on ${today}</div>
+    <div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Status today</th><th style="text-align:left">Reason</th><th style="text-align:left">Duration</th></tr></thead><tbody>
+    ${liveRows.map(r => {
+      const entry = allByD4[r.id];
+      const multi = entry.statuses.length > 1;
+      // Stack badges, reasons, and durations vertically so each cell aligns
+      // row-by-row across the three columns when a recruit has 2+ statuses.
+      const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
+      const reasonsCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.reason || '<span style="color:var(--dim)">—</span>'}</div>`).join("");
+      const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record)}</div>`).join("");
+      const multiHint = multi ? ` <span style="font-size:9px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px">×${entry.statuses.length}</span>` : "";
+      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}${multiHint}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;vertical-align:top">${reasonsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${durationsCell}</td></tr>`;
+    }).join("")}
+    </tbody></table></div>` : `<div class="empty-state" style="padding:12px;font-size:11px">All scoped personnel are Active today.</div>`;
+
+    const recovering = recoveringRows.length ? `<h3 style="font-size:12px;color:var(--muted);margin:12px 0 6px">Recovering <span style="color:var(--dim);font-weight:400">(post-MC/LD ghost tag — back to training but monitor)</span></h3>
+    <div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Tag</th><th style="text-align:left">Original</th><th style="text-align:left">Cleared</th></tr></thead><tbody>
+    ${recoveringRows.map(r => {
+      const entry = allByD4[r.id];
+      const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
+      const originalCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.status} · ${s.record.reason || ''}</div>`).join("");
+      const clearedCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.endDate || ''}</div>`).join("");
+      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${originalCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${clearedCell}</td></tr>`;
+    }).join("")}
+    </tbody></table></div>` : "";
+
+    return liveTable + recovering;
+  };
+
+  return {
+    key: "medical", icon: "🏥",
+    title: `Non-Active (${liveRows.length})`,
+    zero: !liveRows.length && !recoveringRows.length,
+    summary, actions: "", body,
+  };
+}
+
+// "Trends" section — the two dashboard charts. Collapsed by default; the
+// header already carries the company-wide average participation, colored by
+// the same thresholds as the attendance table.
+function dashSecTrends(avgPart) {
+  const rateColor = avgPart >= 95 ? "#3FB950" : avgPart >= 70 ? "#D29922" : "#F85149";
+  const summary = STATE.attendance.length
+    ? dashChip(`${avgPart}% avg participation`, rateColor) + `<span class="dash-sec-note">${STATE.attendance.length} conducts</span>`
+    : `<span class="dash-sec-note">no conducts logged yet</span>`;
+  const body = () => `<div class="grid-2">
+    <div><h3>Status Breakdown (today)</h3><canvas id="chart-status" height="200"></canvas></div>
+    <div><h3>Participation Trend</h3><canvas id="chart-participation" height="200"></canvas></div>
+  </div>${typeof Chart === "undefined" ? `<div style="font-size:10px;color:var(--dim);margin-top:6px">Charts need an internet connection.</div>` : ""}`;
+  return { key: "trends", icon: "📈", title: "Trends", zero: !STATE.attendance.length, summary, actions: "", body };
+}
+
 // Active MSK Cases — recruits who self-reported an injury via the Google
 // Form ("Cougar MSK / Physio Log"). One card per recruit, aggregating
 // their initial injury text, any physio appointment we have on file, and
 // the timeline of exercises they've logged. Cleared cases are hidden by
-// default behind a toggle.
-function renderDashMSKCases(visible) {
+// default behind a toggle. Returns null (section hidden) when the scope has
+// no MSK rows at all — same as the old dashboard.
+function dashSecMSK(visible) {
   const scoped = STATE.msk.filter(m => passesFilter(m.d4, visible));
-  if (!scoped.length) return "";
+  if (!scoped.length) return null;
 
   // Group by d4. Per-d4: active if ANY row is not cleared. Cleared if all
   // are cleared.
@@ -303,9 +424,15 @@ function renderDashMSKCases(visible) {
     ? `<div style="margin-top:12px"><button class="btn" style="font-size:11px" onclick="toggleMSKShowCleared()">${_mskShowCleared ? "▾ Hide" : "▸ Show"} cleared (${cleared.length})</button>${_mskShowCleared ? `<div style="max-height:400px;overflow-y:auto;padding-right:6px;margin-top:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${cleared.map(c => renderCard(c, true)).join("")}</div></div>` : ""}</div>`
     : "";
 
-  return `<h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px">🦵 Active MSK Cases <span style="color:var(--dim);font-weight:400">(${active.length}${cleared.length ? ` active · ${cleared.length} cleared` : ""}) <span style="font-size:10px;font-style:italic;color:var(--dim)">— scroll to see all</span></span></h3>
-    ${activeCards}
-    ${clearedSection}`;
+  const summary = (active.length
+    ? dashChip(`${active.length} active`, "#F778BA")
+    : `<span class="dash-sec-note">no active cases</span>`)
+    + (cleared.length ? `<span class="dash-sec-note">${cleared.length} cleared</span>` : "");
+
+  return {
+    key: "msk", icon: "🦵", title: `MSK Cases (${active.length})`, zero: !active.length,
+    summary, actions: "", body: () => activeCards + clearedSection,
+  };
 }
 
 // ── MSK ANALYTICS PAGE ───────────────────────────────────
@@ -690,10 +817,10 @@ function renderMSKAnalytics(el) {
 // full history (past entries are not deleted, just filtered out of view here)
 // so an admin can audit "did we make this appointment?" later. Sorted by
 // date+time ascending so the next one is always at the top.
-// Out today / This week widget — the dashboard equivalent of the WhatsApp
+// "Out today / This week" section — the dashboard equivalent of the WhatsApp
 // parade-state OTHERS block. Anyone currently inside a leave/out date range
 // shows up here; near-future entries are grouped under "This week".
-function renderDashLeaveOut(visible, todayIso) {
+function dashSecLeaveOut(visible, todayIso) {
   const sevenDaysOut = (() => {
     const d = new Date(todayIso); d.setDate(d.getDate() + 7);
     return d.toISOString().slice(0, 10);
@@ -709,28 +836,35 @@ function renderDashLeaveOut(visible, todayIso) {
 
   const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Annual Leave" ? "teal" : t === "Compassionate" ? "red" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
-  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
-    <h3 style="font-size:13px;color:var(--muted);margin:0">🪖 Out today / This week <span style="color:var(--dim);font-weight:400">(${onToday.length} now · ${upcoming.length} upcoming)</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm()">+ Log</button>
-  </div>`;
+  const summary = (onToday.length || upcoming.length)
+    ? (onToday.length ? dashChip(`${onToday.length} out now`, "#D29922") : "")
+      + (upcoming.length ? dashChip(`${upcoming.length} this week`, "#8B949E") : "")
+    : `<span class="dash-sec-note">nobody this week</span>`;
 
-  if (!onToday.length && !upcoming.length) {
-    return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">No commanders out today or in the next 7 days.</div>`;
-  }
+  const body = () => {
+    if (!onToday.length && !upcoming.length) {
+      return `<div class="empty-state" style="padding:12px;font-size:11px">Nobody is out today or in the next 7 days.</div>`;
+    }
+    const row = l => `<tr onclick="openPerson('${l.d4}')" style="cursor:pointer">
+      <td style="text-align:left;font-weight:600">${displayPersonLabel(l.d4)}</td>
+      <td>${badge(l.type, typeColor(l.type))}</td>
+      <td style="white-space:nowrap;font-size:11px;color:var(--muted)">${l.startDate}${l.startIso !== l.endIso ? ` → ${l.endDate}` : ""}</td>
+      <td style="text-align:left;font-size:11px;color:var(--muted)">${l.reason || ""}</td>
+      <td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openLeaveForm(${l.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('leave', ${l.id}, 'leave record')" title="Delete">✕</button></td>
+    </tr>`;
+    return `<div class="table-wrap"><table><thead><tr><th style="text-align:left">Name</th><th>Type</th><th>Dates</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
+      ${onToday.map(row).join("")}
+      ${upcoming.length ? `<tr><td colspan="5" style="padding:6px 8px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;background:var(--surface2)">Upcoming this week</td></tr>` : ""}
+      ${upcoming.map(row).join("")}
+    </tbody></table></div>`;
+  };
 
-  const row = l => `<tr onclick="openPerson('${l.d4}')" style="cursor:pointer">
-    <td style="text-align:left;font-weight:600">${displayPersonLabel(l.d4)}</td>
-    <td>${badge(l.type, typeColor(l.type))}</td>
-    <td style="white-space:nowrap;font-size:11px;color:var(--muted)">${l.startDate}${l.startIso !== l.endIso ? ` → ${l.endDate}` : ""}</td>
-    <td style="text-align:left;font-size:11px;color:var(--muted)">${l.reason || ""}</td>
-    <td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openLeaveForm(${l.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('leave', ${l.id}, 'leave record')" title="Delete">✕</button></td>
-  </tr>`;
-
-  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th style="text-align:left">Name</th><th>Type</th><th>Dates</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
-    ${onToday.map(row).join("")}
-    ${upcoming.length ? `<tr><td colspan="5" style="padding:6px 8px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;background:var(--surface2)">Upcoming this week</td></tr>` : ""}
-    ${upcoming.map(row).join("")}
-  </tbody></table></div>`;
+  return {
+    key: "leaveout", icon: "🪖", title: "Out today / This week",
+    zero: !onToday.length && !upcoming.length, summary,
+    actions: `<button class="btn btn-primary dash-sec-action" onclick="openBookOutForm()">+ Log</button>`,
+    body,
+  };
 }
 
 // The unified absence view: everything "not in camp" in one place. Durable
@@ -872,20 +1006,21 @@ function renderLeaveTimeline(scoped, todayIso) {
   </div>`;
 }
 
-// "Currently Out of Camp" panel — everyone counted out today (the same shared
+// "Out of Camp" section — everyone counted out today (the same shared
 // set that drives the strength tiles + parade). Booked-out rows get a one-tap
 // Book in (plain undo); medical/leave rows get "Book in anyway" (override). A
 // "+ Book Out" button opens the unified Book Out modal (today or a date range).
-function renderDashOutOfCamp(scoped, outMap) {
+function dashSecOutOfCamp(scoped, outMap) {
   const rows = scoped.filter(r => outMap.has(r.id));
   const color = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
   const label = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
-  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
-    <h3 style="font-size:13px;color:var(--muted);margin:0">🚪 Currently Out of Camp <span style="color:var(--dim);font-weight:400">(${rows.length})</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm()">+ Book Out</button>
-  </div>`;
-  if (!rows.length) return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">Everyone in scope is in camp.</div>`;
-  const body = rows.map(r => {
+  const chipLabel = { medical: "medical", leave: "leave", bookedout: "booked out" };
+  const kinds = {};
+  rows.forEach(r => { const k = outMap.get(r.id).kind; kinds[k] = (kinds[k] || 0) + 1; });
+  const summary = rows.length
+    ? Object.entries(kinds).map(([k, n]) => dashChip(`${n} ${chipLabel[k] || k}`, color[k] || "#8B949E")).join("")
+    : `<span class="dash-sec-note">everyone in camp</span>`;
+  const trs = rows.map(r => {
     const info = outMap.get(r.id);
     const c = color[info.kind] || "#8B949E";
     return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">
@@ -898,10 +1033,16 @@ function renderDashOutOfCamp(scoped, outMap) {
         : `<button class="btn btn-icon" style="font-size:10px;padding:3px 8px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${info.kind} record (resets tomorrow)">✓ Book in anyway</button> <span style="font-size:10px;color:var(--dim)">via ${info.kind}</span>`}</td>
     </tr>`;
   }).join("");
-  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Why</th><th style="text-align:left">Detail</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
+  return {
+    key: "outofcamp", icon: "🚪", title: `Out of Camp (${rows.length})`, zero: !rows.length, summary,
+    actions: `<button class="btn btn-primary dash-sec-action" onclick="openBookOutForm()">+ Book Out</button>`,
+    body: () => rows.length
+      ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Why</th><th style="text-align:left">Detail</th><th></th></tr></thead><tbody>${trs}</tbody></table></div>`
+      : `<div class="empty-state" style="padding:12px;font-size:11px">Everyone in scope is in camp.</div>`,
+  };
 }
 
-function renderDashAppointments(visible, todayIso) {
+function dashSecAppointments(visible, todayIso) {
   const upcoming = STATE.appointments
     .filter(a => !a.resolved)
     .filter(a => passesFilter(a.d4, visible))
@@ -916,14 +1057,15 @@ function renderDashAppointments(visible, todayIso) {
       return (a.time || "") < (b.time || "") ? -1 : 1;
     });
 
-  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
-    <h3 style="font-size:13px;color:var(--muted);margin:0">📅 Upcoming Appointments <span style="color:var(--dim);font-weight:400">(${upcoming.length})</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openAppointmentForm()">+ Book</button>
-  </div>`;
-
-  if (!upcoming.length) {
-    return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">No upcoming appointments.</div>`;
-  }
+  // Header shows what matters without opening: how many are TODAY, else
+  // when the next one is.
+  const todayCount = upcoming.filter(a => displayDateToISO(a.date) === todayIso).length;
+  const next = upcoming[0];
+  const summary = !upcoming.length
+    ? `<span class="dash-sec-note">none upcoming</span>`
+    : todayCount
+      ? dashChip(`${todayCount} today`, "#F85149")
+      : `<span class="dash-sec-note">next: ${next.date}${next.time ? ` ${fmtHrs(next.time)}` : ""}</span>`;
 
   // Highlight today's appointments so they don't get lost in a long list.
   const rows = upcoming.map(a => {
@@ -937,7 +1079,7 @@ function renderDashAppointments(visible, todayIso) {
     const bookBtn = (a.outOfCamp && isToday)
       ? (bookedOut
         ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); undoBookOut('${a.d4}')" title="Removes today's book-out">↩ Book in</button> `
-        : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', true, ${JSON.stringify('Appt: ' + (a.reason || 'appointment'))})" title="Book out of camp">🚪 Out</button> `)
+        : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', true, ${escapeAttr(JSON.stringify('Appt: ' + (a.reason || 'appointment')))})" title="Book out of camp">🚪 Out</button> `)
       : "";
     return `<tr onclick="openPerson('${a.d4}')" style="cursor:pointer${isToday ? ';background:#F8514911' : ''}">
       <td class="mono" style="font-weight:700;color:var(--accent)">${displayId(a.d4)}</td>
@@ -950,10 +1092,18 @@ function renderDashAppointments(visible, todayIso) {
     </tr>`;
   }).join("");
 
-  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Reason</th><th>Date</th><th>Time</th><th style="text-align:left">Location</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return {
+    key: "appointments", icon: "📅", title: `Appointments (${upcoming.length})`, zero: !upcoming.length, summary,
+    actions: `<button class="btn btn-primary dash-sec-action" onclick="openAppointmentForm()">+ Book</button>`,
+    body: () => upcoming.length
+      ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Reason</th><th>Date</th><th>Time</th><th style="text-align:left">Location</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="empty-state" style="padding:12px;font-size:11px">No upcoming appointments.</div>`,
+  };
 }
 
-function renderDashProfileCards(scoped) {
+// "Rations & Allergies" section — static company profile info, rarely needed
+// at parade tempo, so it sits last and collapsed.
+function dashSecProfile(scoped) {
   // Ration: count distinct values. Unknowns get grouped under "Unspecified"
   // so they show up but don't disappear silently.
   const rationCounts = {};
@@ -976,13 +1126,18 @@ function renderDashProfileCards(scoped) {
   });
   const allergenRows = Object.entries(allergenCounts).sort((a, b) => b[1] - a[1]);
 
-  return `<div class="grid-2">
-    <div class="card"><h3>Ration Breakdown</h3>
+  const summary = [
+    ...rationRows.slice(0, 2).map(([k, n]) => dashChip(`${n} ${k}`, k === "Muslim" ? "#3FB950" : k === "Non-Muslim" ? "#58A6FF" : "#8B949E")),
+    allergic.length ? dashChip(`${allergic.length} allergies`, "#E3B341") : "",
+  ].join("") || `<span class="dash-sec-note">no data</span>`;
+
+  const body = () => `<div class="grid-2">
+    <div><h3>Ration Breakdown</h3>
       ${rationRows.length ? `<div style="display:flex;flex-direction:column;gap:6px">
         ${rationRows.map(([k, n]) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:${rationColor(k)};font-weight:600">${k}</span><span class="mono" style="color:var(--muted)">${n} (${pct(n, scoped.length)}%)</span></div>`).join("")}
       </div>` : `<div style="color:var(--muted);font-size:12px">No ration data</div>`}
     </div>
-    <div class="card"><h3>Allergies <span style="color:var(--muted);font-weight:400;font-size:11px">(${allergic.length} recruit${allergic.length === 1 ? '' : 's'})</span></h3>
+    <div><h3>Allergies <span style="color:var(--muted);font-weight:400;font-size:11px">(${allergic.length} recruit${allergic.length === 1 ? '' : 's'})</span></h3>
       ${allergic.length ? `
         ${allergenRows.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${allergenRows.map(([a, n]) => `<span class="badge badge-yellow">${a} · ${n}</span>`).join("")}</div>` : ""}
         <div style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto">
@@ -991,6 +1146,12 @@ function renderDashProfileCards(scoped) {
       ` : `<div style="color:var(--muted);font-size:12px">No recruits with allergies recorded</div>`}
     </div>
   </div>`;
+
+  return {
+    key: "profile", icon: "🍚", title: "Rations & Allergies",
+    zero: !allergic.length && rationRows.every(([k]) => k === "Unspecified"),
+    summary, actions: "", body,
+  };
 }
 
 function renderRoster(el) {

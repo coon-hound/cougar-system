@@ -7,6 +7,10 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.classList.add("active");
     STATE.nav = btn.dataset.nav;
     render();
+    // Explicit navigation always lands at the top — including tapping the
+    // tab you are already on, which stays a reliable "back to top" gesture
+    // now that same-tab re-renders preserve scroll position.
+    document.getElementById("content")?.scrollTo(0, 0);
     // On mobile, navigating to a new tab should auto-close the slide-out menu
     // so the user isn't left staring at the sidebar overlay.
     closeMobileSidebar();

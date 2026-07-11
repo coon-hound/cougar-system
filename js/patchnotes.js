@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 124;
+const APP_VERSION = 125;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 125,
+    date: "11 Jul 2026",
+    title: "A dashboard you can read without scrolling",
+    intro: "The dashboard is now one screen: the strength numbers stay on top, and every section below folds into a single row that already shows its counts. Tap a row to expand it.",
+    items: [
+      { t: "📊 Strength first", d: "The Total / Active / Non-Active / In Camp / Out of Camp / Avg Part. tiles stay exactly where they were - everything else got out of their way." },
+      { t: "👆 Tap a section to open it", d: "Out of Camp, Non-Active, Appointments, Out today / This week, MSK, Trends and Rations & Allergies each collapse to one line with their key counts on it. Tap to open, tap again to close - the app remembers what you keep open." },
+      { t: "🔢 The tiles are shortcuts", d: "Tapping the Non-Active, In Camp / Out of Camp or Avg Part. tile jumps straight to (and opens) the matching section." },
+      { t: "📌 No more jumping to the top", d: "Booking someone in or out, resolving an appointment and similar quick actions no longer scroll the page back to the top." },
+    ],
+  },
   {
     v: 124,
     date: "9 Jul 2026",
