@@ -416,8 +416,14 @@ function dashSecMSK(visible) {
   // Scrollable container — caps height so the MSK section doesn't push
   // the rest of the dashboard off-screen as cases accumulate. About 3
   // cards visible at a time; scroll for more.
+  // The card list caps at ~3 visible cards and scrolls internally; on a
+  // phone that scrollbar is invisible, so say the list scrolls when there
+  // are more cases than fit.
+  const scrollHint = active.length > 3
+    ? `<div style="font-size:10px;color:var(--dim);font-style:italic;margin-bottom:4px">${active.length} cases — scroll the list to see all</div>`
+    : "";
   const activeCards = active.length
-    ? `<div style="max-height:560px;overflow-y:auto;padding-right:6px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${active.map(c => renderCard(c, false)).join("")}</div></div>`
+    ? `${scrollHint}<div style="max-height:560px;overflow-y:auto;padding-right:6px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${active.map(c => renderCard(c, false)).join("")}</div></div>`
     : `<div class="empty-state" style="padding:12px;font-size:11px">No active MSK cases.</div>`;
 
   const clearedSection = cleared.length
