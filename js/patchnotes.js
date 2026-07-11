@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 124;
+const APP_VERSION = 126;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 126,
+    date: "11 Jul 2026",
+    title: "Compare parade states",
+    intro: "See exactly what changed between two parade states - who went out, who came back, and what moved - instead of eyeballing two WhatsApp messages.",
+    items: [
+      { t: "🔀 Compare with previous", d: "In the First/Last Parade modal, tap ⇄ Compare with previous: pick an earlier parade state (or paste one in - other formats work best-effort) and get a card-by-card diff: strength deltas, newly listed, no longer listed, and changes like REPORT SICK → ATTC or an extended MC." },
+      { t: "📸 Snapshots save on Copy", d: "Every time you copy a First/Last Parade state it is archived automatically (including your manual edits) to a shared ParadeStates history, so any commander can compare against what was actually sent - even from another phone." },
+      { t: "📋 Copy change summary", d: "One tap turns the diff into a plain-text \"changes since last parade\" message for the group chat." },
+      { t: "🧭 Compare any two", d: "Generate Report ▾ → 🔀 Compare Parade States compares any two saved or pasted states." },
+    ],
+  },
   {
     v: 124,
     date: "9 Jul 2026",

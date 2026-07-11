@@ -18,6 +18,7 @@ const DIRTY_KEY = "cougar-dirty-tabs";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
 const PROGRAMS_KEY = "cougar-programs";
 const COMBINED_KEY = "cougar-combined-groups";
+const PARADE_STATES_KEY = "cougar-parade-snapshots";
 
 // Sheet-tab-name → STATE-array-key lookup. The autoSync coalesce path uses
 // this when flushing a queued replace push: by the time the flush runs the
@@ -117,6 +118,42 @@ function loadCombinedGroups() {
 }
 function saveCombinedGroups() {
   localStorage.setItem(COMBINED_KEY, JSON.stringify(STATE.combinedGroups || []));
+}
+
+// Parade-state snapshots (Compare feature): every FP/LP "Copy to Clipboard"
+// archives the exact textarea text (including hand edits) because past parade
+// states can NOT be regenerated faithfully — manual book-outs/force-ins are
+// day-scoped mutable roster fields and the borderline overrides are session-
+// only. The shared ParadeStates sheet tab is the cross-device store; this is
+// the local cache + offline fallback. Own localStorage key so a data-cache
+// reset (or a readAll rebuild of STORAGE_KEY) can't wipe history.
+// Shape: { snapshots: [{id,type,dateIso,time,savedAt,text}], pendingIds: [] }
+// — pendingIds are snapshots not yet pushed to the sheet (offline / failed).
+function loadParadeSnapshots() {
+  try {
+    const d = JSON.parse(localStorage.getItem(PARADE_STATES_KEY) || "{}");
+    return {
+      snapshots: Array.isArray(d.snapshots) ? d.snapshots.filter(s => s && s.id && s.text) : [],
+      pendingIds: Array.isArray(d.pendingIds) ? d.pendingIds.map(String) : []
+    };
+  } catch { return { snapshots: [], pendingIds: [] }; }
+}
+function saveParadeSnapshots(store) {
+  // Newest-first, pruned to 60 (~a month of FP+LP) to respect the ~5MB
+  // localStorage quota; the sheet keeps everything. Snapshots still awaiting
+  // a push are EXEMPT from the prune — dropping one would silently lose data
+  // that never reached the sheet.
+  const pending = new Set((store.pendingIds || []).map(String));
+  const snapshots = (store.snapshots || [])
+    .slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+    .filter((s, i) => i < 60 || pending.has(s.id));
+  const kept = new Set(snapshots.map(s => s.id));
+  // Drop only ids with no backing snapshot (orphans), never live pending data.
+  const pendingIds = (store.pendingIds || []).filter(id => kept.has(id));
+  // Quota failure must never break the caller (the Copy flow) — history is
+  // best-effort; the clipboard copy is not.
+  try { localStorage.setItem(PARADE_STATES_KEY, JSON.stringify({ snapshots, pendingIds })); }
+  catch { /* quota exceeded — keep going without persisting */ }
 }
 
 // Reads the persisted "who got a fitness report and when" map.

@@ -273,6 +273,11 @@ async function tryRedeemInviteFromURL() {
   // background pull). See js/sync.js.
   if (STATE.authToken && typeof initAutoRefresh === "function") initAutoRefresh();
 
+  // Retry any parade-state snapshots that never reached the ParadeStates
+  // sheet (saved offline / push failed). Fire-and-forget — self-guards when
+  // there's no apiUrl/auth and never touches the main sync path.
+  if (typeof pushPendingParadeSnapshots === "function") pushPendingParadeSnapshots();
+
   // Last: if this device hasn't seen the current version's patch notes, show
   // them over the freshly-rendered app. Runs after the invite/auth + first
   // render above so it never fights the redemption flow or an empty-state flash.
