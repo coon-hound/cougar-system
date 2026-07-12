@@ -2135,7 +2135,11 @@ function toggleBorderline(d4, checked, type) {
 // receiving the whole record (m => boolean) — the record form lets a section
 // key off flags like inCamp, not just the status string (MEDICAL STATUS folds
 // in consume-in-camp MCs, ATTC excludes them).
-function buildMedicalSection(label, dateIso, recordFilter) {
+// collectD4s (optional Set) receives every d4 this section RENDERS, so a later
+// section can exclude anyone already shown here — used to keep a person out of
+// OTHERS once they appear in ATTC (a person can't be away on MC and out on
+// leave/book-out at the same time; the ATTC listing wins).
+function buildMedicalSection(label, dateIso, recordFilter, collectD4s) {
   const matchRecord = typeof recordFilter === "function"
     ? recordFilter
     : m => recordFilter.includes(m.status);
@@ -2162,6 +2166,7 @@ function buildMedicalSection(label, dateIso, recordFilter) {
   // ties; harmless for ATTC/REPORT SICK where every entry shares one severity.
   const groupRank = d4 => Math.max(...byD4[d4].map(m => medSeverityRank(m.status)));
   const peopleIds = Object.keys(byD4).sort((a, b) => groupRank(b) - groupRank(a));
+  if (collectD4s) peopleIds.forEach(d4 => collectD4s.add(d4));
 
   if (!peopleIds.length) {
     return `${label}:\n\nS/N:\nR/N:\nReason:`;
@@ -2262,7 +2267,7 @@ function buildAppointmentSection(dateIso, paradeTime) {
   return `MEDICAL APPT: ${String(upcoming.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
 }
 
-function buildOthersSection(dateIso) {
+function buildOthersSection(dateIso, excludeD4s) {
   // Single source of truth — same map the dashboard uses. OTHERS lists leave +
   // manual book-outs; medical (MC/Warded) lives in the ATTC/MEDICAL STATUS
   // sections, so it's excluded here.
@@ -2270,6 +2275,11 @@ function buildOthersSection(dateIso) {
   const entries = [];
   for (const [d4, info] of map) {
     if (info.kind === "medical") continue;
+    // Never list someone here who is already shown in ATTC. outOfCampMap's
+    // medical precedence covers active MC/Warded, but a borderline returnee
+    // (MC ended yesterday, ticked still-out) is folded into ATTC with an
+    // INACTIVE record, so leave/book-out could otherwise double-list them.
+    if (excludeD4s && excludeD4s.has(d4)) continue;
     if (info.kind === "leave") {
       const l = STATE.leave.find(x => x.d4 === d4 && (() => {
         const s = displayDateToISO(x.startDate), e = displayDateToISO(x.endDate);
@@ -2346,16 +2356,20 @@ function buildStrengthBlock(dateIso) {
 function generateParadeStateText(type, dateIso, time) {
   const dateStr = toDDMMYY(dateIso);
   const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
+  // Everyone shown in ATTC, so OTHERS can exclude them — a person away on MC
+  // must never also appear as booked out / on leave (the same person can't be
+  // both). Populated by the ATTC build below before OTHERS is built.
+  const attcD4s = new Set();
   const sections = [
     buildStrengthBlock(dateIso),
     // ATTC = MC/Warded physically AWAY. Kept-in-camp MC/Warded (consume-in-camp OR
     // a manual same-day Book In) are excluded here and fall through to MEDICAL
     // STATUS below, so anyone counted in camp is never listed as away.
-    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d)),
+    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d), attcD4s),
     buildMedicalSection("REPORT SICK", dateIso, m => m.status === "Pending"),
     buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord),
     buildAppointmentSection(dateIso, time),
-    buildOthersSection(dateIso)
+    buildOthersSection(dateIso, attcD4s)
   ];
   return `COUGAR COMPANY\n${header}\nDATE: ${dateStr} @ ${fmtHrs(time)}\n\n${SEP}\n\n${sections.join(`\n\n${SEP}\n\n`)}\n\n${SEP}`;
 }
@@ -2462,6 +2476,8 @@ function openReportModal(type) {
         <button type="submit" class="btn">↻ Regenerate</button>
         <textarea id="rep-text" rows="20" spellcheck="false" style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.45;resize:vertical;white-space:pre"></textarea>
         <button type="button" id="rep-copy-btn" class="btn btn-success" onclick="copyReportToClipboard()">📋 Copy to Clipboard</button>
+        ${isParade ? `<button type="button" class="btn" style="min-height:40px" onclick="toggleCompareSection()">⇄ Compare with previous</button>
+        <div id="cmp-wrap"></div>` : ""}
       </div>
     </form>
   `);
@@ -2593,6 +2609,458 @@ async function copyReportToClipboard() {
   const ta = document.getElementById("rep-text");
   const btn = document.getElementById("rep-copy-btn");
   const text = ta.value;
+  // Snapshot BEFORE the clipboard attempt: Copy is the "this is what got
+  // sent" moment (including hand edits), and the blocked-clipboard fallback
+  // below must still archive the text it is about to hand over.
+  const repType = ta.dataset.type;
+  let saved = false;
+  if (repType === "FP" || repType === "LP") {
+    // Archive failure (e.g. localStorage quota) must never block the copy —
+    // the clipboard is what the commander is actually here for.
+    try { saved = !!saveParadeSnapshot(repType, gv("rep-date"), gv("rep-time") || "0700", text); }
+    catch { saved = false; }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = saved ? "✓ Copied & saved!" : "✓ Copied!";
+      setTimeout(() => { btn.textContent = original; }, 1800);
+    }
+  } catch {
+    // Fallback: select all in the textarea so the user can manually Cmd+C.
+    ta.focus(); ta.select();
+    alert("Copy blocked — text is selected, press Cmd+C / Ctrl+C to copy.");
+  }
+}
+
+// ─── PARADE STATE SNAPSHOTS (Compare feature) ──────────
+// Cross-device history lives in a "ParadeStates" sheet tab that is deliberately
+// NOT in readAll/REV_TABS — it's append-only archive data fetched on demand by
+// the compare picker, so it must never bloat the boot pull or the 20s revCheck
+// loop. Writes bypass sync.js autoSync for the same reason: that queue is
+// TAB_TO_STATE-coupled and drives the dirty-pill UX, and a failed snapshot
+// push must never alarm or block live-state sync.
+
+// {id,type,dateIso,time,savedAt,text} → sheet row. The JSON cell packs the
+// coercion-prone fields: raw sheet.appendRow would turn "0700" into 700 and a
+// leading "=" (possible in hand-edited text) into a live formula; a cell
+// starting with "{" is immune to both. savedAt stays a top-level NUMBER
+// (epoch ms) — readTab reformats Date-coerced cells and would drop the time
+// from an ISO string.
+function paradeSnapshotToRow(s) {
+  return { id: s.id, type: s.type, savedAt: s.savedAt, json: JSON.stringify({ dateIso: s.dateIso, time: s.time, text: s.text }) };
+}
+
+// Archive one copied parade state: local cache first (synchronous — the whole
+// story when offline/demo), then fire-and-forget push. Returns the snapshot,
+// or the existing one when the identical text was already saved for the same
+// (type, date, time) — a double-tapped Copy must not create a phantom v2;
+// genuinely edited re-sends ("latest version as of…") do append a new version.
+function saveParadeSnapshot(type, dateIso, time, text) {
+  if (!text || !String(text).trim() || !dateIso) return null;
+  if (text.length > 45000) return null;   // Sheets 50k cell cap headroom
+  time = String(time || "").replace(/\D/g, "").padStart(4, "0").slice(0, 4);
+  const store = loadParadeSnapshots();
+  const dup = store.snapshots.find(s => s.type === type && s.dateIso === dateIso && s.time === time && s.text === text);
+  if (dup) return dup;
+  const snap = {
+    // Never nextId() — that's a random per-pageload counter; two phones
+    // saving the same evening could collide. Epoch ms + 4 base36 chars is
+    // unique across uncoordinated devices, and the "ps-" prefix keeps the
+    // sheet cell a string.
+    id: "ps-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+    type, dateIso, time, savedAt: Date.now(), text
+  };
+  store.snapshots.unshift(snap);
+  store.pendingIds.push(snap.id);
+  saveParadeSnapshots(store);
+  pushPendingParadeSnapshots();
+  return snap;
+}
+
+// Drain unpushed snapshots to the sheet. Quiet by design: failures leave ids
+// pending for the next attempt (launch, next Copy, or compare-picker open).
+let _paradeSnapPushing = false;
+async function pushPendingParadeSnapshots() {
+  if (_paradeSnapPushing || !STATE.apiUrl || !STATE.authToken) return;
+  const store = loadParadeSnapshots();
+  if (!store.pendingIds.length) return;
+  _paradeSnapPushing = true;
+  // Track what this run actually pushed and reconcile against a FRESH store
+  // in the finally — persisting the pre-await copy would clobber any snapshot
+  // saved (or remote row merged) while a network round-trip was in flight.
+  const pushedIds = new Set();
+  try {
+    for (const id of store.pendingIds.slice()) {
+      const snap = store.snapshots.find(s => s.id === id);
+      if (!snap) { pushedIds.add(id); continue; }   // orphaned id — just clear it
+      let res = await API.appendRow("ParadeStates", paradeSnapshotToRow(snap));
+      if (res && res.error && /not found/i.test(res.error)) {
+        // First save ever: the tab doesn't exist. `write` with no baseRev
+        // (STATE.rev has no ParadeStates entry → JSON drops the key →
+        // withRevLock skips OCC) auto-creates the sheet. Send ALL cached
+        // snapshots so a two-device bootstrap race self-heals.
+        res = await API.pushTab("ParadeStates", store.snapshots.map(paradeSnapshotToRow));
+        if (res && !res.error) { store.pendingIds.forEach(x => pushedIds.add(x)); break; }
+      }
+      if (res && !res.error) pushedIds.add(id);
+      else break;   // offline / server busy — retry the rest later
+    }
+  } catch { /* network failure — everything stays pending */ }
+  finally {
+    _paradeSnapPushing = false;
+    if (pushedIds.size) {
+      const fresh = loadParadeSnapshots();
+      fresh.pendingIds = fresh.pendingIds.filter(id => !pushedIds.has(id));
+      saveParadeSnapshots(fresh);
+    }
+  }
+}
+
+// Merge sheet rows into the local cache (union by id — rows are immutable).
+// Called from the compare picker; never from the boot path.
+async function fetchRemoteParadeSnapshots() {
+  if (!STATE.apiUrl || !STATE.authToken) return null;
+  await pushPendingParadeSnapshots();   // flush first so the read includes ours
+  const res = await API.get("read", "ParadeStates");
+  const rows = (res && Array.isArray(res.rows)) ? res.rows : null;
+  if (!rows) return null;   // {rows:{error:"Tab not found"}} = no remote history yet
+  const store = loadParadeSnapshots();
+  const have = new Set(store.snapshots.map(s => s.id));
+  rows.forEach(r => {
+    // Per-row guard: one hand-mangled sheet row must never veto the rest.
+    let snap = null;
+    try { snap = normalizeParadeSnapshotRow(r); } catch { /* skip bad row */ }
+    if (snap && !have.has(snap.id)) { store.snapshots.push(snap); have.add(snap.id); }
+  });
+  saveParadeSnapshots(store);
+  return loadParadeSnapshots().snapshots;
+}
+
+// ─── COMPARE PARADE STATES (UI) ─────────────────────────
+// Two contexts share one renderer set:
+//  - "report": inline section inside the FP/LP report modal — the NEW side is
+//    always the live #rep-text textarea (fresh hand edits included), the BASE
+//    side is a saved snapshot or pasted text. Inline (not a second modal)
+//    because there is only ONE modal — swapping #modal-body would destroy the
+//    user's edits.
+//  - "standalone": its own modal from the report menu — both sides pick from
+//    Saved | Paste (compare any two historical/foreign states).
+// Ephemeral view state lives in _compareOpts (the _bookOutOpts convention).
+// XSS note: snapshot/pasted/parsed strings are attacker-ish input (pasted
+// WhatsApp text, sheet rows) — EVERY such string rendered below goes through
+// escapeAttr, and no inline handler ever embeds one (handlers only carry the
+// side name; values are read back from the DOM / _compareOpts).
+let _compareOpts = null;
+
+const CMP_SECTION_BADGE = {
+  ATTC: "red", REPORT_SICK: "orange", MEDICAL_STATUS: "yellow",
+  MEDICAL_APPT: "accent", OTHERS: "purple", UNKNOWN: "pink"
+};
+const CMP_VERBS = {
+  added: { ATTC: "went OUT of camp", REPORT_SICK: "reported sick", MEDICAL_STATUS: "new status", MEDICAL_APPT: "new appointment", OTHERS: "went OUT of camp", UNKNOWN: "newly listed" },
+  removed: { ATTC: "back IN camp", REPORT_SICK: "no longer pending", MEDICAL_STATUS: "status ended", MEDICAL_APPT: "appt done / removed", OTHERS: "back IN camp", UNKNOWN: "no longer listed" }
+};
+
+// "FP · 110726 0700 · saved 11/07 0832" — battalion-style date, local time.
+function compareSnapshotLabel(s, dupIndex) {
+  const d = new Date(s.savedAt || 0);
+  const pad = n => String(n).padStart(2, "0");
+  const savedStr = s.savedAt ? `saved ${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}${pad(d.getMinutes())}` : "";
+  return [`${s.type} · ${toDDMMYY(s.dateIso)} ${s.time}`, savedStr, dupIndex ? "(earlier version)" : ""]
+    .filter(Boolean).join(" · ");
+}
+
+function compareSideLabel(side) {
+  const o = _compareOpts[side];
+  if (o.mode === "current") return `${gv("rep-date") ? toDDMMYY(gv("rep-date")) : ""} ${gv("rep-time") || ""} (current, incl. edits)`.trim();
+  if (o.mode === "paste") return "pasted text";
+  const s = _compareOpts.snapshots.find(x => x.id === o.snapshotId);
+  return s ? `${s.type} ${toDDMMYY(s.dateIso)} ${s.time}` : "saved snapshot";
+}
+
+// Entry from the FP/LP report modal.
+function toggleCompareSection() {
+  const wrap = document.getElementById("cmp-wrap");
+  if (!wrap) return;
+  if (wrap.innerHTML) { wrap.innerHTML = ""; _compareOpts = null; return; }
+  _compareOpts = {
+    context: "report",
+    base: { mode: "saved", snapshotId: "" },
+    neu: { mode: "current", snapshotId: "" },
+    snapshots: [], lastDiff: null, lastLabels: null
+  };
+  initCompareSnapshots();
+  wrap.innerHTML = `
+    <div id="cmp-pickers"></div>
+    <button type="button" class="btn btn-primary" style="width:100%;min-height:44px;margin-top:10px" onclick="runCompare()">🔍 Compare</button>
+    <div id="cmp-results"></div>`;
+  renderComparePickers();
+}
+
+// Entry from the report menu (standalone modal, both sides selectable).
+function openCompareModal() {
+  _compareOpts = {
+    context: "standalone",
+    base: { mode: "saved", snapshotId: "" },
+    neu: { mode: "saved", snapshotId: "" },
+    snapshots: [], lastDiff: null, lastLabels: null
+  };
+  initCompareSnapshots();
+  openModal("🔀 Compare Parade States", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px">
+        Pick two parade states (saved snapshots or pasted text, any format — foreign formats diff best-effort) → tap <strong>Compare</strong>. Snapshots save automatically whenever a First/Last Parade state is copied.
+      </div>
+      <div id="cmp-pickers"></div>
+      <button type="button" class="btn btn-primary" style="width:100%;min-height:44px" onclick="runCompare()">🔍 Compare</button>
+      <div id="cmp-results"></div>
+    </div>`);
+  document.querySelector(".modal")?.classList.add("wide");
+  renderComparePickers();
+}
+
+// Cache-first snapshot list, then a quiet background merge from the sheet.
+// The picker re-renders in place when remote rows land; selection preserved.
+function initCompareSnapshots() {
+  _compareOpts.snapshots = loadParadeSnapshots().snapshots;
+  if (!STATE.apiUrl || !STATE.authToken) return;
+  fetchRemoteParadeSnapshots().then(list => {
+    // The modal may have been closed (or replaced) while fetching.
+    if (!list || !_compareOpts || !document.getElementById("cmp-pickers")) return;
+    _compareOpts.snapshots = list;
+    renderComparePickers();
+  }).catch(() => {});
+}
+
+// Default BASE = the newest snapshot strictly OLDER than the NEW side's
+// date+time — "the previous parade state" (usually yesterday's LP when
+// comparing today's FP). Falls back to the newest overall.
+function compareDefaultBaseId(newerThan) {
+  const snaps = _compareOpts.snapshots;
+  if (!snaps.length) return "";
+  if (newerThan) {
+    const older = snaps.filter(s => (s.dateIso + " " + s.time) < newerThan);
+    // Nothing strictly older (e.g. only today's later copy exists) → newest.
+    return (older[0] || snaps[0]).id;
+  }
+  // Standalone default: NEW = newest, BASE = the one after it.
+  return (snaps[1] || snaps[0]).id;
+}
+
+function comparePickerCard(side, title, hint) {
+  const o = _compareOpts[side];
+  const snaps = _compareOpts.snapshots;
+  const pill = (mode, label) =>
+    `<button type="button" class="role-btn ${o.mode === mode ? "active" : ""}" style="flex:1;padding:10px 0" onclick="setCompareSrcMode('${side}','${mode}')">${label}</button>`;
+  let body;
+  if (o.mode === "saved" && !snaps.length) {
+    body = `<div style="font-size:11px;color:var(--muted);padding:8px 2px">No saved parade states yet — snapshots save automatically when you tap <strong>📋 Copy to Clipboard</strong> on a First/Last Parade state. Use <strong>📋 Paste</strong> instead.</div>`;
+  } else if (o.mode === "saved") {
+    // Group versions of the same (type, date, time): newest is the headline,
+    // re-sends get "(earlier version)".
+    const seen = {};
+    const options = snaps.map(s => {
+      const slot = `${s.type}|${s.dateIso}|${s.time}`;
+      const dupIndex = seen[slot] || 0;
+      seen[slot] = dupIndex + 1;
+      return `<option value="${escapeAttr(s.id)}" ${s.id === o.snapshotId ? "selected" : ""}>${escapeAttr(compareSnapshotLabel(s, dupIndex))}</option>`;
+    }).join("");
+    body = `<div class="form-group" style="margin-top:10px"><label>Saved parade states</label>
+      <select id="cmp-${side}-select" onchange="onCompareSelectChange('${side}')" style="padding:9px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;width:100%">${options}</select></div>`;
+  } else {
+    body = `<textarea id="cmp-${side}-paste" rows="7" spellcheck="false" class="cmp-paste" placeholder="Paste the ${side === "base" ? "older" : "newer"} parade state here — any format, diff is best-effort">${escapeAttr(o.pasteDraft || "")}</textarea>`;
+  }
+  return `
+    <div class="card" style="margin-bottom:10px">
+      <h3 style="margin-bottom:8px">${title}</h3>
+      ${hint ? `<div style="font-size:10px;color:var(--muted);margin-bottom:8px">${hint}</div>` : ""}
+      <div class="filter-role-group" style="display:flex;width:100%">${pill("saved", "📂 Saved")}${pill("paste", "📋 Paste")}</div>
+      ${body}
+    </div>`;
+}
+
+function renderComparePickers() {
+  const host = document.getElementById("cmp-pickers");
+  if (!host || !_compareOpts) return;
+  // Harvest live paste text BEFORE the innerHTML rebuild — every re-render
+  // path (either side's pill flip, the async snapshot fetch landing) would
+  // otherwise wipe what the user pasted on the other card.
+  ["base", "neu"].forEach(side => {
+    const ta = document.getElementById(`cmp-${side}-paste`);
+    if (ta) _compareOpts[side].pasteDraft = ta.value;
+  });
+  const snaps = _compareOpts.snapshots;
+  // Seed default selections once snapshots are known.
+  if (_compareOpts.context === "report") {
+    const newKey = `${gv("rep-date") || ""} ${gv("rep-time") || ""}`;
+    if (!_compareOpts.base.snapshotId) _compareOpts.base.snapshotId = compareDefaultBaseId(newKey);
+    host.innerHTML = comparePickerCard("base", "Compare against — older parade state",
+      "The parade state above (including your edits) is compared as the NEW side.");
+  } else {
+    if (!_compareOpts.neu.snapshotId && snaps.length) _compareOpts.neu.snapshotId = snaps[0].id;
+    if (!_compareOpts.base.snapshotId) _compareOpts.base.snapshotId = compareDefaultBaseId("");
+    host.innerHTML =
+      comparePickerCard("base", "Base — older parade state") +
+      comparePickerCard("neu", "New — later parade state");
+  }
+}
+
+function setCompareSrcMode(side, mode) {
+  // renderComparePickers harvests both sides' paste drafts before rebuilding,
+  // so a mis-tap on any pill never eats pasted text.
+  _compareOpts[side].mode = mode;
+  renderComparePickers();
+}
+
+function onCompareSelectChange(side) {
+  const sel = document.getElementById(`cmp-${side}-select`);
+  if (sel) _compareOpts[side].snapshotId = sel.value;
+  runCompare();   // a completed selection is a completed intent — recompute live
+}
+
+// Resolve a side to its raw text (null = nothing usable yet).
+function compareSideText(side) {
+  const o = _compareOpts[side];
+  if (o.mode === "current") return document.getElementById("rep-text")?.value ?? null;
+  if (o.mode === "paste") {
+    const v = document.getElementById(`cmp-${side}-paste`)?.value || "";
+    return v.trim() ? v : null;
+  }
+  const s = _compareOpts.snapshots.find(x => x.id === o.snapshotId);
+  return s ? s.text : null;
+}
+
+function runCompare() {
+  if (!_compareOpts) return;
+  const host = document.getElementById("cmp-results");
+  if (!host) return;
+  const oldText = compareSideText("base");
+  const newText = compareSideText("neu");
+  if (oldText == null || newText == null) {
+    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px;margin-top:10px">Pick a saved parade state or paste one in first.</div>`;
+    return;
+  }
+  const oldParsed = parseParadeState(oldText);
+  const newParsed = parseParadeState(newText);
+  const diff = diffParadeStates(oldParsed, newParsed, { oldText, newText });
+  _compareOpts.lastDiff = diff;
+  _compareOpts.lastLabels = { old: compareSideLabel("base"), new: compareSideLabel("neu") };
+  renderCompareResults(diff, oldParsed, newParsed);
+  host.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ── Result rendering ──
+function cmpPersonHead(entry) {
+  const d4 = entry.d4 ? `<span class="cmp-4d mono">${escapeAttr(entry.d4)}</span>` : "";
+  const name = `<span class="cmp-name">${escapeAttr(entry.name || entry.rnRaw || "(unknown)")}</span>`;
+  return d4 + name;
+}
+
+function cmpStatusLines(entry) {
+  return entry.statuses.map(st => {
+    const dur = st.durationRaw ? `<div class="cmp-dur mono">${escapeAttr(st.durationRaw)}</div>` : "";
+    return (st.raw ? `<div class="cmp-dur">${escapeAttr(st.raw)}</div>` : "") + dur;
+  }).join("");
+}
+
+function renderCompareResults(diff, oldParsed, newParsed) {
+  const host = document.getElementById("cmp-results");
+  if (!host) return;
+  const labels = _compareOpts.lastLabels;
+  const parts = [];
+
+  // Summary: strength deltas (only fields parsed on BOTH sides).
+  const s = diff.strength;
+  const deltaBadge = d => d === 0 ? `<span class="badge">±0</span>`
+    : badge((d > 0 ? "+" : "") + d, d > 0 ? "green" : "red");
+  const chips = [];
+  Object.keys(s.platoons).sort().forEach(p => {
+    const d = s.platoons[p];
+    chips.push(`<span class="cmp-chip">P${escapeAttr(p)} ${d.old.in}/${d.old.total}→${d.new.in}/${d.new.total} <b class="${d.deltaIn < 0 ? "cmp-neg" : d.deltaIn > 0 ? "cmp-pos" : "cmp-zero"}">${d.deltaIn > 0 ? "+" : ""}${d.deltaIn}</b></span>`);
+  });
+  if (s.commanders) chips.push(`<span class="cmp-chip">CDR ${s.commanders.old.in}/${s.commanders.old.total}→${s.commanders.new.in}/${s.commanders.new.total} <b class="${s.commanders.deltaIn < 0 ? "cmp-neg" : s.commanders.deltaIn > 0 ? "cmp-pos" : "cmp-zero"}">${s.commanders.deltaIn > 0 ? "+" : ""}${s.commanders.deltaIn}</b></span>`);
+  parts.push(`<div class="card cmp-summary" style="margin-top:12px">
+    ${s.current ? `<div class="cmp-strength mono">CURRENT ${s.current.old} → ${s.current.new} ${deltaBadge(s.current.delta)}</div>` : ""}
+    ${chips.length ? `<div class="cmp-chips">${chips.join("")}</div>` : ""}
+    <div class="cmp-meta">${escapeAttr(labels.old)} → ${escapeAttr(labels.new)}${diff.bestEffort ? ` · ${badge("best-effort", "orange")}` : ""}</div>
+  </div>`);
+
+  if (diff.warnings.length) {
+    parts.push(`<div class="cmp-warnings">${diff.warnings.map(w => `<div>⚠ ${escapeAttr(w)}</div>`).join("")}</div>`);
+  }
+
+  if (!diff.structuredOk) {
+    parts.push(`<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px;margin-top:10px">⚠ Couldn't read enough structure from ${!oldParsed.people.length ? "the BASE text" : "the NEW text"} — showing the raw text diff below.</div>`);
+  } else {
+    const secBadge = e => badge(escapeAttr(PC_SECTION_LABELS[e.section] || e.section), CMP_SECTION_BADGE[e.section] || "pink");
+    const noChanges = !diff.people.added.length && !diff.people.removed.length && !diff.people.changed.length;
+    if (noChanges) {
+      const strengthChanged = s.current && s.current.delta !== 0;
+      parts.push(`<div class="empty-state" style="padding:20px">✅ No personnel changes between these two parade states.${strengthChanged ? " (Strength numbers differ — see above.)" : ""}</div>`);
+    }
+    if (diff.people.added.length) {
+      parts.push(`<div class="cmp-group"><div class="cmp-group-head">${badge(String(diff.people.added.length), "red")} ➕ Newly listed</div>` +
+        diff.people.added.map(a => `<div class="cmp-card cmp-card-out">
+          <div class="cmp-card-top">${cmpPersonHead(a.entry)}${secBadge(a.entry)}<span class="cmp-verb">${CMP_VERBS.added[a.entry.section] || "added"}</span></div>
+          ${a.entry.reason ? `<div class="cmp-reason">${escapeAttr(a.entry.reason)}</div>` : ""}
+          ${cmpStatusLines(a.entry)}
+          ${a.entry.apptDateRaw || a.entry.apptTime ? `<div class="cmp-dur mono">${escapeAttr([a.entry.apptDateRaw, a.entry.apptTime].filter(Boolean).join(" · "))}</div>` : ""}
+        </div>`).join("") + `</div>`);
+    }
+    if (diff.people.removed.length) {
+      parts.push(`<div class="cmp-group"><div class="cmp-group-head">${badge(String(diff.people.removed.length), "green")} ➖ No longer listed</div>` +
+        diff.people.removed.map(r => `<div class="cmp-card cmp-card-ret">
+          <div class="cmp-card-top">${cmpPersonHead(r.entry)}<span class="badge badge-green">was ${escapeAttr(PC_SECTION_LABELS[r.entry.section] || r.entry.section)}</span><span class="cmp-verb">${CMP_VERBS.removed[r.entry.section] || "removed"}</span></div>
+          ${r.entry.reason ? `<div class="cmp-reason">${escapeAttr(r.entry.reason)}</div>` : ""}
+        </div>`).join("") + `</div>`);
+    }
+    if (diff.people.changed.length) {
+      parts.push(`<div class="cmp-group"><div class="cmp-group-head">${badge(String(diff.people.changed.length), "yellow")} ✏️ Changed</div>` +
+        diff.people.changed.map(c => {
+          const moved = c.changes.find(ch => ch.field === "section");
+          const head = `<div class="cmp-card-top">${cmpPersonHead(c.new)}${moved
+            ? `${badge(escapeAttr(moved.old), CMP_SECTION_BADGE[c.old.section] || "pink")}<span class="cmp-arrow">→</span>${badge(escapeAttr(moved.new), CMP_SECTION_BADGE[c.new.section] || "pink")}`
+            : secBadge(c.new)}</div>`;
+          const lines = c.changes.filter(ch => ch.field !== "section").map(ch => {
+            const label = ch.field.charAt(0).toUpperCase() + ch.field.slice(1);
+            const note = ch.note ? ` <span class="cmp-note">(${escapeAttr(ch.note)})</span>` : "";
+            if (ch.kind === "added") return `<div class="cmp-diffline">${label} added: ${escapeAttr(ch.new)}${note}</div>`;
+            if (ch.kind === "removed") return `<div class="cmp-diffline">${label} ended: <s>${escapeAttr(ch.old)}</s>${note}</div>`;
+            return `<div class="cmp-diffline">${label}: <s>${escapeAttr(ch.old)}</s> → ${escapeAttr(ch.new)}${note}</div>`;
+          }).join("");
+          return `<div class="cmp-card cmp-card-chg">${head}${lines}</div>`;
+        }).join("") + `</div>`);
+    }
+    if (diff.people.unchangedCount) {
+      parts.push(`<div class="cmp-meta" style="margin-top:8px">${diff.people.unchangedCount} ${diff.people.unchangedCount === 1 ? "entry" : "entries"} unchanged</div>`);
+    }
+    parts.push(`<button type="button" id="cmp-copy-btn" class="btn btn-success" style="width:100%;min-height:44px;margin-top:10px" onclick="copyCompareSummary()">📋 Copy change summary</button>`);
+  }
+
+  // Collapsibles: parser leftovers + the raw line diff (the trust anchor —
+  // always available so the structured summary can be verified at a glance).
+  const unparsedCount = oldParsed.unparsed.length + newParsed.unparsed.length;
+  if (unparsedCount) {
+    const block = (label, lines) => lines.length ? `<div class="cmp-meta" style="padding:0 12px">${label} (${lines.length})</div><pre class="cmp-pre">${lines.map(escapeAttr).join("\n")}</pre>` : "";
+    parts.push(`<details class="cmp-details"><summary>⚠ ${unparsedCount} unparsed line${unparsedCount === 1 ? "" : "s"}</summary>${block("Base", oldParsed.unparsed)}${block("New", newParsed.unparsed)}</details>`);
+  }
+  if (diff.textDiff) {
+    const rows = diff.textDiff
+      .filter(l => l.type !== "same" || true)
+      .map(l => `<div class="cmp-line ${l.type === "add" ? "cmp-add" : l.type === "del" ? "cmp-del" : ""}">${escapeAttr(l.line) || "&nbsp;"}</div>`).join("");
+    parts.push(`<details class="cmp-details" ${diff.structuredOk ? "" : "open"}><summary>Raw text diff</summary><div class="cmp-rawdiff mono">${rows}</div></details>`);
+  }
+
+  host.innerHTML = parts.join("");
+}
+
+// Plain-text change summary → clipboard, for the commanders' group chat.
+async function copyCompareSummary() {
+  if (!_compareOpts?.lastDiff) return;
+  const text = compareSummaryText(_compareOpts.lastDiff, _compareOpts.lastLabels.old, _compareOpts.lastLabels.new);
+  const btn = document.getElementById("cmp-copy-btn");
   try {
     await navigator.clipboard.writeText(text);
     if (btn) {
@@ -2601,9 +3069,9 @@ async function copyReportToClipboard() {
       setTimeout(() => { btn.textContent = original; }, 1800);
     }
   } catch {
-    // Fallback: select all in the textarea so the user can manually Cmd+C.
-    ta.focus(); ta.select();
-    alert("Copy blocked — text is selected, press Cmd+C / Ctrl+C to copy.");
+    // Same fallback contract as copyReportToClipboard: surface the text so
+    // the user can copy manually.
+    prompt("Copy blocked — select and copy manually:", text);
   }
 }
 
