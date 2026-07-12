@@ -19,6 +19,8 @@ function render() {
     document.getElementById("content")?.scrollTo(0, 0);
     _lastRenderedCtx = renderCtx;
   }
+  // Leaving the dashboard re-arms its hero animation for the next visit.
+  if (STATE.nav !== "dashboard") _dashHeroKey = null;
 
   // Keep filter dropdown options in sync with the current roster — cheap to
   // rebuild a few <option>s and means we don't have to remember to call this
@@ -68,14 +70,47 @@ let _dashOpen = (() => {
 
 function toggleDashSection(key) {
   _dashOpen[key] = !_dashOpen[key];
+  // Mark the newly-opened section so ONLY its body plays the entry
+  // animation — bodies rebuild on every render, so an ungated animation
+  // would replay after every inline action.
+  if (_dashOpen[key]) _dashJustOpened = key;
   try { localStorage.setItem(DASH_OPEN_KEY, JSON.stringify(_dashOpen)); } catch {}
   render();
 }
 
-// Stat-tile shortcut: expand the backing section and bring it into view.
+// Hero shortcut: expand the backing section and bring it into view.
 function openDashSection(key) {
   if (!_dashOpen[key]) toggleDashSection(key);
   document.getElementById(`dash-sec-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ── Hero motion gating ───────────────────────────────────
+// The count-up + entrance play when the dashboard is (re)entered or the
+// scope filter changes (the number genuinely changed meaning) — never on
+// same-context re-renders. _dashHeroKey remembers the last render context
+// the hero animated for; render() nulls it whenever another tab renders,
+// so returning to the dashboard animates again.
+let _dashHeroKey = null;
+let _dashJustOpened = null;
+
+function prefersReducedMotion() {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Count the in-camp figure up to `target` over 700ms (easeOutExpo); the
+// final frame writes the exact value. The DOM already carries the final
+// number (first paint is masked by the hero's opacity entrance), so an
+// interrupted animation can never leave a wrong figure behind.
+function dashHeroCountUp(target) {
+  const el = document.getElementById("dash-hero-num");
+  if (!el) return;
+  const t0 = performance.now(), dur = 700;
+  const step = now => {
+    const p = Math.min(1, (now - t0) / dur);
+    el.textContent = String(p >= 1 ? target : Math.round(target * (1 - Math.pow(2, -10 * p))));
+    if (p < 1 && document.getElementById("dash-hero-num") === el) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 // Small colored count pill for section headers (hex color, e.g. "#F85149").
@@ -90,7 +125,9 @@ function dashChip(text, color) {
 // so tapping them can't also expand the section.
 function dashSectionHtml(s) {
   const open = !!_dashOpen[s.key];
-  return `<div class="card dash-sec${open ? " open" : ""}${s.zero ? " zero" : ""}" id="dash-sec-${s.key}">
+  // dash-sec-<key> drives the severity-colored left edge in CSS.
+  const entering = open && _dashJustOpened === s.key && !prefersReducedMotion() ? " entering" : "";
+  return `<div class="card dash-sec dash-sec-${s.key}${open ? " open" : ""}${s.zero ? " zero" : ""}" id="dash-sec-${s.key}">
     <div class="dash-sec-head">
       <button type="button" class="dash-sec-toggle" onclick="toggleDashSection('${s.key}')" aria-expanded="${open}" aria-controls="dash-sec-${s.key}-body">
         <span class="dash-sec-chevron" aria-hidden="true">▶</span>
@@ -99,7 +136,73 @@ function dashSectionHtml(s) {
       </button>
       ${s.actions || ""}
     </div>
-    ${open ? `<div class="dash-sec-body" id="dash-sec-${s.key}-body">${s.body()}</div>` : ""}
+    ${open ? `<div class="dash-sec-body${entering}" id="dash-sec-${s.key}-body">${s.body()}</div>` : ""}
+  </div>`;
+}
+
+// ── Command-center hero ──────────────────────────────────
+// The dashboard's focal point: the in-camp/total figure a commander reads
+// from across a room, over a strength bar where every person in scope is a
+// sliver of the line. Kinds match outOfCampMap exactly (in-camp = the
+// complement), in fixed severity order — red anchors the right edge. All
+// bar/legend taps open the Out of Camp section (the one whose counts equal
+// the bar's); substats open their own sections.
+const DASH_HERO_KINDS = [
+  { key: "incamp", label: "in camp", color: "var(--k-incamp)" },
+  { key: "bookedout", label: "booked out", color: "var(--k-bookedout)" },
+  { key: "leave", label: "leave", color: "var(--k-leave)" },
+  { key: "medical", label: "medical", color: "var(--k-medical)" },
+];
+
+function dashHeroHtml({ scoped, inCamp, outKinds, active, nonActive, avgPart, isAll, recCount, cmdCount, today, animate }) {
+  const total = scoped.length;
+  const countOf = k => k.key === "incamp" ? inCamp : (outKinds[k.key] || 0);
+
+  const d = new Date(today + "T00:00:00");
+  const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const MONS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const dateLabel = `${DAYS[d.getDay()]} · ${d.getDate()} ${MONS[d.getMonth()]} ${d.getFullYear()}`;
+  const scopeActive = isFilterActive();
+  const scopeLabel = scopeActive ? filterLabel() : "All Company";
+
+  // Segments: flex-grow carries the raw count (flex-basis 0 makes flexbox do
+  // the proportional math); only non-zero kinds render. min-width in CSS
+  // keeps a 1-person sliver visible; ::after extends its tap zone.
+  const segments = DASH_HERO_KINDS.filter(k => countOf(k) > 0).map(k => {
+    const n = countOf(k);
+    return `<button type="button" class="dash-hero-seg" style="--seg:${k.color};flex:${n} 1 0px" onclick="openDashSection('outofcamp')" title="${n} ${k.label}" aria-label="${n} ${k.label}"></button>`;
+  }).join("");
+  const bar = total
+    ? `<div class="dash-hero-bar" role="group" aria-label="Company strength: ${inCamp} of ${total} in camp">${segments}</div>`
+    : `<div class="dash-hero-bar empty" aria-hidden="true"></div>`;
+
+  // Legend: the guaranteed-size tap backup for thin segments. The in-camp
+  // key ALWAYS renders (even at 0 — "0 in camp" is the headline of a bad
+  // day); other kinds only when present.
+  const legend = total
+    ? `<div class="dash-hero-legend">${DASH_HERO_KINDS.filter(k => k.key === "incamp" || countOf(k) > 0).map(k =>
+        `<button type="button" class="dash-hero-key" onclick="openDashSection('outofcamp')"><i style="background:${k.color}"></i><b>${countOf(k)}</b>${k.label}</button>`
+      ).join("")}</div>`
+    : `<div class="dash-hero-empty-note">No one in this scope.</div>`;
+
+  return `<div class="card dash-hero${animate ? " dash-hero-enter" : ""}">
+    <div class="dash-hero-eyebrow">
+      <span class="dash-hero-scope${scopeActive ? " active" : ""}">${scopeLabel}</span>
+      <span class="dash-hero-date">${dateLabel}</span>
+    </div>
+    <div class="dash-hero-figure">
+      <span class="dash-hero-num" id="dash-hero-num">${inCamp}</span>
+      <span class="dash-hero-den">/${total}</span>
+      <span class="dash-hero-caption">in camp</span>
+    </div>
+    ${bar}
+    ${legend}
+    <div class="dash-hero-substats">
+      <button type="button" class="dash-hero-sub" onclick="openDashSection('medical')"><label>Active today</label><b style="color:var(--green)">${active}</b><span class="dash-hero-go">›</span></button>
+      <button type="button" class="dash-hero-sub" onclick="openDashSection('medical')"><label>Non-Active</label><b style="color:var(--red)">${nonActive}</b><span class="dash-hero-go">›</span></button>
+      <button type="button" class="dash-hero-sub" onclick="openDashSection('trends')"><label>Avg part.</label><b style="color:var(--accent)">${avgPart}%</b><span class="dash-hero-go">›</span></button>
+      ${isAll ? `<div class="dash-hero-sub is-static"><label>Rec / Cmd</label><b>${recCount}<span class="dash-hero-split">/${cmdCount}</span></b></div>` : ""}
+    </div>
   </div>`;
 }
 
@@ -149,35 +252,28 @@ function renderDashboard(el) {
   const awayFromCamp = outScoped.length;
   const inCamp = scoped.length - awayFromCamp;
   const avgPart = STATE.attendance.length ? Math.round(STATE.attendance.reduce((a, c) => a + (c.participating / c.total * 100), 0) / STATE.attendance.length) : 0;
-  const scopeBanner = isFilterActive() ? `<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Scope: <strong>${filterLabel()}</strong> — Attendance figures remain company-wide.</div>` : "";
 
-  // R/C breakdown — only shown when scope is "All". Helps reproduce the
-  // parade-state-style "PLATOON x: y/z … COMMANDERS: a/b" split in one
-  // glance without forcing a separate Commanders card.
+  // Out-of-camp kind tally — shared by the hero strength bar, its legend,
+  // and the Out of Camp section header chips (one computation, no drift).
+  const outKinds = {};
+  outScoped.forEach(r => { const k = outMap.get(r.id).kind; outKinds[k] = (outKinds[k] || 0) + 1; });
+
+  // R/C split for the hero substat — only shown when scope is "All".
   const isAll = !STATE.filterRole;
-  const recRows = scoped.filter(r => r.role !== "Commander");
-  const cmdRows = scoped.filter(r => r.role === "Commander");
-  const recLive = liveRows.filter(r => r.role !== "Commander");
-  const cmdLive = liveRows.filter(r => r.role === "Commander");
-  const recActive = recRows.length - recLive.length;
-  const cmdActive = cmdRows.length - cmdLive.length;
-  const recAway = outScoped.filter(r => r.role !== "Commander").length;
-  const cmdAway = outScoped.filter(r => r.role === "Commander").length;
-  const recInCamp = recRows.length - recAway;
-  const cmdInCamp = cmdRows.length - cmdAway;
-  // Inline "total/recruits/commanders" — the /R/C portion renders smaller
-  // and dimmer so the headline number stays pronounced. Hidden when scope
-  // is already narrowed to one role.
-  const inlineBreakdown = (rec, cmd) => isAll
-    ? `<span style="font-size:55%;color:var(--muted);font-weight:400;margin-left:1px">/${rec}/${cmd}</span>`
-    : "";
+  const recCount = scoped.filter(r => r.role !== "Commander").length;
+  const cmdCount = scoped.length - recCount;
+
+  // Hero motion: animate on dashboard (re)entry or scope change, never on
+  // same-context re-renders (see _dashHeroKey machinery above).
+  const animateHero = !prefersReducedMotion() && _dashHeroKey !== _lastRenderedCtx;
+  _dashHeroKey = _lastRenderedCtx;
 
   // Every section below the hero is a collapsible summary card. Order is
   // operational: who's not here → medical → upcoming movement → injuries →
   // analytics → static company info. MSK returns null when the scope has
   // no MSK rows at all (same as the old dashboard, which hid the section).
   const sections = [
-    dashSecOutOfCamp(scoped, outMap),
+    dashSecOutOfCamp(scoped, outMap, outKinds),
     dashSecMedical(liveRows, recoveringRows, allByD4, today),
     dashSecAppointments(visible, today),
     dashSecLeaveOut(visible, today),
@@ -200,16 +296,12 @@ function renderDashboard(el) {
         </div>
       </div>
     </div>
-    ${scopeBanner}
-    <div class="stats-row" style="margin-top:12px">
-      <div class="stat"><label>Total Str</label><div class="val">${scoped.length}${inlineBreakdown(recRows.length, cmdRows.length)}</div></div>
-      <div class="stat stat-link" onclick="openDashSection('medical')" title="See who is non-active"><label>Active today</label><div class="val" style="color:var(--green)">${active}${inlineBreakdown(recActive, cmdActive)}</div></div>
-      <div class="stat stat-link" onclick="openDashSection('medical')" title="See who is non-active"><label>Non-Active</label><div class="val" style="color:var(--red)">${liveRows.length}${inlineBreakdown(recLive.length, cmdLive.length)}</div></div>
-      <div class="stat stat-link" onclick="openDashSection('outofcamp')" title="See who is out of camp"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCamp}${inlineBreakdown(recInCamp, cmdInCamp)}</div></div>
-      <div class="stat stat-link" onclick="openDashSection('outofcamp')" title="See who is out of camp"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
-      <div class="stat stat-link" onclick="openDashSection('trends')" title="See the participation trend"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
-    </div>
+    ${dashHeroHtml({ scoped, inCamp, outKinds, active, nonActive: liveRows.length, avgPart, isAll, recCount, cmdCount, today, animate: animateHero })}
     ${sections.map(dashSectionHtml).join("")}`;
+
+  // One-shot flags consumed by this render.
+  _dashJustOpened = null;
+  if (animateHero) dashHeroCountUp(inCamp);
 
   // Charts only exist while the Trends section is open. The Chart guard also
   // keeps offline runs (CDN unavailable, e.g. Playwright) exception-free.
@@ -331,9 +423,12 @@ function dashSecMedical(liveRows, recoveringRows, allByD4, today) {
 // the same thresholds as the attendance table.
 function dashSecTrends(avgPart) {
   const rateColor = avgPart >= 95 ? "#3FB950" : avgPart >= 70 ? "#D29922" : "#F85149";
-  const summary = STATE.attendance.length
+  // When a scope filter is active, carry the caveat the old scope banner
+  // used to show — attendance numbers never narrow with the filter.
+  const scopeNote = isFilterActive() ? `<span class="dash-sec-note">attendance is company-wide</span>` : "";
+  const summary = (STATE.attendance.length
     ? dashChip(`${avgPart}% avg participation`, rateColor) + `<span class="dash-sec-note">${STATE.attendance.length} conducts</span>`
-    : `<span class="dash-sec-note">no conducts logged yet</span>`;
+    : `<span class="dash-sec-note">no conducts logged yet</span>`) + scopeNote;
   const body = () => `<div class="grid-2">
     <div><h3>Status Breakdown (today)</h3><canvas id="chart-status" height="200"></canvas></div>
     <div><h3>Participation Trend</h3><canvas id="chart-participation" height="200"></canvas></div>
@@ -1016,15 +1111,13 @@ function renderLeaveTimeline(scoped, todayIso) {
 // set that drives the strength tiles + parade). Booked-out rows get a one-tap
 // Book in (plain undo); medical/leave rows get "Book in anyway" (override). A
 // "+ Book Out" button opens the unified Book Out modal (today or a date range).
-function dashSecOutOfCamp(scoped, outMap) {
+function dashSecOutOfCamp(scoped, outMap, outKinds) {
   const rows = scoped.filter(r => outMap.has(r.id));
   const color = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
   const label = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
   const chipLabel = { medical: "medical", leave: "leave", bookedout: "booked out" };
-  const kinds = {};
-  rows.forEach(r => { const k = outMap.get(r.id).kind; kinds[k] = (kinds[k] || 0) + 1; });
   const summary = rows.length
-    ? Object.entries(kinds).map(([k, n]) => dashChip(`${n} ${chipLabel[k] || k}`, color[k] || "#8B949E")).join("")
+    ? Object.entries(outKinds).map(([k, n]) => dashChip(`${n} ${chipLabel[k] || k}`, color[k] || "#8B949E")).join("")
     : `<span class="dash-sec-note">everyone in camp</span>`;
   const trs = rows.map(r => {
     const info = outMap.get(r.id);
@@ -2109,7 +2202,7 @@ function renderConducts(el) {
   // platoon belongs to at most one program (mutually exclusive).
   const allPlatoons = [...new Set(STATE.roster.map(getPlt).filter(Boolean))].sort();
   const programsCard = `
-    <div class="card" style="padding:12px 14px;margin-bottom:16px;background:var(--surface2);border-radius:8px">
+    <div class="card" style="padding:12px 14px;margin-bottom:16px;background:var(--surface2);border-radius:var(--radius-card)">
       <div style="margin-bottom:8px">
         <strong style="font-size:14px">🎯 Training Programs</strong>
         <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">Defines the programs and a <strong>fallback</strong> platoon→program mapping. A recruit's own <code>program</code> column (BMT/PTP on the Roster) overrides this; the platoon map only applies to recruits with no explicit program set. Drives the conduct wizard's program scoping and the program badges/filters.</div>

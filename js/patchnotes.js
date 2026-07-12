@@ -23,12 +23,12 @@ const PATCH_NOTES = [
   {
     v: 125,
     date: "11 Jul 2026",
-    title: "A dashboard you can read without scrolling",
-    intro: "The dashboard is now one screen: the strength numbers stay on top, and every section below folds into a single row that already shows its counts. Tap a row to expand it.",
+    title: "A dashboard you can read from across the room",
+    intro: "The dashboard is now one screen with one star: your in-camp strength, drawn as a single bar where every person is a sliver of the line. Everything else folds into a tap-to-open row that already shows its counts.",
     items: [
-      { t: "📊 Strength first", d: "The Total / Active / Non-Active / In Camp / Out of Camp / Avg Part. tiles stay exactly where they were - everything else got out of their way." },
-      { t: "👆 Tap a section to open it", d: "Out of Camp, Non-Active, Appointments, Out today / This week, MSK, Trends and Rations & Allergies each collapse to one line with their key counts on it. Tap to open, tap again to close - the app remembers what you keep open." },
-      { t: "🔢 The tiles are shortcuts", d: "Tapping the Non-Active, In Camp / Out of Camp or Avg Part. tile jumps straight to (and opens) the matching section." },
+      { t: "🎯 The strength bar", d: "One big number - in camp / total - over a colored bar: teal in camp, orange booked out, purple leave, red medical. Tap the bar or its legend to see exactly who is out." },
+      { t: "👆 Tap a section to open it", d: "Out of Camp, Non-Active, Appointments, Out today / This week, MSK, Trends and Rations & Allergies each collapse to one line with their key counts on it. Tap to open, tap again to close - the app remembers what you keep open. Colored edges mark what each row is about." },
+      { t: "🔢 The small numbers are shortcuts", d: "Active today, Non-Active and Avg part. under the bar jump straight to (and open) the matching section." },
       { t: "📌 No more jumping to the top", d: "Booking someone in or out, resolving an appointment and similar quick actions no longer scroll the page back to the top." },
     ],
   },

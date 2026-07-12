@@ -1,4 +1,16 @@
-:root{--bg:#0D1117;--surface:#161B22;--surface2:#21262D;--border:#30363D;--text:#E6EDF3;--muted:#8B949E;--dim:#484F58;--accent:#58A6FF;--accentDim:#1F6FEB;--green:#3FB950;--red:#F85149;--orange:#D29922;--yellow:#E3B341;--purple:#BC8CFF;--teal:#39D2C0;--pink:#F778BA}
+:root{--bg:#0D1117;--surface:#161B22;--surface2:#21262D;--border:#30363D;--text:#E6EDF3;--muted:#8B949E;--dim:#484F58;--accent:#58A6FF;--accentDim:#1F6FEB;--green:#3FB950;--red:#F85149;--orange:#D29922;--yellow:#E3B341;--purple:#BC8CFF;--teal:#39D2C0;--pink:#F778BA;
+  /* Out-of-camp KIND colors — semantic aliases shared by the hero strength
+     bar, its legend, and the JS color maps so they can never drift. In-camp
+     is TEAL (not green): green stays reserved for "Active today" (a medical
+     measure, not a location measure), and teal-first segment ordering has
+     4x better colorblind separation against red/orange neighbors. */
+  --k-incamp:#39D2C0;--k-medical:#F85149;--k-leave:#BC8CFF;--k-bookedout:#D29922;
+  /* Elevated-surface tokens (app-wide restyle) */
+  --shadow-card:0 1px 2px rgba(1,4,9,.45);
+  --shadow-deep:0 8px 32px rgba(1,4,9,.40);
+  --edge-top:inset 0 1px 0 rgba(230,237,243,.05);
+  --glow-hero:0 0 48px -12px rgba(57,210,192,.16);
+  --radius-card:10px}
 *{margin:0;padding:0;box-sizing:border-box}
 /* `dvh` adjusts as iOS Safari's address bar grows/shrinks — prevents the
    page from sitting partially behind the toolbar on first load. position:fixed
@@ -44,13 +56,16 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
 #content{flex:1;padding:20px;overflow-y:auto}
 
 /* Components */
-.stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;flex:1;min-width:120}
-.stat label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.stat .val{font-size:22px;font-weight:700;margin-top:2px;font-family:'JetBrains Mono',monospace}
+/* NOTE (restyle): surface changes here are ADDITIVE only — .stat's box model
+   (incl. the historically-invalid unitless min-width:120) is load-bearing for
+   the wizard stat grids and person-modal rows. */
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);padding:14px 16px;flex:1;min-width:120;background-image:linear-gradient(180deg,rgba(230,237,243,.025),rgba(230,237,243,0) 64px);box-shadow:var(--edge-top),var(--shadow-card)}
+.stat label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;font-weight:600}
+.stat .val{font-size:22px;font-weight:700;margin-top:2px;font-family:'JetBrains Mono',monospace;letter-spacing:-0.02em}
 .stat .sub{font-size:10px;color:var(--muted);margin-top:1px}
 .stats-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
 
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+.badge{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase}
 .badge-green{background:#3FB95022;color:var(--green);border:1px solid #3FB95044}
 .badge-red{background:#F8514922;color:var(--red);border:1px solid #F8514944}
 .badge-orange{background:#D2992222;color:var(--orange);border:1px solid #D2992244}
@@ -59,19 +74,23 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
 .badge-accent{background:#58A6FF22;color:var(--accent);border:1px solid #58A6FF44}
 .badge-pink{background:#F778BA22;color:var(--pink);border:1px solid #F778BA44}
 
-.btn{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;border:1px solid var(--border);background:var(--surface2);color:var(--text)}
+.btn{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;border:1px solid var(--border);background:var(--surface2);color:var(--text);box-shadow:inset 0 1px 0 rgba(230,237,243,.05),0 1px 2px rgba(1,4,9,.5)}
 .btn:hover{filter:brightness(1.2)}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn:active{transform:translateY(1px);box-shadow:inset 0 1px 0 rgba(230,237,243,.03)}
 .btn-primary{background:var(--accentDim);border-color:var(--accent)}
 .btn-success{background:#23863644;color:var(--green);border-color:#3FB95044}
 .btn-danger{background:#DA363322;color:var(--red);border-color:#F8514944}
 
 table{width:100%;border-collapse:collapse}
-th{padding:8px 10px;background:var(--surface2);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center;border-bottom:1px solid var(--border);position:sticky;top:0}
+/* th: inset bottom shadow instead of relying on border-bottom alone — under
+   border-collapse the sticky header's border scrolls away with the rows; the
+   inset shadow stays glued to the header. */
+th{padding:8px 10px;background:var(--surface2);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.8px;text-align:center;border-bottom:1px solid var(--border);box-shadow:inset 0 -1px 0 var(--border);position:sticky;top:0}
 td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:center;font-size:12px}
 tr:hover{background:var(--surface2)}
-.table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border);max-height:60vh;overflow-y:auto}
+.table-wrap{overflow-x:auto;border-radius:var(--radius-card);border:1px solid var(--border);max-height:60vh;overflow-y:auto;box-shadow:var(--shadow-card)}
 
-.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px;margin-bottom:16px;background-image:linear-gradient(180deg,rgba(230,237,243,.025),rgba(230,237,243,0) 64px);box-shadow:var(--edge-top),var(--shadow-card)}
 .card h3{font-size:13px;color:var(--muted);margin-bottom:12px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 
@@ -100,6 +119,79 @@ tr:hover{background:var(--surface2)}
 .stat-link:hover{border-color:var(--accent)}
 .stat-link:hover::after{color:var(--accent)}
 
+/* ── Dashboard section severity edges ──────────────────────
+   Each section carries a 3px colored left edge (inset shadow, NOT
+   border-left — a border would eat 3px of content width and misalign the
+   card against its neighbors). Empty sections fade the edge to 35%. */
+.dash-sec{--sec-edge:transparent;--sec-edge-final:var(--sec-edge);box-shadow:var(--edge-top),var(--shadow-card),inset 3px 0 0 var(--sec-edge-final)}
+.dash-sec-outofcamp{--sec-edge:var(--orange)}
+.dash-sec-medical{--sec-edge:var(--red)}
+.dash-sec-appointments{--sec-edge:var(--teal)}
+.dash-sec-leaveout{--sec-edge:var(--purple)}
+.dash-sec-msk{--sec-edge:var(--pink)}
+.dash-sec-trends{--sec-edge:var(--accent)}
+.dash-sec-profile{--sec-edge:var(--dim)}
+@supports (color: color-mix(in srgb, red, blue)){
+  .dash-sec.zero{--sec-edge-final:color-mix(in srgb, var(--sec-edge) 35%, transparent)}
+}
+.dash-sec:has(> .dash-sec-head .dash-sec-toggle:hover){border-color:#3D444D}
+
+/* ── Command-center hero ───────────────────────────────────
+   The dashboard's focal point: one oversized in-camp/total figure and a
+   segmented strength bar where every person in scope is a sliver of the
+   line (GitHub language-bar idiom: flat segments, 2px surface gaps, pill
+   container). Everything else on the page is subordinate to this card. */
+.dash-hero{padding:20px;border-radius:12px;margin-bottom:16px;box-shadow:var(--edge-top),var(--shadow-deep),var(--glow-hero);background-image:radial-gradient(120% 90% at 50% 0%,rgba(57,210,192,.05),transparent 60%)}
+.dash-hero-eyebrow{display:flex;gap:12px;align-items:baseline;margin-bottom:14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted)}
+.dash-hero-scope.active{color:var(--accent)}
+.dash-hero-figure{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.dash-hero-num{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:72px;line-height:.95;letter-spacing:-0.03em;color:var(--text)}
+.dash-hero-den{font-family:'JetBrains Mono',monospace;font-weight:400;font-size:32px;letter-spacing:-0.01em;color:var(--muted)}
+.dash-hero-caption{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted)}
+/* Strength bar: flex-grow carries the person counts so flexbox does all the
+   proportional math; min-width keeps a 1-person segment visible AND findable.
+   The outer ends are rounded on the FIRST/LAST segments themselves (longhand
+   radii so a lone segment rounds on both sides) rather than by clipping the
+   container — an overflow:hidden bar would also clip the ::after tap-zone
+   below, silently shrinking every segment's real target to its 16px height. */
+.dash-hero-bar{display:flex;column-gap:2px;height:16px;margin-top:16px}
+.dash-hero-bar.empty{background:var(--surface2);border:1px solid var(--border);border-radius:8px}
+.dash-hero-seg{background:var(--seg);border:none;padding:0;min-width:16px;cursor:pointer;position:relative}
+.dash-hero-seg:first-child{border-top-left-radius:8px;border-bottom-left-radius:8px}
+.dash-hero-seg:last-child{border-top-right-radius:8px;border-bottom-right-radius:8px}
+/* Tap target: extend the hit zone into the empty gaps above/below the bar so
+   each segment clears ~44px on a phone. Left/right inset stays 0, so adjacent
+   segments' zones sit side by side and never steal each other's taps. */
+.dash-hero-seg::after{content:"";position:absolute;inset:-16px 0 -10px}
+.dash-hero-seg:hover{filter:brightness(1.18)}
+.dash-hero-seg:active{filter:brightness(.85)}
+.dash-hero-seg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dash-hero-legend{margin-top:10px;display:flex;flex-wrap:wrap;gap:2px 14px}
+.dash-hero-key{display:inline-flex;align-items:center;background:none;border:none;padding:2px 0;min-height:28px;font:inherit;font-size:11px;color:var(--muted);cursor:pointer}
+.dash-hero-key i{width:8px;height:8px;border-radius:2px;margin-right:6px;flex-shrink:0}
+.dash-hero-key b{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--text);margin-right:4px}
+.dash-hero-key:hover{color:var(--text)}
+.dash-hero-substats{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dash-hero-sub{background:none;border:none;text-align:left;padding:4px 6px;min-height:40px;cursor:pointer;font:inherit}
+.dash-hero-sub.is-static{cursor:default}
+.dash-hero-sub label{display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:2px;cursor:inherit}
+.dash-hero-sub b{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:18px;letter-spacing:-0.01em}
+.dash-hero-split{font-size:55%;font-weight:400;color:var(--muted)}
+.dash-hero-go{color:var(--dim);font-size:13px;margin-left:4px}
+.dash-hero-sub:hover label,.dash-hero-sub:hover .dash-hero-go{color:var(--accent)}
+.dash-hero-empty-note{margin-top:10px;font-size:11px;color:var(--muted)}
+
+/* ── Motion (all entry animations are GATED in JS and disabled under
+   prefers-reduced-motion; no width/height transitions — full innerHTML
+   re-renders would restart them constantly) ── */
+@keyframes dashHeroIn{from{opacity:0;transform:translateY(6px)}}
+.dash-hero-enter{animation:dashHeroIn .48s cubic-bezier(.16,1,.3,1)}
+@keyframes dashBodyIn{from{opacity:0;transform:translateY(-4px)}}
+.dash-sec-body.entering{animation:dashBodyIn .18s ease-out}
+@media(prefers-reduced-motion:reduce){
+  .dash-hero-enter,.dash-sec-body.entering{animation:none}
+}
+
 /* Forms */
 .form-group{display:flex;flex-direction:column;gap:4px}
 .form-group label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
@@ -125,7 +217,7 @@ tr:hover{background:var(--surface2)}
 /* Dashboard "Generate Report" dropdown — anchored to its button, opens
  * downward toward the right edge so it doesn't get clipped by the topbar. */
 .dropdown-wrapper{position:relative;display:inline-block}
-.dropdown-menu{position:absolute;top:100%;right:0;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:50;min-width:200px;padding:4px;display:flex;flex-direction:column;gap:2px}
+.dropdown-menu{position:absolute;top:100%;right:0;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow-deep);z-index:50;min-width:200px;padding:4px;display:flex;flex-direction:column;gap:2px}
 .dropdown-menu button{padding:8px 12px;font-size:12px;font-weight:500;background:transparent;color:var(--text);border:none;border-radius:4px;cursor:pointer;text-align:left;font-family:inherit;outline:none}
 .dropdown-menu button:hover{background:var(--surface2);color:var(--accent)}
 
@@ -144,8 +236,9 @@ tr:hover{background:var(--surface2)}
 /* Empty state */
 .empty-state{padding:40px;text-align:center;color:var(--muted)}
 
-/* Inline edit button on table rows */
-.btn-icon{padding:2px 8px;font-size:14px;line-height:1.2;min-width:0}
+/* Inline edit button on table rows — exempt from the .btn drop shadow: at
+   this size, inside dense clickable rows, it reads as smudge not depth. */
+.btn-icon{padding:2px 8px;font-size:14px;line-height:1.2;min-width:0;box-shadow:none}
 
 /* ── Log Conduct wizard: Status Personnel checklist ────────
    Each row is a <label> so the WHOLE row toggles its checkbox — the bare
@@ -232,6 +325,14 @@ tr:hover{background:var(--surface2)}
   .dash-sec-toggle{min-height:52px;padding:12px}
   .dash-sec-body{padding:0 10px 10px}
   .btn.dash-sec-action{font-size:12px;padding:10px 14px;min-height:44px}
+
+  /* Hero on a phone: smaller figure, taller bar (thumb target), substats
+     as a 2x2 grid. */
+  .dash-hero{padding:16px}
+  .dash-hero-num{font-size:58px}
+  .dash-hero-den{font-size:26px}
+  .dash-hero-bar{height:18px}
+  .dash-hero-substats{display:grid;grid-template-columns:1fr 1fr;gap:10px 8px}
 
   /* Tables: horizontal scroll already enabled; tighten cell padding */
   th,td{padding:6px 8px;font-size:11px}

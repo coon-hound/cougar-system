@@ -4113,7 +4113,7 @@ function renderLogConductWizard() {
         <button type="button" class="btn btn-icon btn-danger" onclick="wizRemoveRow('${key}', ${i})" title="Remove" style="padding:4px 8px">✕</button>
       </div>`;
     }).join("");
-    return `<div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
+    return `<div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:var(--radius-card)">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap">
         <div style="flex:1;min-width:0">
           <strong style="color:${color};font-size:13px">${label}</strong> <span style="color:var(--muted);font-size:11px" id="wiz-${key}-count">(${wizSectionD4s(key).length})</span>
@@ -4163,7 +4163,7 @@ function renderLogConductWizard() {
         </div>
       </div>
 
-      <div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
+      <div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:var(--radius-card)">
         <div style="margin-bottom:8px">
           <strong style="color:var(--accent);font-size:13px">⚕️ Status Personnel</strong> <span style="color:var(--muted);font-size:11px">(${w.status.length} on status today)</span>
           <div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.45">Tap a row to mark that person as not participating; tap again if they actually take part in this conduct despite the status.</div>
@@ -4177,7 +4177,7 @@ function renderLogConductWizard() {
 
       <div id="wiz-overlap-warning"></div>
 
-      <div class="card" style="padding:12px 14px;background:var(--surface2);border-radius:8px">
+      <div class="card" style="padding:12px 14px;background:var(--surface2);border-radius:var(--radius-card)">
         <div class="lc-wiz-stats-top" style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:end">
           <div class="form-group" style="grid-column:span 2;margin:0">
             <label style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Total Str</label>

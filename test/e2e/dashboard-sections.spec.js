@@ -9,13 +9,20 @@ const { test, expect } = require("@playwright/test");
 const { seedAndGoto } = require("./support");
 
 test.describe("dashboard sections", () => {
-  test("boots collapsed: hero tiles + one-line summaries, no bodies", async ({ page }) => {
+  test("boots collapsed: strength hero + one-line summaries, no bodies", async ({ page }) => {
     const errs = [];
     page.on("pageerror", (e) => errs.push(String(e)));
     await seedAndGoto(page);
 
-    // Hero: the 6 strength tiles.
-    await expect(page.locator(".stats-row .stat")).toHaveCount(6);
+    // Command-center hero: in-camp/total figure and the strength bar.
+    // (toContainText retries past the 700ms count-up.)
+    await expect(page.locator("#dash-hero-num")).toHaveText("7");
+    await expect(page.locator(".dash-hero-den")).toHaveText("/7");
+    // Fixture has nobody out → a single unbroken in-camp segment, and the
+    // legend's in-camp key (which always renders) shows the same 7.
+    await expect(page.locator(".dash-hero-seg")).toHaveCount(1);
+    await expect(page.locator(".dash-hero-key")).toHaveCount(1);
+    await expect(page.locator(".dash-hero-key b")).toHaveText("7");
 
     // Sections render collapsed. The fixture has no MSK rows, so that
     // section is hidden entirely (6 of the 7 sections).
@@ -68,12 +75,32 @@ test.describe("dashboard sections", () => {
     expect(errs, errs.join("\n")).toEqual([]);
   });
 
-  test("a stat tile is a shortcut that opens its section", async ({ page }) => {
+  test("hero bar, legend, and substats are shortcuts that open sections", async ({ page }) => {
     await seedAndGoto(page);
-    await page.click('.stat-link:has-text("Out of Camp")');
+    await page.click(".dash-hero-seg");
     await expect(page.locator("#dash-sec-outofcamp .dash-sec-body")).toBeVisible();
-    await page.click('.stat-link:has-text("Non-Active")');
+    await page.click('.dash-hero-sub:has-text("Non-Active")');
     await expect(page.locator("#dash-sec-medical .dash-sec-body")).toBeVisible();
+    await page.click(".dash-hero-key");
+    await expect(page.locator("#dash-sec-outofcamp .dash-sec-body")).toBeVisible();
+  });
+
+  test("hero motion is gated: no entrance under reduced motion, no replay on inline actions", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await seedAndGoto(page);
+    // Reduced motion: the entrance class is never emitted and the figure is
+    // final immediately (no count-up).
+    await expect(page.locator(".dash-hero")).not.toHaveClass(/dash-hero-enter/);
+    await expect(page.locator("#dash-hero-num")).toHaveText("7");
+
+    // An inline action re-renders in the same context — still no entrance
+    // class, and the figure updates to the new truth synchronously.
+    await page.evaluate(() => bookOutToggle(STATE.roster[0].id, true, "Errand"));
+    await expect(page.locator("#dash-hero-num")).toHaveText("6");
+    await expect(page.locator(".dash-hero")).not.toHaveClass(/dash-hero-enter/);
+    // The booked-out kind now shows in the bar and legend.
+    await expect(page.locator(".dash-hero-seg")).toHaveCount(2);
+    await expect(page.locator('.dash-hero-key:has-text("booked out") b')).toHaveText("1");
   });
 
   test("open state survives tab switches and reloads", async ({ page }) => {
@@ -160,5 +187,21 @@ test.describe("dashboard on a phone", () => {
 
     expect(errs, errs.join("\n")).toEqual([]);
     await page.screenshot({ path: "test-results/dashboard-mobile.png", fullPage: true });
+  });
+
+  test("strength-bar segment tap zone extends past the visible bar (::after not clipped)", async ({ page }) => {
+    await seedAndGoto(page);
+    // Two-segment bar so a segment sits mid-line (not spanning the whole width).
+    await page.evaluate(() => bookOutToggle(STATE.roster[0].id, true, "Errand"));
+    const box = await page.locator(".dash-hero-seg").first().boundingBox();
+
+    // The visible segment is ~18px tall, but its ::after extends the hit zone
+    // into the empty gaps above and below. Taps 12px above and 8px below the
+    // visible segment must both resolve to a segment button — the regression
+    // was an overflow:hidden bar clipping that ::after down to 18px.
+    const hitAt = (x, y) => page.evaluate(({ x, y }) =>
+      !!document.elementFromPoint(x, y)?.closest(".dash-hero-seg"), { x, y });
+    expect(await hitAt(box.x + box.width / 2, box.y - 12)).toBe(true);
+    expect(await hitAt(box.x + box.width / 2, box.y + box.height + 8)).toBe(true);
   });
 });
