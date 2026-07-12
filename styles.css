@@ -141,6 +141,42 @@ tr:hover{background:var(--surface2)}
 .lc-wiz-filter-chip:hover{filter:brightness(1.2)}
 .lc-wiz-filter-chip.active{background:#58A6FF22;border-color:var(--accent);color:var(--accent)}
 
+/* ── Compare Parade States ─────────────────────────────────
+   Deliberately single-column at every viewport: the diff is a reading flow
+   (summary → change cards → collapsibles), so the desktop layout IS the
+   mobile layout — no reflow, no horizontal scroll ever (raw diff wraps). */
+.cmp-paste{width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.45;resize:vertical;white-space:pre;margin-top:10px;box-sizing:border-box}
+.cmp-summary .cmp-strength{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cmp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.cmp-chip{font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 10px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);white-space:nowrap}
+.cmp-neg{color:var(--red)} .cmp-pos{color:var(--green)} .cmp-zero{color:var(--dim)}
+.cmp-meta{margin-top:8px;font-size:10px;color:var(--muted)}
+.cmp-warnings{margin-top:8px;font-size:10px;color:var(--orange);display:flex;flex-direction:column;gap:2px}
+.cmp-group{margin-top:14px}
+.cmp-group-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;margin-bottom:8px}
+.cmp-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.cmp-card-out{border-left:3px solid var(--red)}
+.cmp-card-ret{border-left:3px solid var(--green)}
+.cmp-card-chg{border-left:3px solid var(--yellow)}
+.cmp-card-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:24px}
+.cmp-4d{font-weight:700;color:var(--accent);font-size:12px}
+.cmp-name{font-size:13px;font-weight:600;min-width:0}
+.cmp-arrow{color:var(--muted)}
+.cmp-verb{font-size:10px;color:var(--muted)}
+.cmp-reason{font-size:12px;color:var(--muted);line-height:1.4}
+.cmp-dur{font-size:11px;color:var(--dim)}
+.cmp-note{color:var(--muted);font-size:11px}
+.cmp-diffline{font-size:12px;line-height:1.5}
+.cmp-diffline s{color:var(--red);opacity:.75}
+.cmp-details{border:1px solid var(--border);border-radius:8px;background:var(--surface);margin-top:10px}
+.cmp-details summary{padding:12px;min-height:44px;display:flex;align-items:center;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);user-select:none;-webkit-user-select:none;box-sizing:border-box}
+.cmp-details[open] summary{border-bottom:1px solid var(--border)}
+.cmp-rawdiff,.cmp-pre{padding:10px 12px;font-size:11px;line-height:1.5;overflow-x:hidden;margin:0;font-family:'JetBrains Mono',monospace}
+.cmp-pre{white-space:pre-wrap;word-break:break-word;color:var(--muted)}
+.cmp-line{white-space:pre-wrap;word-break:break-word;padding:1px 6px;border-radius:3px}
+.cmp-del{background:#F8514918;color:var(--red)}
+.cmp-add{background:#3FB95018;color:var(--green)}
+
 /* ── Mobile (≤768px) ───────────────────────────────────────
    Sidebar slides in from the left over the content, triggered by the
    hamburger. Backdrop catches taps outside the menu to close. Topbar
@@ -333,4 +369,12 @@ tr:hover{background:var(--surface2)}
      when needed (that's the one place where it's intentional). */
   #content,.card{overflow-x:hidden}
   .table-wrap{overflow-x:auto}  /* re-assert — explicit > inherited */
+
+  /* Compare Parade States: same stacked layout, just thumb-sized. */
+  .cmp-card{padding:12px;gap:6px}
+  .cmp-name{font-size:14px}
+  .cmp-reason,.cmp-diffline{font-size:13px}
+  .cmp-paste{font-size:12px;padding:12px}
+  .cmp-chip{font-size:11px;padding:6px 11px}
+  .cmp-details summary{min-height:48px;font-size:13px}
 }

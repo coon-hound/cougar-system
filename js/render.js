@@ -119,6 +119,7 @@ function renderDashboard(el) {
           <button type="button" onclick="openReportModal('MED'); closeReportMenu()">🏥 Medical Status List</button>
           <button type="button" onclick="openReportModal('MSK'); closeReportMenu()">🦵 MSK Report</button>
           <button type="button" onclick="openReportModal('CONDUCT'); closeReportMenu()">📊 Per-Conduct Chat Format</button>
+          <button type="button" onclick="openCompareModal(); closeReportMenu()">🔀 Compare Parade States</button>
         </div>
       </div>
     </div>

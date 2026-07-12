@@ -19,7 +19,10 @@ function loadParade(state) {
   vm.createContext(sandbox);
   const src = ["js/helpers.js", "js/forms.js"]
     .map(f => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n;\n")
-    + "\n;this.generateParadeStateText = generateParadeStateText;";
+    + "\n;this.generateParadeStateText = generateParadeStateText;"
+    // Expose the borderline-returnee override so tests can simulate the PDS
+    // ticking a recently-ended MC as still-out.
+    + "this.tickBorderline = d4 => { _paradeOverrides[d4] = true; };";
   vm.runInContext(src, sandbox, { filename: "parade-bundle.js" });
   return sandbox;
 }
@@ -72,5 +75,34 @@ module.exports = async function run() {
     ok(/C1405/.test(med) && /Status: 4D LD/.test(med), "LD also listed");
     ok(med.indexOf("C1303") < med.indexOf("C1405"), "MC (sev 100) sorts above LD (sev 80)");
     ok(/MEDICAL STATUS: 02/.test(med), "two entries in MEDICAL STATUS");
+  });
+
+  suite("parade: a person is never in both ATTC and OTHERS");
+
+  await test("active away MC + accidental book-out + leave → ATTC only", () => {
+    // 1201 is genuinely away on MC AND was accidentally booked out AND put on
+    // leave. outOfCampMap's medical precedence must keep them out of OTHERS.
+    const st = state();
+    const r = st.roster.find(x => x.id === "1201");
+    r.outOfCamp = true; r.outSince = DATE;
+    st.leave.push({ id: 1, d4: "1201", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "accidental" });
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/C1201/.test(section(out, "ATTC")), "on MC → ATTC");
+    ok(!/C1201/.test(section(out, "OTHERS")), "accidental book-out/leave suppressed from OTHERS");
+  });
+
+  await test("borderline returnee (MC ended yesterday, ticked) + leave → ATTC only", () => {
+    // 1201's MC ended the day before DATE, so it is INACTIVE — the PDS ticks
+    // them still-out (folded into ATTC). They also have leave today, which
+    // would otherwise leak them into OTHERS since medical precedence no longer
+    // applies to an inactive record.
+    const st = state();
+    st.medical.find(m => m.d4 === "1201").endDate = "28 Jun 2026"; // ended yesterday
+    st.leave.push({ id: 2, d4: "1201", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "x" });
+    const bundle = loadParade(st);
+    bundle.tickBorderline("1201");
+    const out = bundle.generateParadeStateText("FP", DATE, "0730");
+    ok(/C1201/.test(section(out, "ATTC")), "ticked borderline returnee is in ATTC");
+    ok(!/C1201/.test(section(out, "OTHERS")), "not double-listed in OTHERS");
   });
 };
