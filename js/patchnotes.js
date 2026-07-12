@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 126;
+const APP_VERSION = 127;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 127,
+    date: "12 Jul 2026",
+    title: "Faster saving + never lose a change",
+    intro: "Booking out a whole platoon or group used to save one person at a time and could take a minute. Now the whole group saves in one go, and if a save ever fails the app keeps trying on its own.",
+    items: [
+      { t: "⚡ Group actions save in one shot", d: "Book out / book in a platoon, program or group, or log group leave, and every person is sent together in a single save instead of one slow request each. A 40-person book-out that took ~a minute now finishes in seconds." },
+      { t: "🔁 Saves that retry themselves", d: "If a save fails (bad signal, server busy), the app now retries automatically in the background - the status pill shows a countdown - instead of just sitting on \"unsaved\" until you tap Retry." },
+      { t: "🔐 Clear \"Sign in again\" prompt", d: "If your access link has expired, the pill now says Sign in again and points you to the Sync tab, instead of looping on Retry forever. Your unsaved changes are kept and pushed once you sign back in." },
+      { t: "💾 Unsaved changes survive a refresh", d: "Close the tab or reload with changes still pending and they're remembered exactly, then pushed automatically - no more redoing a bulk edit." },
+    ],
+  },
   {
     v: 126,
     date: "11 Jul 2026",

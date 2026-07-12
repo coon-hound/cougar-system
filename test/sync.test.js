@@ -208,8 +208,10 @@ module.exports = async function run() {
 
   suite("sync: queue + launch");
 
-  // 8) Per-tab queue serializes rapid edits.
-  await test("two rapid upserts both land (queue serialization)", async () => {
+  // 8) Per-tab queue serializes rapid edits. Since applyOps batching, a
+  // synchronous burst coalesces into ONE request with ONE rev bump (the
+  // backend bumps once per batch) — same rows, fewer round trips.
+  await test("two rapid upserts both land (queue batches them)", async () => {
     const backend = loadBackend();
     backend.db.seed("Medical", MED_HEADERS, []);
     const A = makeClient(backend);
@@ -219,7 +221,7 @@ module.exports = async function run() {
     const p2 = A.sb.autoSync("Medical", { type: "upsert", row: med(2, "second") });
     await Promise.all([p1, p2]);
     eq(backend.db.rowsOf("Medical").length, 2, "both upserts landed");
-    eq(A.sb.STATE.rev.Medical, before + 2, "rev bumped twice, no lost op");
+    eq(A.sb.STATE.rev.Medical, before + 1, "one rev bump for the batched pair, no lost op");
   });
 
   // 9) Launch is incremental when a baseline exists; full pull when not.

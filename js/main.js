@@ -215,6 +215,8 @@ async function tryRedeemInviteFromURL() {
     const res = await API.redeemInvite(inviteToken);
     if (res && res.ok && res.authToken) {
       setAuthToken(res.authToken);
+      // Leaving the sign-in state: replay anything stashed while signed out.
+      if (typeof authRestored === "function") authRestored();
       return true;
     }
     alert("Invite link rejected: " + (res?.error || "unknown error") + "\n\nAsk your admin for a new link.");
@@ -251,7 +253,8 @@ async function tryRedeemInviteFromURL() {
       syncLog(`Auto-sync on launch: pulled from ${data.sheetName}`, "var(--green)");
     } catch (e) {
       if (e.name === "AuthError") {
-        setSyncIndicator("● Not authenticated", "var(--red)");
+        if (typeof noteAuthFailed === "function") noteAuthFailed();
+        else setSyncIndicator("● Not authenticated", "var(--red)");
       } else {
         setSyncIndicator("● Sync failed", "var(--red)");
         syncLog(`Auto-sync failed: ${e.message}`, "var(--red)");
@@ -285,20 +288,14 @@ async function tryRedeemInviteFromURL() {
 })();
 
 // On launch, if previous session(s) left dirty tabs (pushes failed offline
-// or the tab closed before a retry), offer to retry now. Runs after the
-// initial render so the user sees their data before being asked.
+// or the tab closed before a retry), schedule an automatic retry pass. No
+// prompt: the red topbar pill already shows the unsaved state and counts
+// down to the retry, and the stashed ops replay through the same OCC-guarded
+// paths as a manual retry.
 function maybeRestoreDirty() {
-  if (!STATE.dirty || STATE.dirty.size === 0 || !STATE.authToken) {
-    if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();
-    return;
+  if (STATE.dirty && STATE.dirty.size > 0 && STATE.authToken
+      && typeof scheduleAutoRetry === "function") {
+    scheduleAutoRetry(true);
   }
-  // Wait a moment so the modal stack from migration etc. has cleared.
-  setTimeout(() => {
-    const tabs = [...STATE.dirty];
-    const ok = confirm(
-      `${tabs.length} tab${tabs.length === 1 ? " has" : "s have"} unpushed changes from your last session:\n  • ${tabs.join("\n  • ")}\n\nPush now?`
-    );
-    if (ok && typeof retryAllDirty === "function") retryAllDirty();
-    else if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();
-  }, 600);
+  if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();
 }

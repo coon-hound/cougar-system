@@ -22,6 +22,9 @@
  *
  * SETUP (first deploy or after pulling these changes)
  * ───────────────────────────────────────────────────
+ * 0. Bump BACKEND_BUILD below (date + counter) so the live deployment is
+ *    identifiable: curl -sL "<exec-url>?action=ping" must echo the new value
+ *    after you deploy (if it doesn't, you saved but forgot the New version).
  * 1. Open your Google Sheet → Extensions → Apps Script.
  * 2. Delete any existing code, paste this entire file.
  * 3. Update FRONTEND_BASE_URL below to match where your frontend is hosted.
@@ -131,13 +134,22 @@
 
 var FRONTEND_BASE_URL = "https://coon-hound.github.io/cougar-system/";
 
+// Deploy stamp — BUMP THIS ON EVERY PASTE (date + counter). jsonResponse
+// attaches it to every response, so `curl -sL "<exec-url>?action=ping"` always
+// tells you which paste the live web app is actually serving. This exists
+// because deployment "Version N" numbers live only in the Apps Script console
+// and can silently lag the repo (the Jun 25 lock fix shipped in git but the
+// live version couldn't be dated — never again).
+var BACKEND_BUILD = "2026-07-11-1";
+
 // ─── ROUTING ───────────────────────────────────────────
 
 function doGet(e) {
   var output;
+  var action = "", tab = "";
   try {
-    var action = e.parameter.action || "readAll";
-    var tab = e.parameter.tab || "";
+    action = e.parameter.action || "readAll";
+    tab = e.parameter.tab || "";
     var auth = e.parameter.auth || "";
 
     // Public action: ping (used by the frontend to verify the URL is reachable).
@@ -160,6 +172,7 @@ function doGet(e) {
     output = { error: err.message };
   }
 
+  logNonOk("GET", action, tab, output);
   return jsonResponse(output);
 }
 
@@ -174,10 +187,11 @@ function doPost(e) {
   }
 
   var output;
+  var action = "", tab = "";
   try {
     var body = JSON.parse(e.postData.contents);
-    var action = body.action || "write";
-    var tab = body.tab || "";
+    action = body.action || "write";
+    tab = body.tab || "";
     var auth = body.auth || "";
 
     // Public action: redeem a single-use invite token in exchange for an auth token.
@@ -201,6 +215,13 @@ function doPost(e) {
       // revision (that caused false conflicts + a retry storm) — just apply and
       // bump. Same-row simultaneous edits remain last-write-wins (acceptable).
       output = withRevLock(tab, body.baseRev, false, function () { return upsertRow(tab, body.row); });
+    } else if (action === "applyOps" && tab && Array.isArray(body.ops)) {
+      // Batched granular mutations — one request applies a whole queue of
+      // row-scoped ops (upsert/delete/append) in order. Same no-enforce
+      // reasoning as upsertRow: every op is row-scoped, so tab-level rev
+      // conflicts don't apply. ONE rev bump covers the whole batch (clients'
+      // revCheck sees a single delta and pulls once).
+      output = withRevLock(tab, body.baseRev, false, function () { return applyOps(tab, body.ops); });
     } else if (action === "deleteRowById" && tab && body.id !== undefined) {
       // ID-based delete — also row-scoped; no enforce (can't clobber other rows).
       output = withRevLock(tab, body.baseRev, false, function () { return deleteRowById(tab, body.id); });
@@ -244,13 +265,31 @@ function doPost(e) {
     output = { error: err.message };
   }
 
+  logNonOk("POST", action, tab, output);
   return jsonResponse(output);
 }
 
 function jsonResponse(obj) {
+  // Stamp every response with the paste build so any client / curl / log line
+  // can tell which code the live deployment is running.
+  if (obj && typeof obj === "object" && obj.build === undefined) obj.build = BACKEND_BUILD;
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Executions all show "Completed" even when the body carries {error}/{conflict},
+// which made production sync failures invisible. Log a WARN line for every
+// non-ok response so bursts of 401/503/conflict are findable in the execution
+// log / Cloud Logging. Metadata only — never row payloads (PII) or tokens.
+function logNonOk(method, action, tab, output) {
+  try {
+    if (!output || (!output.error && !output.conflict)) return;
+    console.warn("[cougar-nonok] " + BACKEND_BUILD + " " + method + " action=" + action +
+      (tab ? " tab=" + tab : "") +
+      (output.code ? " code=" + output.code : "") +
+      (output.conflict ? " conflict serverRev=" + output.serverRev : " err=" + output.error));
+  } catch (e) { /* logging must never break a response */ }
 }
 
 // ─── AUTH / INVITE FLOW ────────────────────────────────
@@ -304,10 +343,14 @@ function initAllRevs() {
 // lock — the Telegram poller (tgPoll) holds the *script* lock for up to 5
 // minutes while long-polling, which would otherwise block every web-app write
 // until its waitLock timeout. The document lock scopes contention to actual
-// sheet writers. Falls back to the script lock for a standalone (unbound) script.
+// sheet writers. NO script-lock fallback: the old fallback silently
+// reintroduced exactly that contention whenever the doc lock was unavailable,
+// so an unbound deployment now fails LOUD instead of failing slow. This script
+// must stay container-bound to the Sheet (Extensions → Apps Script).
 function getDataLock() {
-  try { var l = LockService.getDocumentLock(); if (l) return l; } catch (e) {}
-  return LockService.getScriptLock();
+  var l = LockService.getDocumentLock();
+  if (!l) throw new Error("No document lock — this script must stay container-bound to the Sheet");
+  return l;
 }
 
 // Atomic write wrapper. `enforce` true → reject when the client's `baseRev` no
@@ -931,12 +974,39 @@ function seedRosterPrograms() {
   return { ok: true, bmt: counts.BMT, ptp: counts.PTP, blank: counts.blank };
 }
 
+// Returns the existing 1-based sheet row index whose `id` column matches
+// rowData.id, or 0 if none (or the tab has no id column / the row has no id).
+// Used to make appends idempotent: a retried/duplicated append (e.g. after a
+// lost response or a client auto-retry) must not create a second copy, since
+// duplicate ids are data corruption.
+function findRowByIdIndex_(sheet, trimmed, id) {
+  if (id === undefined || id === null || id === "") return 0;
+  var idCol = trimmed.indexOf("id");
+  if (idCol === -1) return 0;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  var idCells = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
+  var target = String(id);
+  for (var i = 0; i < idCells.length; i++) {
+    if (String(idCells[i][0]) === target) return i + 2;
+  }
+  return 0;
+}
+
 function appendRow(tabName, rowData) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(tabName);
   if (!sheet) return { error: "Tab '" + tabName + "' not found" };
 
   var trimmed = ensureColumnsForKeys(sheet, Object.keys(rowData));
+
+  // Idempotent: if this id is already present, no-op success (a retried append
+  // must not duplicate the row).
+  var existingRow = findRowByIdIndex_(sheet, trimmed, rowData.id);
+  if (existingRow) {
+    return { ok: true, tab: tabName, action: "noop", note: "id already present", newRowIndex: existingRow - 1 };
+  }
+
   var newRow = trimmed.map(function (h) {
     var val = rowData[h];
     return val !== undefined && val !== null ? val : "";
@@ -966,7 +1036,28 @@ function appendMany(tabName, rows) {
   var keySet = {};
   rows.forEach(function (r) { Object.keys(r).forEach(function (k) { keySet[k] = true; }); });
   var trimmed = ensureColumnsForKeys(sheet, Object.keys(keySet));
-  var newRows = rows.map(function (rowData) {
+
+  // Idempotent: skip rows whose id already exists so a retried/duplicated
+  // appendMany can't create second copies (duplicate ids = corruption). Read
+  // the id column ONCE for the whole batch.
+  var idCol = trimmed.indexOf("id");
+  var toAdd = rows;
+  if (idCol !== -1) {
+    var existing = {};
+    var lastRow0 = sheet.getLastRow();
+    if (lastRow0 >= 2) {
+      var idVals = sheet.getRange(2, idCol + 1, lastRow0 - 1, 1).getValues();
+      for (var e = 0; e < idVals.length; e++) existing[String(idVals[e][0])] = true;
+    }
+    toAdd = rows.filter(function (r) {
+      return !(r.id !== undefined && r.id !== null && r.id !== "" && existing[String(r.id)]);
+    });
+  }
+  if (!toAdd.length) {
+    return { ok: true, tab: tabName, rowsAppended: 0, action: "noop", note: "all ids already present" };
+  }
+
+  var newRows = toAdd.map(function (rowData) {
     return trimmed.map(function (h) {
       var val = rowData[h];
       return val !== undefined && val !== null ? val : "";
@@ -1042,6 +1133,47 @@ function upsertRow(tabName, rowData) {
     rowIndex: sheet.getLastRow(),
     timestamp: new Date().toISOString()
   };
+}
+
+// Batched granular mutations — the client's write queue in one request.
+// ops: [{op:"upsert", row}, {op:"delete", id}, {op:"append", row}, ...]
+// Applied strictly IN ORDER (a delete-then-append of the same id must not be
+// reordered) by dispatching to the row-scoped primitives above. One bad op
+// does NOT abort the rest — a commander's 30-row book-out must not lose 29
+// rows to one malformed one. results[i] aligns with ops[i] and carries the
+// primitive's own return shape ({ok, action, ...} or {error}).
+// Caller (doPost) wraps this in withRevLock, whose "don't bump on error" rule
+// gives the batch its rev semantics: >=1 op applied → {ok, ...} → ONE bump;
+// nothing applied → {error} → no bump (nothing changed).
+var MAX_BATCH_OPS = 200;
+
+function applyOps(tabName, ops) {
+  if (!Array.isArray(ops) || ops.length === 0) {
+    return { error: "ops must be a non-empty array" };
+  }
+  if (ops.length > MAX_BATCH_OPS) {
+    return { error: "Too many ops (max " + MAX_BATCH_OPS + ")" };
+  }
+  var results = [];
+  var applied = 0, failed = 0;
+  for (var i = 0; i < ops.length; i++) {
+    var op = ops[i] || {};
+    var res;
+    try {
+      if (op.op === "upsert" && op.row) res = upsertRow(tabName, op.row);
+      else if (op.op === "delete" && op.id !== undefined) res = deleteRowById(tabName, op.id);
+      else if (op.op === "append" && op.row) res = appendRow(tabName, op.row);
+      else res = { error: "Unknown op: " + String(op.op) };
+    } catch (e) {
+      res = { error: e.message };
+    }
+    results.push(res);
+    if (res && res.error) failed++; else applied++;
+  }
+  if (applied === 0) {
+    return { error: "All " + failed + " ops failed", results: results };
+  }
+  return { ok: true, tab: tabName, applied: applied, failed: failed, results: results };
 }
 
 // ID-based row delete. Finds the row whose `id` column matches and removes
@@ -1335,6 +1467,13 @@ function tgPollingStatus() {
   return n > 0;
 }
 
+// How long one tgPoll invocation keeps long-polling (stays under the 6-min
+// execution cap). A top-level var so tests can zero it out to exercise lock
+// acquisition without entering the loop. The SCRIPT lock below is deliberate
+// and Telegram-only: data writes use the DOCUMENT lock (getDataLock), so a
+// 5-minute poll can never block a commander's save.
+var TG_POLL_BUDGET_MS = 5 * 60 * 1000;
+
 function tgPoll() {
   var token = tgProp("TG_BOT_TOKEN");
   if (!token) return;
@@ -1342,7 +1481,7 @@ function tgPoll() {
   if (!lock.tryLock(500)) return;   // another poller is already running
   try {
     var start = Date.now();
-    while (Date.now() - start < 5 * 60 * 1000) {     // stay under the 6-min cap
+    while (Date.now() - start < TG_POLL_BUDGET_MS) {
       var offset = Number(PropertiesService.getScriptProperties().getProperty("TG_OFFSET") || 0);
       var url = "https://api.telegram.org/bot" + token + "/getUpdates?timeout=50" +
         "&allowed_updates=" + encodeURIComponent('["message","callback_query"]') +
@@ -1970,6 +2109,7 @@ function tgCompleteMC(chatId, state, url, fileId) {
     return;
   }
   var today = tgDisplayDate(new Date());
+  var medOk = false;   // did the Medical dashboard row actually get written?
 
   try {
     if (state.rsId) {
@@ -1986,29 +2126,51 @@ function tgCompleteMC(chatId, state, url, fileId) {
     // captured in the rs_clinic step (out-of-camp only) so report-sick-outside
     // cases show the location in the parade state. Falls back to the ReportSick
     // row's clinic in case the conversation state was trimmed.
-    appendRow("Medical", {
+    // Server-side bot write — go through withRevLock like every other data
+    // write so the append + rev bump are atomic under the DOCUMENT lock. The
+    // old manual bumpRev here was a non-atomic read-modify-write done while
+    // holding only the SCRIPT lock, so it could race a concurrent web-app
+    // write's bump and collapse two revisions into one — a client that had
+    // just written would then see the rev as current and silently miss the
+    // bot's Medical row. Lock ordering stays one-way (script → document), so
+    // this cannot deadlock with tgPoll.
+    // Stable id across attempts so a retry can't create a duplicate Medical row
+    // (appendRow is id-idempotent). Retry a couple of times because withRevLock
+    // returns {code:503} on a lock timeout WITHOUT writing - we must not treat
+    // that as success and then tell the recruit their MC was logged when it
+    // wasn't (a silently-dropped report-sick record).
+    var medRow = {
       id: Date.now(), d4: user.d4, date: today,
       reason: state.reason || "Reported sick",
       location: state.clinic || (rs && rs.clinic) || "",
       status: "", startDate: "", endDate: ""
-    });
-    // This write bypasses doPost/withRevLock (it's a server-side bot action), so
-    // bump the Medical revision manually — otherwise dashboards' revCheck poll
-    // would never see the change and would silently miss the bot-reported sick
-    // record until a manual full pull.
-    bumpRev("Medical");
+    };
+    for (var medTry = 0; medTry < 3 && !medOk; medTry++) {
+      var medResult = withRevLock("Medical", null, false, function () { return appendRow("Medical", medRow); });
+      medOk = !(medResult && (medResult.error || medResult.conflict));
+    }
+    if (!medOk) Logger.log("tgCompleteMC: Medical write failed after retries for d4=" + user.d4);
   } catch (e) {
     Logger.log("tgCompleteMC sheet error: " + e);
   }
 
   var sc = tgFindSectionCmds(user.plt, user.sect);
+  // Always send the MC image to commanders — the human path must not depend on
+  // the Medical row landing (the image is what they act on).
   // Caption (no Drive link — the photo itself is shown in the group). The
   // Drive copy is still kept in ReportSick.mcUrl for the records/dashboard.
   tgGroupNotify(
     "📄 MC SUBMITTED — " + tgRN(user) + " · P" + user.plt + " S" + user.sect + "\n" +
     "Status + duration: read from the MC image below — please record it in the system.", sc, fileId);
 
-  tgSend(chatId, "✅ Received — your MC has been sent to your commanders.\n Get the book in timing from your Commaders, and remember to book in on time once your status ends.");
+  if (medOk) {
+    tgSend(chatId, "✅ Received — your MC has been sent to your commanders.\n Get the book in timing from your Commaders, and remember to book in on time once your status ends.");
+  } else {
+    // The Medical dashboard row didn't save (sustained contention). Commanders
+    // still got the image above, but don't claim it was fully logged - tell the
+    // recruit to inform their SC directly so nothing falls through the cracks.
+    tgSend(chatId, "⚠️ Your MC image was sent to your commanders, but the system was busy and may not have logged it fully. Please also tell your SC directly, and book in on time once your status ends.");
+  }
   tgClearState(chatId);
   tgSendMenu(chatId, "What would you like to do?");
 }

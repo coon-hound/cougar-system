@@ -46,22 +46,40 @@ function parseQuery(url) {
 
 function makeClient(backend, opts) {
   opts = opts || {};
-  const browser = makeBrowser();
-  const fetchSpy = [];   // [{ method, action, tab }]
+  // opts.store: share one localStorage map between clients — building a second
+  // client over the first one's store simulates a reload on the same device.
+  const browser = makeBrowser({ store: opts.store });
+  const fetchSpy = [];   // [{ method, action, tab, body?, intercepted? }]
 
   async function fetchImpl(url, init) {
     const method = (init && init.method ? init.method : "GET").toUpperCase();
-    let out, rec;
+    let rec, body = null;
     if (method === "GET") {
       const q = parseQuery(url);
       rec = { method: "GET", action: q.action, tab: q.tab };
-      out = backend.doGet({ parameter: { action: q.action, tab: q.tab, auth: q.auth } });
     } else {
-      const body = JSON.parse(init.body);
-      rec = { method: "POST", action: body.action, tab: body.tab };
-      out = backend.doPost({ parameter: {}, postData: { contents: init.body } });
+      body = JSON.parse(init.body);
+      rec = { method: "POST", action: body.action, tab: body.tab, body };
     }
+    // Every attempt is recorded, including ones the intercept fails - tests
+    // count transport-failure dispatches too.
     fetchSpy.push(rec);
+    // Per-client fault injection: client.intercept(rec, body) runs BEFORE the
+    // backend. Return a response body to fake that response, return null/
+    // undefined to pass through, or throw to simulate a transport failure
+    // (which _fetchJson maps to NetError).
+    if (client.intercept) {
+      let fake;
+      try { fake = client.intercept(rec, body); }
+      catch (e) { rec.intercepted = true; throw e; }
+      if (fake) {
+        rec.intercepted = true;
+        return { ok: true, status: 200, json: async () => fake };
+      }
+    }
+    const out = method === "GET"
+      ? backend.doGet({ parameter: { action: rec.action, tab: rec.tab, auth: parseQuery(url).auth } })
+      : backend.doPost({ parameter: {}, postData: { contents: init.body } });
     const text = out.getContent();
     return { ok: true, status: 200, json: async () => JSON.parse(text) };
   }
@@ -78,15 +96,27 @@ function makeClient(backend, opts) {
   }, browser.globals);
   vm.createContext(sandbox);
 
-  // Concatenate the three frontend files + an epilogue exposing the consts.
+  // Concatenate the three frontend files + an epilogue exposing the consts and
+  // the module-local sync internals (let/const bindings aren't reachable from
+  // outside the bundle, so getters close over them here).
   const src = FRONTEND_FILES.map(f => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n;\n")
-    + "\n;this.STATE = STATE; this.API = API; this.TAB_TO_STATE = TAB_TO_STATE;\n";
+    + "\n;this.STATE = STATE; this.API = API; this.TAB_TO_STATE = TAB_TO_STATE;"
+    + "\nthis.__sync = {"
+    + "  get authFailed() { return _authFailed; },"
+    + "  get batchUnsupported() { return _batchUnsupported; },"
+    + "  get retryTimer() { return _retryTimer; },"
+    + "  get retryNextAt() { return _retryNextAt; },"
+    + "  get retryAttempt() { return _retryAttempt; },"
+    + "  get dirtyOps() { return _dirtyOps; },"
+    + "  get lastConflictedReplace() { return _lastConflictedReplace; }"
+    + "};\n";
   vm.runInContext(src, sandbox, { filename: "frontend-bundle.js" });
 
   sandbox.STATE.authToken = opts.authToken || VALID_TOKEN;
   sandbox.STATE.apiUrl = "https://mock.local/exec";
 
-  return { sb: sandbox, fetchSpy, ctl: browser.ctl, db: backend.db };
+  const client = { sb: sandbox, fetchSpy, ctl: browser.ctl, db: backend.db, store: browser.store, intercept: null };
+  return client;
 }
 
 // Convenience: pull a client to a clean baseline (full readAll → STATE.rev set).

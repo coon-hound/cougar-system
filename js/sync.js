@@ -3,7 +3,15 @@
 
 function renderSync(el) {
   const authed = !!STATE.authToken;
-  const authStatusHtml = authed
+  // Three access states: revoked (server rejected our token - loudest),
+  // authenticated, never authenticated.
+  const authStatusHtml = (_authFailed && authed)
+    ? `<div style="background:#F8514922;border:1px solid #F8514944;border-radius:6px;padding:10px;margin-bottom:12px;color:var(--red);font-size:12px;line-height:1.55">
+         <strong>Access revoked or expired.</strong> The sheet rejected this device's sign-in.
+         Ask your admin for a <strong>NEW invite link</strong> and open it on this phone.
+         Your unsaved changes are kept on this device and will push automatically after you sign in again.
+       </div>`
+    : authed
     ? `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
          <span style="color:var(--green);font-weight:600">✓ Authenticated</span>
          <span class="mono" style="font-size:10px;color:var(--dim)">${STATE.authToken.slice(0, 8)}…</span>
@@ -139,8 +147,16 @@ let _lastSyncError = null;   // last write failure message (for the pill/banner)
 function refreshSyncIndicator() {
   const el = document.getElementById("sync-indicator");
   if (!el) return;
-  if (!STATE.authToken) {
-    setSyncIndicator("● Not authenticated", "var(--red)");
+  if (_authFailed || !STATE.authToken) {
+    // Sign-in state: the token was revoked/expired (or never issued). The pill
+    // navigates to the Sync tab, whose red card explains how to recover.
+    updateSyncPill("error", "⚠ Sign in again", goToSyncTab);
+    el.textContent = "⚠ Sign in again - access revoked. Unsaved changes are kept.";
+    el.style.color = "var(--red)";
+    el.style.cursor = "pointer";
+    el.style.textDecoration = "underline";
+    el.title = "Access was revoked or expired. Ask your admin for a NEW invite link and open it on this phone. Unsaved changes stay on this device and push after you sign in.";
+    el.onclick = goToSyncTab;
     return;
   }
   if (_pullInFlight || _activePushCount > 0) {
@@ -150,13 +166,21 @@ function refreshSyncIndicator() {
   const dirtyCount = (STATE.dirty && STATE.dirty.size) || 0;
   if (dirtyCount > 0) {
     // Loud, tappable "not saved" state — both in the sidebar and the topbar pill.
-    updateSyncPill("error", `⚠ ${dirtyCount} unsaved · Retry`, retryAllDirty);
-    el.textContent = `⚠ ${dirtyCount} tab${dirtyCount === 1 ? "" : "s"} need retry · Retry now`;
+    // With an auto-retry armed, show the countdown; tapping retries right now.
+    if (_retryNextAt !== null) {
+      const secs = Math.max(1, Math.ceil((_retryNextAt - Date.now()) / 1000));
+      updateSyncPill("error", `⚠ ${dirtyCount} unsaved · retry in ${secs}s`, retryNow);
+      el.textContent = `⚠ ${dirtyCount} tab${dirtyCount === 1 ? "" : "s"} unsaved · auto-retry in ${secs}s · Retry now`;
+      el.onclick = retryNow;
+    } else {
+      updateSyncPill("error", `⚠ ${dirtyCount} unsaved · Retry`, retryAllDirty);
+      el.textContent = `⚠ ${dirtyCount} tab${dirtyCount === 1 ? "" : "s"} need retry · Retry now`;
+      el.onclick = retryAllDirty;
+    }
     el.style.color = "var(--red)";
     el.style.cursor = "pointer";
     el.style.textDecoration = "underline";
     el.title = `Unsynced changes in: ${[...STATE.dirty].join(", ")}. Click to retry all.`;
-    el.onclick = retryAllDirty;
     return;
   }
   const stamp = _lastSyncedAt ? new Date(_lastSyncedAt).toLocaleTimeString() : new Date().toLocaleTimeString();
@@ -164,22 +188,171 @@ function refreshSyncIndicator() {
   setSyncIndicator(`● Synced ${stamp}${checked}`, "var(--green)");
 }
 
+// ── Sign-in state (auth token rejected server-side) ──────
+// While set, nothing is dispatched or auto-retried: recovery is redeeming a
+// NEW invite link (main.js calls authRestored() after a successful redeem).
+let _authFailed = false;
+
+function goToSyncTab() {
+  STATE.nav = "sync";
+  if (typeof render === "function") render();
+}
+
+// Flip into the sign-in state. Cancels the auto-retry (a retry can't outrun a
+// revoked token) and repaints the pill as "Sign in again".
+function noteAuthFailed() {
+  _authFailed = true;
+  cancelAutoRetry();
+  refreshSyncIndicator();
+}
+
+// Called by main.js after a successful invite redemption: leave the sign-in
+// state and immediately replay everything stashed while signed out.
+function authRestored() {
+  _authFailed = false;
+  _lastSyncError = null;
+  refreshSyncIndicator();
+  if (STATE.dirty && STATE.dirty.size > 0) scheduleAutoRetry(true);
+}
+
 // ── Dirty-tab tracking ────────────────────────────────────
 // _dirtyOps stashes the exact granular ops that FAILED to push, so a later
 // retry can replay them (each OCC-merges via resolveConflict) instead of a
 // stale full-tab replace that would force the user to redo their edit.
-const _dirtyOps = new Map();   // tabName → array of failed granular modes
+// Persisted to localStorage (DIRTY_OPS_KEY) so a reload keeps the granular
+// replay instead of degrading to the replace fallback.
+const _dirtyOps = loadDirtyOps();   // tabName → array of failed granular modes
+
+function loadDirtyOps() {
+  const map = new Map();
+  try {
+    const raw = localStorage.getItem(DIRTY_OPS_KEY);
+    if (!raw) return map;
+    const d = JSON.parse(raw);
+    if (!d || d.v !== 1 || !d.tabs || typeof d.tabs !== "object") return map;  // unknown version - discard
+    for (const tab in d.tabs) {
+      // Only restore stashes for tabs still marked dirty - a stale stash for a
+      // clean tab would replay edits the server already accepted.
+      if (!STATE.dirty || !STATE.dirty.has(tab)) continue;
+      const modes = d.tabs[tab];
+      if (Array.isArray(modes)) {
+        const valid = modes.filter(m => m && typeof m.type === "string");
+        if (valid.length) map.set(tab, valid);
+      }
+    }
+  } catch { /* corrupt payload → start empty; dirty markers still drive the replace fallback */ }
+  return map;
+}
+
+// Order-preserving coalesce of granular modes: a later upsert of a row id
+// supersedes an earlier upsert of it, and a later delete of an id drops any
+// earlier upsert of it. The net server effect is identical - the list is just
+// shorter. Shared by the batch builder and the dirty-ops persistence.
+function coalesceModes(modes) {
+  const out = [];
+  for (const m of modes) {
+    if (m.type === "upsert" && m.row && m.row.id != null) {
+      const i = out.findIndex(o => o.type === "upsert" && o.row && String(o.row.id) === String(m.row.id));
+      if (i >= 0) out.splice(i, 1);
+    } else if (m.type === "delete" && m.id != null) {
+      const i = out.findIndex(o => o.type === "upsert" && o.row && String(o.row.id) === String(m.id));
+      if (i >= 0) out.splice(i, 1);
+    }
+    out.push(m);
+  }
+  return out;
+}
+
+// Serialize the stash to localStorage. Degrades instead of failing: if the
+// payload is huge (localStorage is ~5MB shared with the data cache) or setItem
+// hits the quota, drop the largest tab's ops from the PERSISTED copy only -
+// its dirty marker survives, so after a reload that tab still recovers via the
+// OCC-guarded replace fallback in retryAllDirty.
+const DIRTY_OPS_MAX_BYTES = 900 * 1024;
+function persistDirtyOps() {
+  const tabs = {};
+  for (const [tab, modes] of _dirtyOps) {
+    const c = coalesceModes(modes);
+    _dirtyOps.set(tab, c);
+    if (c.length) tabs[tab] = c;
+  }
+  const dropLargest = () => {
+    const names = Object.keys(tabs);
+    if (!names.length) return false;
+    const biggest = names.sort((a, b) => JSON.stringify(tabs[b]).length - JSON.stringify(tabs[a]).length)[0];
+    delete tabs[biggest];
+    syncLog(`Unsaved edits to "${biggest}" are too large to keep across a reload - after one they retry as a full re-push instead.`, "var(--orange)");
+    return true;
+  };
+  let json = JSON.stringify({ v: 1, tabs });
+  while (json.length > DIRTY_OPS_MAX_BYTES && dropLargest()) json = JSON.stringify({ v: 1, tabs });
+  for (;;) {
+    try { localStorage.setItem(DIRTY_OPS_KEY, json); return; }
+    catch (e) { if (!dropLargest()) return; json = JSON.stringify({ v: 1, tabs }); }
+  }
+}
+
+// Stash a failed mode for later replay. applyOps batches split back into their
+// original granular modes - the batch wrapper is a transport optimization, not
+// state. "replace" modes are never stashed: they re-derive from STATE on retry.
+function stashDirtyOps(tabName, mode) {
+  if (!mode || mode.type === "replace") return;
+  const modes = mode.type === "applyOps" ? (mode.modes || []) : [mode];
+  if (!modes.length) return;
+  if (!_dirtyOps.has(tabName)) _dirtyOps.set(tabName, []);
+  _dirtyOps.get(tabName).push(...modes);
+  persistDirtyOps();
+}
+
 function markDirty(tabName) {
   if (!tabName) return;
   STATE.dirty = STATE.dirty || new Set();
   STATE.dirty.add(tabName);
   saveDirty();
 }
-function clearDirty(tabName) {
-  if (!STATE.dirty) return;
-  STATE.dirty.delete(tabName);
-  _dirtyOps.delete(tabName);
-  saveDirty();
+// The row id a granular mode targets (upsert/append row.id, delete id).
+function modeRowId(m) {
+  if (!m) return undefined;
+  if ((m.type === "upsert" || m.type === "append") && m.row) return m.row.id;
+  if (m.type === "delete") return m.id;
+  return undefined;
+}
+
+// Clear the dirty state for the ops that JUST landed on the server, without
+// touching ops still stashed or queued for the same tab. A success on one op
+// must never erase a DIFFERENT op that is still waiting to retry — that would
+// silently drop the user's edit (e.g. book out A fails + is stashed, then book
+// out B succeeds; B's success must not wipe A). The tab only goes clean when it
+// has nothing stashed AND nothing queued.
+function clearSyncedOps(tabName, syncedModes) {
+  const stash = _dirtyOps.get(tabName);
+  if (stash && stash.length && syncedModes && syncedModes.length) {
+    // Evict stashed ops that this dispatch supersedes: by object identity, AND
+    // by row id — a landed write to row R makes a still-stashed (older, failed)
+    // write to the SAME row R stale; replaying it would clobber the newer value
+    // that just landed. Ops are serialized per tab (FIFO), so a stashed op for a
+    // row is always older than a landing op for that same row.
+    const syncedIds = new Set();
+    syncedModes.forEach(m => { const id = modeRowId(m); if (id != null) syncedIds.add(String(id)); });
+    const remaining = stash.filter(m => {
+      if (syncedModes.includes(m)) return false;
+      const id = modeRowId(m);
+      return !(id != null && syncedIds.has(String(id)));
+    });
+    if (remaining.length !== stash.length) {
+      if (remaining.length) _dirtyOps.set(tabName, remaining);
+      else _dirtyOps.delete(tabName);
+      persistDirtyOps();
+    }
+  }
+  const stillStashed = (_dirtyOps.get(tabName) || []).length > 0;
+  const q = _writeQueue.get(tabName);
+  const stillQueued = !!(q && q.length);
+  if (!stillStashed && !stillQueued && STATE.dirty && STATE.dirty.has(tabName)) {
+    STATE.dirty.delete(tabName);
+    saveDirty();
+    if (STATE.dirty.size === 0) { _retryAttempt = 0; cancelAutoRetry(); }
+  }
 }
 
 // ── Pull/push mutex + per-tab write queue ────────────────
@@ -195,7 +368,10 @@ let _activePushCount = 0;
 let _pullPromise = Promise.resolve();
 function setPullInFlight(promise) {
   _pullInFlight = true;
-  _pullPromise = Promise.resolve(promise).finally(() => { _pullInFlight = false; refreshSyncIndicator(); });
+  // .catch: _pullPromise is only a gate. Callers handle their own await of the
+  // original promise; a failed pull must not also surface as an unhandled
+  // rejection through this gate copy.
+  _pullPromise = Promise.resolve(promise).catch(() => {}).finally(() => { _pullInFlight = false; refreshSyncIndicator(); });
 }
 
 const _writeQueue = new Map();    // tabName → array of pending modes
@@ -216,26 +392,62 @@ function autoSync(tabName, mode) {
 async function drainTab(tabName) {
   _activePushCount++;
   refreshSyncIndicator();
+  // Yield one microtask so a synchronous fan-out (a forEach over 30 recruits
+  // each calling autoSync) finishes enqueueing before the first dispatch -
+  // the whole burst then leaves as ONE batched request instead of 30.
+  await Promise.resolve();
   try {
     // Never push against STATE that an in-flight pull is about to replace.
     if (_pullInFlight) { try { await _pullPromise; } catch (e) { /* handled elsewhere */ } }
     const q = _writeQueue.get(tabName);
     while (q && q.length) {
-      const mode = q.shift();
+      const mode = takeBatch(q);
       try {
-        await runWrite(tabName, mode);
-        clearDirty(tabName);
+        const res = await runWrite(tabName, mode);
+        // Partial batch success: some ops in the batch failed server-side. Mark
+        // dirty + stash exactly those (so a reload can't lose them and the clear
+        // below won't wipe them); the background scheduler replays them. Only the
+        // ops that DID land are cleared from the dirty state.
+        if (mode.type === "applyOps" && res && res.ok && res.failed > 0 && Array.isArray(res.results)) {
+          const failed = [], landed = [];
+          mode.modes.forEach((m, i) => ((res.results[i] && res.results[i].error) ? failed : landed).push(m));
+          if (failed.length) {
+            markDirty(tabName);
+            failed.forEach(m => stashDirtyOps(tabName, m));
+            scheduleAutoRetry();
+            syncLog(`${tabName}: ${failed.length} of ${mode.ops.length} batched change${failed.length === 1 ? "" : "s"} failed - will retry.`, "var(--orange)");
+          }
+          clearSyncedOps(tabName, landed);
+        } else {
+          clearSyncedOps(tabName, mode.type === "applyOps" ? (mode.modes || []) : [mode]);
+        }
       } catch (e) {
+        if (e && e.batchUnsupported) {
+          // Deployed backend predates applyOps. Fall back to per-row dispatch
+          // for the rest of the session: put the original granular modes back
+          // at the queue front, in order, and re-loop.
+          _batchUnsupported = true;
+          q.unshift(...(mode.modes || []));
+          syncLog("Backend doesn't support batched writes yet - sending row by row.", "var(--orange)");
+          continue;
+        }
         markDirty(tabName);
         _lastSyncError = (e && e.message) || String(e);   // surfaced in the pill/banner
-        // Stash the failed granular op so retryAllDirty can replay it (and
+        // Stash the failed granular op(s) so retryAllDirty can replay them (and
         // OCC-merge) rather than a stale full replace. Replace failures aren't
         // stashed — they re-derive from STATE on retry.
-        if (mode.type !== "replace") {
-          if (!_dirtyOps.has(tabName)) _dirtyOps.set(tabName, []);
-          _dirtyOps.get(tabName).push(mode);
+        stashDirtyOps(tabName, mode);
+        if (e && e.name === "AuthError") {
+          // Access revoked server-side. Stop the world: stash everything still
+          // queued WITHOUT dispatching (one failed round trip total) and flip
+          // the sign-in state - auto-retry no-ops until authRestored().
+          while (q.length) stashDirtyOps(tabName, q.shift());
+          noteAuthFailed();
+          syncLog("Access revoked - sign in with a NEW invite link to resume syncing. Unsaved changes are kept on this device.", "var(--red)");
+        } else {
+          syncLog(`Auto-push ${tabName} failed: ${e.message || e}`, "var(--red)");
+          scheduleAutoRetry();
         }
-        syncLog(`Auto-push ${tabName} failed: ${e.message || e}`, "var(--red)");
       }
     }
   } finally {
@@ -246,12 +458,44 @@ async function drainTab(tabName) {
   }
 }
 
+// How many granular ops to pack into one applyOps request. The backend caps a
+// batch at 200; 50 keeps request bodies comfortably small on flaky mobile links.
+const BATCH_MAX = 50;
+// Set when the deployed backend answers an applyOps dispatch with its
+// "Invalid request" fallback (backend too old). Session-scoped on purpose:
+// a reload re-probes, so an upgraded backend is picked up automatically.
+let _batchUnsupported = false;
+
+// Pull the next dispatchable unit off the queue: either one mode verbatim
+// (zero behavior change for singles) or an applyOps batch wrapping the maximal
+// run of consecutive granular ops. "replace" and "appendMany" stop the run -
+// they keep their own dispatch semantics. A failed op inside a batch is stashed
+// and replayed by the background scheduler, so no per-op flag is needed here.
+function takeBatch(q) {
+  const granular = m => (m.type === "upsert" || m.type === "delete" || m.type === "append");
+  if (_batchUnsupported || !granular(q[0])) return q.shift();
+  const run = [];
+  while (q.length && granular(q[0]) && run.length < BATCH_MAX) run.push(q.shift());
+  if (run.length === 1) return run[0];
+  const modes = coalesceModes(run);
+  if (modes.length === 1) return modes[0];
+  return {
+    type: "applyOps",
+    modes,
+    ops: modes.map(m =>
+      m.type === "upsert" ? { op: "upsert", row: m.row } :
+      m.type === "delete" ? { op: "delete", id: m.id } :
+                            { op: "append", row: m.row })
+  };
+}
+
 // Dispatch one write to the backend. Each carries STATE.rev[tab] as baseRev
 // (added inside the API.* helpers; appendMany posts directly so it's added here).
 //   { type: "append",     row  } → API.appendRow
 //   { type: "appendMany", rows } → API.post appendMany
 //   { type: "upsert",     row  } → API.upsertRow (id-based, cross-device safe)
 //   { type: "delete",     id   } → API.deleteRowById
+//   { type: "applyOps",   ops  } → API.post applyOps (batched granular ops)
 //   { type: "replace",    data } → API.pushTab (full overwrite, bulk only)
 function dispatchWrite(tabName, mode) {
   if (!STATE.authToken) return Promise.reject(new Error("Not authenticated"));
@@ -259,50 +503,113 @@ function dispatchWrite(tabName, mode) {
   if (mode.type === "appendMany")  return API.post({ action: "appendMany", tab: tabName, rows: mode.rows, baseRev: STATE.rev[tabName] });
   if (mode.type === "upsert")      return API.upsertRow(tabName, mode.row);
   if (mode.type === "delete")      return API.deleteRowById(tabName, mode.id);
+  if (mode.type === "applyOps")    return API.post({ action: "applyOps", tab: tabName, ops: mode.ops, baseRev: STATE.rev[tabName] });
   if (mode.type === "replace")     return API.pushTab(tabName, mode.data);
   return Promise.reject(new Error(`Unknown autoSync mode: ${mode.type}`));
+}
+
+// ── Backoff / retry policy helpers ───────────────────────
+// Exponential backoff with +-25% jitter so a fleet of phones that all hit a
+// busy server don't retry in lockstep and re-collide.
+function backoffMs(attempt, base, cap) {
+  return Math.min(base * Math.pow(2, attempt - 1), cap) * (0.75 + Math.random() * 0.5);
+}
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// A 503 means the server couldn't take its write lock within 15s - the write
+// never happened, so retrying the SAME op in place is safe (no pull, no
+// reapply). Four retries spans ~1+2+4+8s, comfortably past a lock hiccup.
+const BUSY_MAX_INPLACE = 4;
+
+// One dispatch with class-aware transport handling:
+//   AuthError         → rethrow (the sign-in state owns recovery)
+//   NetError, offline → rethrow (the `online` event owns recovery)
+//   NetError, online  → ONE in-place retry (blip vs real outage), then rethrow
+async function dispatchWithNetRetry(tabName, mode) {
+  try {
+    return await timed("write", `write ${tabName} (${mode.type})`, () => dispatchWrite(tabName, mode));
+  } catch (e) {
+    if (!e || e.name !== "NetError") throw e;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) throw e;
+    await sleep(backoffMs(1, 2000, 8000));
+    return timed("write", `write ${tabName} (${mode.type}, net retry)`, () => dispatchWrite(tabName, mode));
+  }
 }
 
 // Runs one write, handling the server's optimistic-concurrency response.
 // The backend returns errors AND conflicts in the BODY (not as HTTP errors),
 // so we must inspect the response here:
+//   { code:503 }      → server lock busy; bounded in-place retry, then BusyError.
 //   { conflict:true } → our baseRev was stale (someone else wrote) → resolve.
 //   { error }         → real failure; throw so the tab is marked dirty.
 //   { rev }           → success; advance our baseline for this tab.
 async function runWrite(tabName, mode) {
-  let res = await timed("write", `write ${tabName} (${mode.type})`, () => dispatchWrite(tabName, mode));
-  // A stale write is rejected with { conflict }. Resolve by pulling fresh,
-  // re-applying this edit, and retrying. Bounded loop (not a single retry) so a
-  // BUSY tab whose revision keeps moving while we resolve still settles in-line
-  // instead of bouncing to the dirty "needs retry" list. replace returns a
-  // non-conflict result, so it never loops.
-  let attempts = 0;
-  while (res && res.conflict && attempts < 6) {
-    attempts++;
-    res = await resolveConflict(tabName, mode, res.serverRev);
+  let res = await dispatchWithNetRetry(tabName, mode);
+  let busyTries = 0;
+  // The conflict loop is bounded (not a single retry) so a BUSY tab whose
+  // revision keeps moving while we resolve still settles in-line instead of
+  // bouncing to the dirty "needs retry" list. replace returns a non-conflict
+  // result from resolveConflict, so it never loops.
+  let conflictTries = 0;
+  while (res) {
+    if (res.code === 503) {
+      if (busyTries >= BUSY_MAX_INPLACE) throw new BusyError(res.error);
+      busyTries++;
+      await sleep(backoffMs(busyTries, 1000, 8000));
+      res = await dispatchWithNetRetry(tabName, mode);
+    } else if (res.conflict) {
+      if (conflictTries >= 6) throw new Error("Still out of date after refresh — will retry");
+      conflictTries++;
+      res = await resolveConflict(tabName, mode, res.serverRev);
+    } else {
+      break;
+    }
   }
-  if (res && res.conflict) throw new Error("Still out of date after refresh — will retry");
+  // A deployed backend that predates applyOps answers it with its generic
+  // dispatch fallback. Signal the drain loop to unpack the batch - never
+  // retried as a batch.
+  if (mode.type === "applyOps" && res && res.error === "Invalid request") {
+    const e = new Error("Backend too old for batched writes");
+    e.batchUnsupported = true;
+    throw e;
+  }
   if (res && res.error) throw new Error(res.error);
   if (res && res.rev != null) { STATE.rev[tabName] = res.rev; saveLocal(); }
   return res;
 }
+
+// Last bulk replace that lost an OCC conflict: { tab, data, at }. Kept so the
+// conflict banner's "Push mine anyway" can re-push exactly what the user built.
+let _lastConflictedReplace = null;
 
 // Recover from a stale-write rejection WITHOUT clobbering newer data.
 //  • Granular (upsert/append/appendMany/delete): pull the tab fresh, re-apply
 //    this edit on top of the latest rows, retry the push once (baseRev now
 //    matches) → the user's change lands alongside everyone else's.
 //  • replace (full re-push): never auto-clobber. Pull fresh and surface a
-//    banner asking the user to redo their bulk change on the refreshed data.
+//    banner offering to push the held bulk change over the refreshed data.
 async function resolveConflict(tabName, mode, serverRev) {
   const arrKey = TAB_TO_STATE[tabName];
   if (mode.type === "replace") {
-    try { await API.pullTabs([tabName]); } catch (e) { /* keep going */ }
+    // Hold on to what the user tried to push - the banner below offers to
+    // re-push it over the refreshed server rows as an explicit choice.
+    _lastConflictedReplace = { tab: tabName, data: mode.data, at: Date.now() };
+    const pull = API.pullTabs([tabName]);
+    setPullInFlight(pull);   // the 20s poll and the write queue must see this pull
+    try { await pull; } catch (e) { /* keep going */ }
     if (serverRev != null) STATE.rev[tabName] = serverRev;
     if (typeof render === "function") render();
-    showSyncBanner(`"${tabName}" was changed on another device. Refreshed to the latest — please redo your bulk change, then Re-push.`);
+    const snap = _lastConflictedReplace;
+    showSyncBanner(
+      `"${tabName}" changed on another device - your bulk change was NOT saved. It is held on this device.`,
+      "Push mine anyway",
+      () => autoSync(snap.tab, { type: "replace", data: snap.data })
+    );
     return { ok: true, refreshed: true };   // tab now matches server; not dirty
   }
-  try { await API.pullTabs([tabName]); }
+  const pull = API.pullTabs([tabName]);
+  setPullInFlight(pull);
+  try { await pull; }
   catch (e) { return { conflict: true, serverRev }; }   // couldn't refresh → bubble up
   // Belt-and-suspenders: make baseRev reflect the server even if the partial
   // read didn't carry a rev, so the retry isn't guaranteed to re-conflict.
@@ -330,6 +637,10 @@ function reapplyMode(arrKey, mode) {
     arr.push(mode.row);
   } else if (mode.type === "appendMany" && Array.isArray(mode.rows)) {
     arr.push(...mode.rows);
+  } else if (mode.type === "applyOps" && Array.isArray(mode.modes)) {
+    // Completeness only - applyOps is enforce=false server-side, so it can't
+    // conflict. Each op re-applies as its granular equivalent.
+    for (const m of mode.modes) reapplyMode(arrKey, m);
   }
 }
 
@@ -344,8 +655,11 @@ async function retryAllDirty() {
     if (ops && ops.length) {
       // Replay the exact failed granular ops — each OCC-merges on top of any
       // newer server rows, preserving both the user's edit and others'.
+      // Enqueue the whole stash before the drain dispatches (autoSync returns
+      // one shared drain promise) so the replay batches into applyOps too.
       _dirtyOps.delete(tab);
-      for (const mode of ops) await autoSync(tab, mode);
+      persistDirtyOps();
+      await Promise.all(ops.map(mode => autoSync(tab, mode)));
     } else {
       // No stashed ops (e.g. after a reload) → full replace, OCC-guarded.
       const arrKey = TAB_TO_STATE[tab];
@@ -361,6 +675,73 @@ async function retryAllDirty() {
   }
 }
 
+// ── Global background auto-retry ─────────────────────────
+// Failed writes park in the dirty set; this scheduler replays them with
+// jittered exponential backoff (5s → 5min cap) so a device that hit a
+// transient failure heals itself without the user hunting for a retry button.
+// Replays go through the same OCC-guarded paths as a manual retry - it NEVER
+// force-resyncs. Dormant while signed out (_authFailed) or offline: those
+// states are recovered by authRestored() and the `online` event respectively.
+const RETRY_BASE_MS = 5000;
+const RETRY_CAP_MS = 300000;
+let _retryTimer = null;
+let _retryAttempt = 0;
+let _retryNextAt = null;        // epoch ms of the armed pass (drives the pill countdown)
+let _retryCountdownTimer = null;
+
+function scheduleAutoRetry(immediate) {
+  if (_authFailed) return;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+  if (_retryTimer !== null) {
+    if (!immediate) return;                 // already armed - keep the earlier pass
+    clearTimeout(_retryTimer);              // immediate: pull the pass forward
+    _retryTimer = null;
+  }
+  const delay = immediate ? 1500 : backoffMs(++_retryAttempt, RETRY_BASE_MS, RETRY_CAP_MS);
+  _retryNextAt = Date.now() + delay;
+  _retryTimer = setTimeout(runAutoRetryPass, delay);
+  startRetryCountdown();
+  refreshSyncIndicator();
+}
+
+function cancelAutoRetry() {
+  if (_retryTimer !== null) { clearTimeout(_retryTimer); _retryTimer = null; }
+  _retryNextAt = null;
+  stopRetryCountdown();
+}
+
+async function runAutoRetryPass() {
+  cancelAutoRetry();   // this pass owns the retry now; failures re-arm below
+  if (!STATE.dirty || STATE.dirty.size === 0) { _retryAttempt = 0; refreshSyncIndicator(); return; }
+  if (_authFailed) return;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+  // Never overlap a pull or an active push - step the backoff and try later.
+  if (_pullInFlight || _activePushCount > 0) { scheduleAutoRetry(); return; }
+  await retryAllDirty();
+  if (STATE.dirty && STATE.dirty.size > 0) scheduleAutoRetry();
+  else _retryAttempt = 0;
+  refreshSyncIndicator();
+}
+
+// Pill tap while a retry is armed: don't wait out the countdown.
+function retryNow() {
+  cancelAutoRetry();
+  runAutoRetryPass();
+}
+
+// 1s repaint of the "retry in Xs" countdown. Runs ONLY while a retry is
+// armed, so an idle app burns zero timers.
+function startRetryCountdown() {
+  if (_retryCountdownTimer !== null) return;
+  _retryCountdownTimer = setInterval(() => {
+    if (_retryNextAt === null) { stopRetryCountdown(); return; }
+    refreshSyncIndicator();
+  }, 1000);
+}
+function stopRetryCountdown() {
+  if (_retryCountdownTimer !== null) { clearInterval(_retryCountdownTimer); _retryCountdownTimer = null; }
+}
+
 // Escape hatch for a device stuck showing "unsaved" that a normal retry can't
 // clear (expired invite, a poison local row, or stale cached code). Discards
 // this device's unsynced local changes and reloads the authoritative sheet
@@ -372,6 +753,9 @@ async function forceResync() {
   )) return;
   STATE.dirty = new Set();
   _dirtyOps.clear();
+  persistDirtyOps();
+  cancelAutoRetry();
+  _retryAttempt = 0;
   saveDirty();
   STATE.rev = {};                 // drop a possibly-stale baseline → full authoritative pull
   _lastSyncError = null;
@@ -386,7 +770,7 @@ async function forceResync() {
     syncLog("Force resync complete — device is back in sync.", "var(--green)");
   } catch (e) {
     if (e.name === "AuthError") {
-      setSyncIndicator("● Not authenticated", "var(--red)");
+      noteAuthFailed();
       syncLog("Force resync failed: not authorized — this device needs a new invite link.", "var(--red)");
     } else {
       setSyncIndicator("● Sync failed", "var(--red)");
@@ -444,7 +828,7 @@ async function doPull() {
     render();
   } catch (e) {
     syncLog(`Pull failed: ${e.message}`, "var(--red)");
-    if (e.name === "AuthError") setSyncIndicator("● Not authenticated", "var(--red)");
+    if (e.name === "AuthError") noteAuthFailed();
   } finally { const b = document.getElementById("pull-btn"); if (b) b.disabled = false; }
 }
 
@@ -540,7 +924,7 @@ async function autoRefreshTick(reason) {
     }
     await applyAutoPull(safeChanged);
   } catch (e) {
-    if (e.name === "AuthError") setSyncIndicator("● Not authenticated", "var(--red)");
+    if (e.name === "AuthError") noteAuthFailed();
   } finally {
     _autoRefreshing = false;
   }
@@ -643,7 +1027,12 @@ function initAutoRefresh() {
     else stopAutoRefresh();
   });
   window.addEventListener("focus", () => autoRefreshTick("focus"));
-  window.addEventListener("online", () => autoRefreshTick("online"));
+  window.addEventListener("online", () => {
+    autoRefreshTick("online");
+    // Back online is the recovery signal for writes parked by an offline
+    // NetError - replay them right away instead of waiting out a backoff.
+    if (STATE.dirty && STATE.dirty.size > 0) scheduleAutoRetry(true);
+  });
   startAutoRefresh();
 }
 
@@ -664,14 +1053,24 @@ async function autoSyncOnLaunch() {
       _lastCheckedAt = Date.now();
       if (res && !res.error && res.revs) {
         const changed = Object.keys(res.revs).filter(s => Number(res.revs[s]) > Number(STATE.rev[s] || 0));
-        if (changed.length) {
-          await applyAutoPull(changed);   // parallel partial pulls + render + timing
-          syncLog(`Launch: refreshed ${changed.length} changed tab${changed.length === 1 ? "" : "s"} (${changed.join(", ")})`, "var(--green)");
-        } else {
+        // NEVER pull over a tab that has unsynced local edits (dirty) - that
+        // would drop the edit. Mirror autoRefreshTick: pull only the safely
+        // changed tabs; surface dirty-and-changed tabs to the conflict banner and
+        // let the OCC-guarded retry push+merge them (armed by maybeRestoreDirty).
+        const dirty = STATE.dirty || new Set();
+        const safeChanged = changed.filter(t => !dirty.has(t));
+        const dirtyChanged = changed.filter(t => dirty.has(t));
+        if (safeChanged.length) {
+          await applyAutoPull(safeChanged);   // parallel partial pulls + render + timing
+          syncLog(`Launch: refreshed ${safeChanged.length} changed tab${safeChanged.length === 1 ? "" : "s"} (${safeChanged.join(", ")})`, "var(--green)");
+        }
+        if (dirtyChanged.length) {
+          showDirtyConflictBanner(dirtyChanged);
+        } else if (!safeChanged.length) {
           _lastSyncedAt = Date.now();
-          refreshSyncIndicator();
           syncLog("Launch: already up to date ✓", "var(--green)");
         }
+        refreshSyncIndicator();
         return;
       }
       // else: revCheck unsupported/failed → fall through to a full pull.
@@ -685,7 +1084,7 @@ async function autoSyncOnLaunch() {
     render();
   } catch (e) {
     if (e.name === "AuthError") {
-      setSyncIndicator("● Not authenticated", "var(--red)");
+      noteAuthFailed();
       syncLog(`Auth rejected — your invite may have been revoked. Ask admin for a new link.`, "var(--red)");
     } else {
       setSyncIndicator("● Sync failed", "var(--red)");
