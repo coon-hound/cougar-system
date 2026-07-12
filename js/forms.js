@@ -2115,9 +2115,13 @@ function findBorderlineReturnees(dateIso) {
   if (!dateIso) return [];
   const y = new Date(dateIso); y.setDate(y.getDate() - 1);
   const yIso = y.toISOString().slice(0, 10);
+  const awayMc = m => (m.status === "MC" || m.status === "Warded") && !m.inCamp;
   return STATE.medical.filter(m =>
-    (m.status === "MC" || m.status === "Warded") && !m.inCamp &&
-    displayDateToISO(m.endDate || "") === yIso
+    awayMc(m) && displayDateToISO(m.endDate || "") === yIso &&
+    // An extended MC is logged as a SECOND report-sick record (so the count of
+    // report sicks is preserved). If any other away MC/Warded covers the parade
+    // date, the recruit isn't a returnee — they're still out on the extension.
+    !STATE.medical.some(o => o !== m && o.d4 === m.d4 && awayMc(o) && medStatusActive(o, dateIso))
   );
 }
 
