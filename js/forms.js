@@ -2131,7 +2131,11 @@ function toggleBorderline(d4, checked, type) {
 // receiving the whole record (m => boolean) — the record form lets a section
 // key off flags like inCamp, not just the status string (MEDICAL STATUS folds
 // in consume-in-camp MCs, ATTC excludes them).
-function buildMedicalSection(label, dateIso, recordFilter) {
+// collectD4s (optional Set) receives every d4 this section RENDERS, so a later
+// section can exclude anyone already shown here — used to keep a person out of
+// OTHERS once they appear in ATTC (a person can't be away on MC and out on
+// leave/book-out at the same time; the ATTC listing wins).
+function buildMedicalSection(label, dateIso, recordFilter, collectD4s) {
   const matchRecord = typeof recordFilter === "function"
     ? recordFilter
     : m => recordFilter.includes(m.status);
@@ -2158,6 +2162,7 @@ function buildMedicalSection(label, dateIso, recordFilter) {
   // ties; harmless for ATTC/REPORT SICK where every entry shares one severity.
   const groupRank = d4 => Math.max(...byD4[d4].map(m => medSeverityRank(m.status)));
   const peopleIds = Object.keys(byD4).sort((a, b) => groupRank(b) - groupRank(a));
+  if (collectD4s) peopleIds.forEach(d4 => collectD4s.add(d4));
 
   if (!peopleIds.length) {
     return `${label}:\n\nS/N:\nR/N:\nReason:`;
@@ -2258,7 +2263,7 @@ function buildAppointmentSection(dateIso, paradeTime) {
   return `MEDICAL APPT: ${String(upcoming.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
 }
 
-function buildOthersSection(dateIso) {
+function buildOthersSection(dateIso, excludeD4s) {
   // Single source of truth — same map the dashboard uses. OTHERS lists leave +
   // manual book-outs; medical (MC/Warded) lives in the ATTC/MEDICAL STATUS
   // sections, so it's excluded here.
@@ -2266,6 +2271,11 @@ function buildOthersSection(dateIso) {
   const entries = [];
   for (const [d4, info] of map) {
     if (info.kind === "medical") continue;
+    // Never list someone here who is already shown in ATTC. outOfCampMap's
+    // medical precedence covers active MC/Warded, but a borderline returnee
+    // (MC ended yesterday, ticked still-out) is folded into ATTC with an
+    // INACTIVE record, so leave/book-out could otherwise double-list them.
+    if (excludeD4s && excludeD4s.has(d4)) continue;
     if (info.kind === "leave") {
       const l = STATE.leave.find(x => x.d4 === d4 && (() => {
         const s = displayDateToISO(x.startDate), e = displayDateToISO(x.endDate);
@@ -2342,16 +2352,20 @@ function buildStrengthBlock(dateIso) {
 function generateParadeStateText(type, dateIso, time) {
   const dateStr = toDDMMYY(dateIso);
   const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
+  // Everyone shown in ATTC, so OTHERS can exclude them — a person away on MC
+  // must never also appear as booked out / on leave (the same person can't be
+  // both). Populated by the ATTC build below before OTHERS is built.
+  const attcD4s = new Set();
   const sections = [
     buildStrengthBlock(dateIso),
     // ATTC = MC/Warded physically AWAY. Kept-in-camp MC/Warded (consume-in-camp OR
     // a manual same-day Book In) are excluded here and fall through to MEDICAL
     // STATUS below, so anyone counted in camp is never listed as away.
-    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d)),
+    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d), attcD4s),
     buildMedicalSection("REPORT SICK", dateIso, m => m.status === "Pending"),
     buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord),
     buildAppointmentSection(dateIso, time),
-    buildOthersSection(dateIso)
+    buildOthersSection(dateIso, attcD4s)
   ];
   return `COUGAR COMPANY\n${header}\nDATE: ${dateStr} @ ${fmtHrs(time)}\n\n${SEP}\n\n${sections.join(`\n\n${SEP}\n\n`)}\n\n${SEP}`;
 }
