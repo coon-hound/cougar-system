@@ -15,6 +15,10 @@ const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
 const FITNESS_SENT_KEY = "cougar-fitness-sent";
 const DIRTY_KEY = "cougar-dirty-tabs";
+// Failed granular write ops, persisted beside the dirty markers so a reload
+// can replay the exact edits instead of degrading to a full-tab replace.
+// Payload: { v:1, tabs: { TabName: [modes] } } - see persistDirtyOps (sync.js).
+const DIRTY_OPS_KEY = "cougar-dirty-ops-v1";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
 const PROGRAMS_KEY = "cougar-programs";
 const COMBINED_KEY = "cougar-combined-groups";

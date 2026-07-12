@@ -6,6 +6,46 @@ const AuthError = class extends Error {
   constructor(message) { super(message); this.name = "AuthError"; }
 };
 
+// Server couldn't take the write lock (body {error, code:503}) after the
+// client exhausted its in-place retries. Carries no state - sync.js branches
+// on the class to decide retry policy.
+const BusyError = class extends Error {
+  constructor(message) { super(message); this.name = "BusyError"; }
+};
+
+// Transport-level failure: fetch rejected (offline, DNS, CORS) or the request
+// timed out. `timeout` distinguishes an abort-by-timer from other failures.
+const NetError = class extends Error {
+  constructor(message, timeout) { super(message); this.name = "NetError"; this.timeout = !!timeout; }
+};
+
+// Apps Script cold starts can take >10s; 30s separates "slow" from "gone".
+// The launch readAll moves much more data, so it gets 60s (see API.pullAll).
+const FETCH_TIMEOUT_MS = 30000;
+
+// Single fetch path for every API call. Maps failures onto the error taxonomy:
+//   body {code:401}      → throw AuthError (token revoked/expired)
+//   AbortError (timeout) → throw NetError with .timeout = true
+//   other fetch/json rejection → throw NetError
+// Body-level {error} / {conflict} / {code:503} are NOT thrown here - they stay
+// in the returned body so runWrite (sync.js) can apply per-class retry policy.
+async function _fetchJson(url, init, timeoutMs) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs || FETCH_TIMEOUT_MS);
+  let data;
+  try {
+    const res = await fetch(url, Object.assign({}, init, { signal: ctrl.signal }));
+    data = await res.json();
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new NetError("Request timed out", true);
+    throw new NetError((e && e.message) || String(e));
+  } finally {
+    clearTimeout(timer);
+  }
+  if (data && data.code === 401) throw new AuthError(data.error);
+  return data;
+}
+
 // STATE-array-key → normalizer that assigns fresh sheet rows into STATE. Shared
 // by the full pull (pullAll) and partial pulls (pullTabs) so both paths apply
 // identical normalization. Keys match the readAll response keys.
@@ -25,35 +65,29 @@ const PULL_ASSIGN = {
 };
 
 const API = {
-  async get(action, tab) {
+  async get(action, tab, opts) {
     const auth = encodeURIComponent(STATE.authToken || "");
     const url = `${STATE.apiUrl}?action=${action}${tab ? "&tab=" + tab : ""}&auth=${auth}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data && data.code === 401) throw new AuthError(data.error);
-    return data;
+    return _fetchJson(url, undefined, opts && opts.timeoutMs);
   },
-  async post(body) {
-    const res = await fetch(STATE.apiUrl, {
+  async post(body, opts) {
+    return _fetchJson(STATE.apiUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ ...body, auth: STATE.authToken })
-    });
-    const data = await res.json();
-    if (data && data.code === 401) throw new AuthError(data.error);
-    return data;
+    }, opts && opts.timeoutMs);
   },
   // Redeem a single-use invite token. Does not require an existing auth token.
   async redeemInvite(token) {
-    const res = await fetch(STATE.apiUrl, {
+    return _fetchJson(STATE.apiUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ action: "redeemInvite", token })
     });
-    return res.json();
   },
   async pullAll() {
-    const data = await this.get("readAll");
+    // readAll moves every tab in one response - give it double the timeout.
+    const data = await this.get("readAll", "", { timeoutMs: 60000 });
     if (data.error) throw new Error(data.error);
     // Only replace a STATE array when the response carries rows for it — an
     // empty array in the response must not wipe local data (matches prior behavior).
@@ -130,7 +164,8 @@ const API = {
   // inlineImages: optional { "cid_name": "base64_str_without_data_prefix" }
   // map — referenced from the htmlBody as <img src="cid:cid_name">.
   async sendEmail(to, subject, htmlBody, inlineImages) {
-    return this.post({ action: "sendEmail", to, subject, htmlBody, inlineImages });
+    // Sending (with inline images) can outrun the default 30s write timeout.
+    return this.post({ action: "sendEmail", to, subject, htmlBody, inlineImages }, { timeoutMs: 120000 });
   },
   // Returns sender identity + current quota without sending anything.
   // Used by the report modal to surface "who emails will come from".
@@ -142,6 +177,8 @@ const API = {
   //   { recruits: [{d4, avgHR, maxHR, calories, duration}], notes }
   // or { error }. validD4s seeds the prompt so Claude can ignore misreads.
   async analyzePhoto(imageBase64, mediaType, validD4s) {
-    return this.post({ action: "analyzePhoto", imageBase64, mediaType, validD4s });
+    // Apps Script cold start + a Claude-vision extraction on a dense photo can
+    // exceed 30s; give it a generous ceiling so OCR isn't aborted mid-flight.
+    return this.post({ action: "analyzePhoto", imageBase64, mediaType, validD4s }, { timeoutMs: 120000 });
   }
 };

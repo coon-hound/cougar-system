@@ -63,4 +63,61 @@ module.exports = async function run() {
     }
     ok(offenders.length === 0, "tracked-tab writes missing a nearby bumpRev:\n   " + offenders.join("\n   "));
   });
+
+  suite("static: lock-domain split (script lock is Telegram-only)");
+
+  const gsText = fs.readFileSync(path.join(ROOT, "apps-script-Code.gs"), "utf8");
+  const gsLines = gsText.split("\n");
+
+  // (d) The Telegram poller holds the SCRIPT lock for up to 5 minutes. Data
+  // writes therefore use the DOCUMENT lock (getDataLock). If getScriptLock ever
+  // reappears in data-path code, a save can queue behind a 5-minute poll — the
+  // production "Server busy, please retry" storm. Structural rule: every
+  // getScriptLock call site must live BELOW the Telegram section banner.
+  await test("every getScriptLock call is inside the Telegram section", () => {
+    const banner = gsLines.findIndex(l => l.includes("TELEGRAM REPORT-SICK (RSO) BOT"));
+    ok(banner > 0, "Telegram section banner found");
+    const offenders = [];
+    gsLines.forEach((l, i) => {
+      if (l.includes("getScriptLock") && i < banner) offenders.push((i + 1) + ": " + l.trim());
+    });
+    ok(offenders.length === 0, "getScriptLock above the Telegram banner (data path!):\n   " + offenders.join("\n   "));
+  });
+
+  // (e) Belt-and-suspenders: getDataLock must hand out the document lock and
+  // must NOT quietly fall back to the script lock (the old fallback silently
+  // reintroduced poller-vs-write contention whenever the doc lock was null).
+  await test("getDataLock uses the document lock with no script-lock fallback", () => {
+    const mBody = gsText.match(/function getDataLock\(\)\s*{([\s\S]*?)\n}/);
+    ok(mBody, "getDataLock found");
+    ok(mBody[1].includes("getDocumentLock"), "uses getDocumentLock");
+    ok(!mBody[1].includes("getScriptLock"), "no script-lock fallback");
+  });
+
+  suite("static: deploy observability");
+
+  // (f) BACKEND_BUILD makes the live deployment identifiable (curl ping). It
+  // must exist in date-counter form and be stamped by jsonResponse — otherwise
+  // "which code is Version N running" becomes unanswerable again.
+  await test("BACKEND_BUILD exists and jsonResponse stamps it", () => {
+    ok(/var BACKEND_BUILD = "\d{4}-\d{2}-\d{2}-\d+"/.test(gsText), "BACKEND_BUILD constant in date-counter form");
+    const mResp = gsText.match(/function jsonResponse\(obj\)\s*{([\s\S]*?)\n}/);
+    ok(mResp && mResp[1].includes("BACKEND_BUILD"), "jsonResponse references BACKEND_BUILD");
+  });
+
+  // (g) Every mutating doPost dispatch must run under withRevLock — a branch
+  // that skips it writes without atomicity or a rev bump.
+  await test("every mutating doPost branch is wrapped in withRevLock", () => {
+    const mutating = ["write", "append", "appendMany", "upsertRow", "applyOps", "deleteRowById", "deleteRow", "updateRow"];
+    const offenders = [];
+    gsLines.forEach((l, i) => {
+      const mm = l.match(/action === "([A-Za-z]+)"/);
+      if (!mm || mutating.indexOf(mm[1]) === -1) return;
+      // The dispatch assignment may sit a few lines below the branch condition
+      // (comment lines in between).
+      const windowText = gsLines.slice(i, i + 10).join("\n");
+      if (!/withRevLock\(/.test(windowText)) offenders.push((i + 1) + ": " + l.trim());
+    });
+    ok(offenders.length === 0, "mutating branches without withRevLock:\n   " + offenders.join("\n   "));
+  });
 };

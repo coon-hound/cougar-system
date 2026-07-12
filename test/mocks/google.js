@@ -9,7 +9,32 @@
 function makeGoogle() {
   const props = new Map();        // ScriptProperties
   const sheets = new Map();       // name -> { name, grid: any[][] }
-  const spy = { getDisplayValues: 0, getValues: 0 };
+  const spy = { getDisplayValues: 0, getValues: 0, urlFetch: 0, warns: [] };
+
+  // Named, contention-capable locks so tests can prove the lock-domain split:
+  // tgPoll must touch only the SCRIPT lock, data writes only the DOCUMENT lock.
+  // Matches the real API: waitLock THROWS on timeout, tryLock returns false.
+  const locks = {
+    script: { held: false, acquired: 0 },
+    document: { held: false, acquired: 0 }
+  };
+  let unbound = false;            // db.setUnbound() → getDocumentLock() returns null
+  function makeLock(name) {
+    const l = locks[name];
+    return {
+      waitLock() {
+        if (l.held) throw new Error("Could not acquire " + name + " lock (held)");
+        l.acquired++;
+        return true;
+      },
+      tryLock() {
+        if (l.held) return false;
+        l.acquired++;
+        return true;
+      },
+      releaseLock() {}
+    };
+  }
 
   function makeRange(sheet, r, c, nr, nc) {
     return {
@@ -86,7 +111,11 @@ function makeGoogle() {
   const services = {
     SpreadsheetApp: { getActiveSpreadsheet: () => spreadsheet },
     PropertiesService: { getScriptProperties: () => scriptProps },
-    LockService: { getScriptLock: () => ({ waitLock: () => true, tryLock: () => true, releaseLock: () => {} }) },
+    LockService: {
+      getScriptLock: () => makeLock("script"),
+      getDocumentLock: () => (unbound ? null : makeLock("document"))
+    },
+    console: { warn: (...a) => { spy.warns.push(a.join(" ")); }, log() {}, error() {} },
     Session: {
       getScriptTimeZone: () => "Asia/Singapore",
       getEffectiveUser: () => ({ getEmail: () => "test@example.com" }),
@@ -96,7 +125,8 @@ function makeGoogle() {
       formatDate: (d, tz, fmt) => (fmt === "HH:mm" ? "07:30" : "01 Jan 2026"),
       getUuid: () => "uuid-" + Math.random().toString(36).slice(2),
       newBlob: () => ({}),
-      base64Decode: () => []
+      base64Decode: () => [],
+      sleep: () => {}
     },
     ContentService: {
       createTextOutput: s => ({ _s: s, setMimeType() { return this; }, getContent() { return this._s; } }),
@@ -111,7 +141,7 @@ function makeGoogle() {
       newTrigger: () => ({ forSpreadsheet: () => ({ onEdit: () => ({ create() {} }) }) })
     },
     MailApp: { getRemainingDailyQuota: () => 100, sendEmail() {} },
-    UrlFetchApp: { fetch: () => ({ getContentText: () => "{}", getResponseCode: () => 200 }) }
+    UrlFetchApp: { fetch: () => { spy.urlFetch++; return { getContentText: () => "{}", getResponseCode: () => 200 }; } }
   };
 
   const db = {
@@ -128,6 +158,14 @@ function makeGoogle() {
     hasSheet(tab) { return sheets.has(tab); },
     setProp(k, v) { props.set(k, String(v)); },
     getProp(k) { return props.has(k) ? props.get(k) : null; },
+    // Lock controls: hold("script"|"document") simulates another process
+    // holding that lock; acquired(name) counts successful acquisitions.
+    locks: {
+      hold(name) { locks[name].held = true; },
+      release(name) { locks[name].held = false; },
+      acquired(name) { return locks[name].acquired; }
+    },
+    setUnbound() { unbound = true; },
     spy
   };
 
