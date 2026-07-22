@@ -4512,8 +4512,19 @@ function wizStatusFiltersHtml() {
   const famChips = fams.length > 1
     ? fams.map(f => chip(`${escapeAttr(f)} (${famCounts[f]})`, v.fams.has(f), `wizToggleStatusFam('${escapeAttr(f)}')`)).join("")
     : "";
+  // Bulk toggle for the participating flag. Acts on whatever rows the filters are
+  // currently SHOWING: no filter = everyone; pick a status family (or Not
+  // participating / Participating) chip first and it toggles just that group.
+  const shown = w.status.filter(wizStatusRowVisible).length;
+  const scopeWord = shown === w.status.length ? "all" : `shown (${shown})`;
+  const bulk = `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">`
+    + `<span style="font-size:10px;color:var(--dim)">Set ${scopeWord}:</span>`
+    + `<button type="button" class="lc-wiz-filter-chip" onclick="wizBulkSetNP(true)" title="Mark every ${scopeWord === "all" ? "" : "currently shown "}person on this list as not participating">✓ Not participating</button>`
+    + `<button type="button" class="lc-wiz-filter-chip" onclick="wizBulkSetNP(false)" title="Mark every ${scopeWord === "all" ? "" : "currently shown "}person on this list as participating">Participating</button>`
+    + `</div>`;
   return `<div style="display:flex;flex-wrap:wrap;gap:6px">${seg}</div>`
-    + (famChips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${famChips}</div>` : "");
+    + (famChips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${famChips}</div>` : "")
+    + bulk;
 }
 
 // Options for the wizard's "narrower scope" dropdown: platoons / groups /
@@ -4559,6 +4570,10 @@ const wizGroupRowHint = scope => scope
 // (e.g. count totals) instead of re-rendering.
 function renderLogConductWizard() {
   if (!_logConduct) return;
+  // Adding/removing a bulk row re-renders the whole modal; capture the scroll
+  // offset so the view stays put instead of snapping to the top — otherwise
+  // adding a row to a long fallout/report-sick list bounces you away from it.
+  const prevScroll = document.querySelector(".modal")?.scrollTop || 0;
   const w = _logConduct;
   const title = w.attendanceId ? "Edit Conduct" : "Log Conduct";
   const dateVal = w.date || todayISO();
@@ -4597,6 +4612,10 @@ function renderLogConductWizard() {
         </div>
       </div>
       ${rows ? `<div style="display:flex;flex-direction:column;gap:6px">${rows}</div>` : ""}
+      ${rows ? `<div style="display:flex;gap:6px;margin-top:8px">
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddRow('${key}')">+ Add</button>
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddGroupRow('${key}')" title="Add a whole platoon / program / group / combined group — expands to one row per member on save, all with the same reason">+ Add group</button>
+        </div>` : ""}
     </div>`;
   };
 
@@ -4677,7 +4696,9 @@ function renderLogConductWizard() {
   `;
   openModal(title, html);
   // Wider modal — five-column status rows + bulk-add sections need the room.
-  document.querySelector(".modal")?.classList.add("wide");
+  const modalEl = document.querySelector(".modal");
+  modalEl?.classList.add("wide");
+  if (modalEl && prevScroll) modalEl.scrollTop = prevScroll;
   updateLogConductOverlapWarning();
 }
 
@@ -4742,6 +4763,17 @@ function wizToggleStatusFam(fam) {
   const fams = _wizStatusView.fams;
   fams.has(fam) ? fams.delete(fam) : fams.add(fam);
   refreshWizStatusSection();
+}
+// Bulk-set the not-participating flag on every status row the filters currently
+// show. With no filter active this selects/deselects all; filter to a status
+// family (e.g. Excuse) or the Not-participating/Participating segment first and
+// it toggles just that group. Refreshes the checklist + footer counts in place.
+function wizBulkSetNP(np) {
+  const w = _logConduct;
+  if (!w) return;
+  w.status.filter(wizStatusRowVisible).forEach(s => { s.notParticipating = !!np; });
+  refreshWizStatusSection();
+  recomputeLogConductFooter();
 }
 // Rebuild just the filter chips + row list (not the whole modal), so the modal
 // scroll position and every other input stay untouched. Lossless: reason edits
@@ -5023,8 +5055,11 @@ function buildConductChatFormat(attendanceId) {
       if (includeStatusBlock) {
         // Pull the recruit's active medical record on this date for status +
         // duration. Collapse same-status duplicates to the most recent first.
+        // "Pending" (awaiting-MO) is never surfaced as a status in this message —
+        // a report-sick person is shown in FALLOUT with a "(report sick)" note
+        // instead, so the auto-created Pending row must not leak into the block.
         const med = dedupeActiveRecordsByFamily(
-          STATE.medical.filter(m => m.d4 === d.d4 && medStatusActive(m, date))
+          STATE.medical.filter(m => m.d4 === d.d4 && medStatusActive(m, date) && m.status !== "Pending")
         ).sort((x, y) => medSeverityRank(medStatusTag(y, date)?.tag) - medSeverityRank(medStatusTag(x, date)?.tag));
         if (med.length === 1) {
           block += `\nStatus: ${paradeStatusLabel(med[0], date)}\nDuration: ${paradeDuration(med[0])}`;
@@ -5038,12 +5073,23 @@ function buildConductChatFormat(attendanceId) {
     return `${label}: ${String(rows.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
   };
 
-  const header = `${ddmmyy} ${fmtHrs(time)} ${conductLabel} (${conductScopeLabel(program)})\nTotal strength: ${a.total}\nParticipating: ${a.participating}\nStatus: ${String(byType.PX.length).padStart(2, "0")}\nReport sick: ${String(byType.ReportSick.length).padStart(2, "0")}\nFallout: ${String(byType.Fallout.length).padStart(2, "0")}`;
+  // Report-sick personnel (dropped out AND went to MO) are no longer a separate
+  // section — they fold into FALLOUT with a "(report sick)" tag on the reason so
+  // one list captures everyone who dropped out, MO visit or not.
+  const withReportSickTag = reason => {
+    const base = (reason || "").trim();
+    return base ? `${base} (report sick)` : "(report sick)";
+  };
+  const falloutRows = [
+    ...byType.Fallout,
+    ...byType.ReportSick.map(d => ({ ...d, reason: withReportSickTag(d.reason) }))
+  ];
+
+  const header = `${ddmmyy} ${fmtHrs(time)} ${conductLabel} (${conductScopeLabel(program)})\nTotal strength: ${a.total}\nParticipating: ${a.participating}\nStatus: ${String(byType.PX.length).padStart(2, "0")}\nFallout: ${String(falloutRows.length).padStart(2, "0")}`;
 
   const parts = [header];
   parts.push(section("STATUS", byType.PX, /*includeStatusBlock*/ true));
-  if (byType.ReportSick.length) parts.push(section("REPORT SICK", byType.ReportSick, false));
-  if (byType.Fallout.length) parts.push(section("FALLOUT", byType.Fallout, false));
+  if (falloutRows.length) parts.push(section("FALLOUT", falloutRows, false));
   if (byType.RSI.length) parts.push(section("RSI", byType.RSI, false));
   return parts.join("\n\n");
 }
