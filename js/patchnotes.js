@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 127;
+const APP_VERSION = 128;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 128,
+    date: "22 Jul 2026",
+    title: "Simpler conduct message + faster status ticking",
+    intro: "The conduct chat message now keeps everyone who dropped out in one Fallout list, and the Log Conduct wizard is quicker to fill in for big lists.",
+    items: [
+      { t: "📋 Report Sick folds into Fallout", d: "The conduct message no longer has a separate Report Sick section. Anyone who reported sick is listed under Fallout with \"(report sick)\" on their reason, and the Fallout count includes them. \"Pending\" is never shown as a status. (The wizard still has separate Report Sick / Fallout inputs - only the copied message changed.)" },
+      { t: "✓ Select / deselect all on status", d: "Under the Status Personnel filters there's now Set all: ✓ Not participating / Participating. Filter to a status type first (MC, LD, Excuse …) and it flips just that group." },
+      { t: "➕ Add button follows you down", d: "Fallout and Report Sick now have a + Add / + Add group at the bottom of the list too, so you don't have to scroll back up to add another person. Adding a row no longer jumps the view to the top." },
+    ],
+  },
   {
     v: 127,
     date: "12 Jul 2026",

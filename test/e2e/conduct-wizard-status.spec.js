@@ -97,4 +97,27 @@ test.describe("Log Conduct wizard: status checklist", () => {
     await page.click('.lc-wiz-filter-chip >> text="LD (1)"');
     expect(await visibleD4s(page)).toEqual(["2401", "2402", "1401", "1402", "1403"]);
   });
+
+  test("bulk buttons set the not-participating flag on the shown rows only", async ({ page }) => {
+    const allChecked = () => page.$$eval("#wiz-status-list input[type=checkbox]", els => els.every(e => e.checked));
+    const noneChecked = () => page.$$eval("#wiz-status-list input[type=checkbox]", els => els.every(e => !e.checked));
+
+    // No filter → "Participating" clears everyone (select-none).
+    await page.click(`button[onclick="wizBulkSetNP(false)"]`);
+    expect(await page.$eval("#wiz-stat-status", el => el.textContent)).toBe("0");
+    expect(await noneChecked()).toBe(true);
+
+    // No filter → "Not participating" selects everyone (select-all).
+    await page.click(`button[onclick="wizBulkSetNP(true)"]`);
+    expect(await page.$eval("#wiz-stat-status", el => el.textContent)).toBe("5");
+    expect(await allChecked()).toBe(true);
+
+    // Group toggle: filter to the MC family, flip ONLY that group to participating.
+    await page.click('.lc-wiz-filter-chip >> text="MC (2)"');
+    await page.click(`button[onclick="wizBulkSetNP(false)"]`);
+    expect(await page.$eval("#wiz-stat-status", el => el.textContent)).toBe("3"); // 5 − 2 MC
+    expect(await page.$eval('.lc-wiz-status-row[data-d4="2401"] input[type=checkbox]', el => el.checked)).toBe(false);
+    // A row outside the MC filter is untouched (still not participating).
+    expect(await page.evaluate(() => _logConduct.status.find(s => s.d4 === "1401").notParticipating)).toBe(true);
+  });
 });
