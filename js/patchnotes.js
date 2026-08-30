@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 129;
+const APP_VERSION = 130;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,15 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 130,
+    date: "3 Sep 2026",
+    title: "Appointments stay put",
+    intro: "A fix to how appointments are read back from the server.",
+    items: [
+      { t: "📅 Booked appointments no longer disappear", d: "An appointment saved as “not resolved” could be read back as resolved and drop off the dashboard and the parade state. It now stays until you tick it off yourself." },
+    ],
+  },
   {
     v: 129,
     date: "2 Sep 2026",

@@ -19,6 +19,14 @@ slug="${1:-$(git rev-parse --abbrev-ref HEAD | sed 's#.*/##')}"
 base="${VERIFY_BASE:-master}"
 EV="EVIDENCE.md"
 
+# Same no-sudo toolchain dev-env.sh uses (DEV-ENV.md): node and deno live
+# under ~/.local, not on the system PATH. Prepend them when they are there
+# so this gate runs from any shell; a no-op everywhere else, CI included.
+for d in "$HOME/.local/node-v20/bin" "$HOME/.local/deno/bin"; do
+  [ -d "$d" ] && PATH="$d:$PATH"
+done
+export PATH
+
 # Everything different from the base branch (committed + working tree).
 changed="$(git diff --name-only "$base" 2>/dev/null || true)"
 is_fe=0; is_be=0; is_db=0

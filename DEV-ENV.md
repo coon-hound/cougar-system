@@ -6,6 +6,16 @@ data — so the Sheets → Postgres migration can be rehearsed, broken and re-ru
 often as you like before anything is cut over.
 
 ```
+./scripts/demo.sh             # everything up, seeded, with a URL to click
+./scripts/demo.sh --fresh     # …from an empty database
+./scripts/demo.sh --stop      # stop everything
+```
+
+That is the short way in: it starts the pieces below, seeds synthetic data, and
+prints a link that points the browser at the local backend for you. The pieces
+are also drivable one at a time:
+
+```
 ./scripts/dev-env.sh up       # start everything (creates the DB on first run)
 node scripts/dev-seed.mjs     # synthetic people to click around
 npm run test:live             # the backend contract, against the real thing
@@ -14,6 +24,18 @@ npm run test:live             # the backend contract, against the real thing
 
 `up` prints the two `localStorage` lines that point the app at the local
 backend. Paste them into the browser console once and reload.
+
+### Two demos, on purpose
+
+| | `scripts/preview.sh` | `scripts/demo.sh` |
+|---|---|---|
+| Data from | `localStorage`, seeded from a fixture | Postgres, via the Edge Function |
+| Backend | none — the app never calls out | the real one |
+| Good for | looking at a frontend change | anything that saves, syncs or conflicts |
+
+The offline one stays the right tool for a UI change: it is instant and cannot
+be affected by backend state. Use the connected one when the behaviour you care
+about involves a round trip.
 
 ## What is running
 

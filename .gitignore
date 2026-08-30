@@ -56,3 +56,6 @@ __preview.html
 
 # ── Local reference data ───────────────────────────
 cougar_fitness_tracker.xlsx
+
+# Backend-connected demo entry page (scripts/demo.sh)
+__demo.html

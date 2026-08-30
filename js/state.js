@@ -377,6 +377,24 @@ function padD4OnLayer(records) {
   return (records || []).map(r => r && r.d4 != null ? { ...r, d4: padD4(r.d4) } : r);
 }
 
+// Appointments carry two flags the app reads by plain truthiness: `resolved`
+// hides the appointment from the dashboard and the parade state
+// (js/render.js:907, js/forms.js:2235), and `outOfCamp` marks one the recruit
+// leaves camp for (js/forms.js:1512, 2256, 2294).
+//
+// Sheets round-tripped both as REAL booleans, because they were checkbox cells
+// — so `!a.resolved` worked and nothing here had to coerce. A text-typed
+// backend returns the STRING "false", which is truthy, and every unresolved
+// appointment would read as resolved and silently vanish from both screens.
+// Coerce at the read boundary, exactly as normalizeRoster does for
+// outOfCamp/campIn and normalizeMedical for inCamp. Real booleans are
+// unaffected, so this is a no-op against the Sheets backend.
+function normalizeAppointments(records) {
+  const bool = v => v === true || String(v).toUpperCase() === "TRUE";
+  return padD4OnLayer(records).map(r =>
+    r ? { ...r, resolved: bool(r.resolved), outOfCamp: bool(r.outOfCamp) } : r);
+}
+
 // Conduct records (Attendance, ConductDetail) gained a `program` field (PTP /
 // BMT / Combined). Guarantee every row carries it — defaulting legacy/missing
 // values to "Combined" — so writeTab (which derives headers from the first
@@ -452,7 +470,7 @@ function loadLocal() {
     STATE.soc = padD4OnLayer(d.soc);
     STATE.polar = padD4OnLayer(d.polar);
     STATE.conductDetail = normalizeConductDetail(d.conductDetail);
-    STATE.appointments = padD4OnLayer(d.appointments);
+    STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
     STATE.msk = normalizeMSK(d.msk);
     STATE.conducts = Array.isArray(d.conducts) ? d.conducts : [];
