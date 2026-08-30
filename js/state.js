@@ -2,10 +2,18 @@
 // the Google Sheet via API.pullAll() on launch, or from localStorage on
 // subsequent loads.
 
-// The Apps Script web app URL. This is no longer a secret — auth is enforced
-// server-side by per-device tokens issued via the invite flow (see Apps Script).
-// PASTE YOUR DEPLOYMENT URL HERE after redeploying the updated Apps Script:
+// The backend URL. This is no longer a secret — auth is enforced server-side
+// by per-device tokens issued via the invite flow.
+// PASTE YOUR DEPLOYMENT URL HERE after redeploying:
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzazMTu4y4XjjDXBGWN_aAE51fzP_z23zQUZnuKjWWPJ3fNNjUPbp3DbZW9T66OQysr/exec"
+
+// Per-device backend override. Two jobs:
+//   1. Cutover lever — point one device at a new backend without shipping a
+//      build, and clear the key to roll straight back.
+//   2. Lets the e2e suite pin a sentinel URL, so specs script the backend by
+//      protocol rather than by hardcoding whoever is hosting it today.
+const API_URL_KEY = "cougar-api-url";
+const API_URL = localStorage.getItem(API_URL_KEY) || APPS_SCRIPT_URL;
 
 // Storage key is versioned so we can invalidate stale caches in users' browsers.
 const STORAGE_KEY = "cougar-data-v2";
@@ -209,7 +217,7 @@ function importFitnessSent(json) {
 
 const STATE = {
   nav: "dashboard",
-  apiUrl: APPS_SCRIPT_URL,
+  apiUrl: API_URL,
   authToken: localStorage.getItem(AUTH_KEY) || "",
   roster: [], medical: [], attendance: [], ippt: [], rm: [], soc: [], polar: [], conductDetail: [], appointments: [], leave: [], msk: [],
   // Canonical conduct registry: [{id: "c001", name: "Orientation Run"}, ...].
