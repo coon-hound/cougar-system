@@ -122,6 +122,26 @@ module.exports = async function run() {
     ok(mc.statuses[0].inCamp === true, "inCamp suffix detected");
   });
 
+  await test("an MC extended by a second record parses as one MC run", () => {
+    // The extension is a SEPARATE record picking up the day after the first
+    // ends. The report must state the run's real end, and the parser must keep
+    // the family as plain "MC" so it diffs against yesterday's MC as the same
+    // status rather than removed + added.
+    const st = richState();
+    st.medical.push({ d4: "1402", status: "MC", reason: "Flu", startDate: "14 Jul 2026", endDate: "16 Jul 2026", inCamp: false, location: "" });
+    const bundle = loadBundle(st);
+    const txt = bundle.generateParadeStateText("FP", DATE, "0730");
+    const parsed = bundle.parseParadeState(txt);
+    const mc = parsed.people.find(p => p.key === "d4:1402");
+    eq(mc.statuses.length, 1, "one merged status, not two");
+    eq(mc.statuses[0].family, "MC", "family is still MC");
+    eq(mc.statuses[0].days, 6, "6D across both records");
+    eq(mc.statuses[0].endIso, "2026-07-16", "ends at the extension, not 13 Jul");
+    ok(mc.statuses[0].extended === true, "flagged extended");
+    eq(parsed.unparsed.length, 0, "still lossless: " + JSON.stringify(parsed.unparsed));
+    eq(parsed.warnings.length, 0, "no warnings: " + JSON.stringify(parsed.warnings));
+  });
+
   suite("parade-compare: differ reports person-level events");
 
   // Overnight changes: 2401's Pending became a real away MC (the classic

@@ -148,7 +148,10 @@ function renderDashboard(el) {
       // row-by-row across the three columns when a recruit has 2+ statuses.
       const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
       const reasonsCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.reason || '<span style="color:var(--dim)">—</span>'}</div>`).join("");
-      const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record)}</div>`).join("");
+      // Durations span the whole run (medStatusRun), so an MC extended by a
+      // second record shows the date they're actually back — not the first
+      // record's end, which reads as an earlier return.
+      const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record, medStatusRun(s.record))}</div>`).join("");
       const multiHint = multi ? ` <span style="font-size:9px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px">×${entry.statuses.length}</span>` : "";
       return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}${multiHint}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;vertical-align:top">${reasonsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${durationsCell}</td></tr>`;
     }).join("")}
@@ -706,7 +709,13 @@ function renderDashLeaveOut(visible, todayIso) {
     .filter(l => l.startIso && l.endIso);
 
   const onToday = scoped.filter(l => l.startIso <= todayIso && todayIso <= l.endIso);
-  const upcoming = scoped.filter(l => l.startIso > todayIso && l.startIso <= sevenDaysOut);
+  // A block that continues today's absence with no gap is the SAME absence —
+  // today's row already spans it (see `dates` below), so listing it again under
+  // "upcoming" would show one person twice with identical dates.
+  const continuing = new Set();
+  onToday.forEach(l => leaveRun(l).records.forEach(r => continuing.add(r.id)));
+  const upcoming = scoped.filter(l =>
+    l.startIso > todayIso && l.startIso <= sevenDaysOut && !continuing.has(l.id));
 
   const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Annual Leave" ? "teal" : t === "Compassionate" ? "red" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
@@ -719,10 +728,18 @@ function renderDashLeaveOut(visible, todayIso) {
     return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">No commanders out today or in the next 7 days.</div>`;
   }
 
+  // Dates span the run, so two adjacent blocks of the same leave type read as
+  // one absence ending on the real return date rather than the first block's.
+  const dates = l => {
+    const run = leaveRun(l);
+    const s = run.chained ? run.startIso : l.startIso;
+    const e = run.chained ? run.endIso : l.endIso;
+    return `${isoToDisplayDate(s)}${s !== e ? ` → ${isoToDisplayDate(e)}` : ""}${run.chained ? ` <span style="color:var(--dim)">(extended)</span>` : ""}`;
+  };
   const row = l => `<tr onclick="openPerson('${l.d4}')" style="cursor:pointer">
     <td style="text-align:left;font-weight:600">${displayPersonLabel(l.d4)}</td>
     <td>${badge(l.type, typeColor(l.type))}</td>
-    <td style="white-space:nowrap;font-size:11px;color:var(--muted)">${l.startDate}${l.startIso !== l.endIso ? ` → ${l.endDate}` : ""}</td>
+    <td style="white-space:nowrap;font-size:11px;color:var(--muted)">${dates(l)}</td>
     <td style="text-align:left;font-size:11px;color:var(--muted)">${l.reason || ""}</td>
     <td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openLeaveForm(${l.id})" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('leave', ${l.id}, 'leave record')" title="Delete">✕</button></td>
   </tr>`;
@@ -873,6 +890,23 @@ function renderLeaveTimeline(scoped, todayIso) {
   </div>`;
 }
 
+// "Back <date>" for an out-of-camp entry. outOfCampMap works the return date
+// out across chained records, so a re-issued MC shows the date the recruit is
+// REALLY due back — the number people were reading off the wrong record.
+// Manual book-outs auto-clear overnight and carry no return date.
+// Two shapes: `backLine` for a column with vertical room, `backNote` to trail a
+// reason inline. Both keep the date on one line — a date broken across three
+// lines in a narrow phone cell is exactly what makes it get misread.
+const backDate = info => (info && info.back) ? isoToShortDate(info.back) : "";
+function backLine(info) {
+  const d = backDate(info);
+  return d ? `<div style="font-size:10px;color:var(--dim);white-space:nowrap">Back ${d}</div>` : "";
+}
+function backNote(info) {
+  const d = backDate(info);
+  return d ? ` <span style="color:var(--dim);white-space:nowrap">· back ${d}</span>` : "";
+}
+
 // "Currently Out of Camp" panel — everyone counted out today (the same shared
 // set that drives the strength tiles + parade). Booked-out rows get a one-tap
 // Book in (plain undo); medical/leave rows get "Book in anyway" (override). A
@@ -893,7 +927,7 @@ function renderDashOutOfCamp(scoped, outMap) {
       <td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td>
       <td style="text-align:left">${displayPersonLabel(r.id)}</td>
       <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${c}22;color:${c}">${label[info.kind] || info.kind}</span></td>
-      <td style="text-align:left;font-size:11px;color:var(--muted)">${escapeAttr(info.reason || "")}</td>
+      <td style="text-align:left;font-size:11px;color:var(--muted)">${escapeAttr(info.reason || "")}${backNote(info)}</td>
       <td style="white-space:nowrap">${info.kind === "bookedout"
         ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
         : `<button class="btn btn-icon" style="font-size:10px;padding:3px 8px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${info.kind} record (resets tomorrow)">✓ Book in anyway</button> <span style="font-size:10px;color:var(--dim)">via ${info.kind}</span>`}</td>
@@ -1043,8 +1077,10 @@ function renderRoster(el) {
       // the dashboard.
       const outInfo = campOutMap.get(r.id);
       const forcedIn = !outInfo && isForcedIn(r, rosterToday) && derivedCampOut(r.id, rosterToday);
+      // The "back" date rides along with the badge — it spans chained records,
+      // so an extended MC can't be read as ending at the first record.
       const campBadge = outInfo
-        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${CAMP_COLOR[outInfo.kind] || "#8B949E"}22;color:${CAMP_COLOR[outInfo.kind] || "#8B949E"}" title="Out of camp — ${escapeAttr(outInfo.reason || "")}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>`
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${CAMP_COLOR[outInfo.kind] || "#8B949E"}22;color:${CAMP_COLOR[outInfo.kind] || "#8B949E"}" title="Out of camp — ${escapeAttr(outInfo.reason || "")}${outInfo.back ? ` (back ${isoToDisplayDate(outInfo.back)})` : ""}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>${backLine(outInfo)}`
         : forcedIn
           ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#39D2C022;color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
           : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#3FB95018;color:var(--green)">In camp</span>`;
