@@ -90,6 +90,111 @@ module.exports = async function run() {
     ok(!h.isBookedOut({ outOfCamp: false, outSince: DATE }, DATE), "not booked");
   });
 
+  // ── Chained (back-to-back) status runs ──────────────────
+  // An extended MC is a SECOND record starting the day the first ends + 1.
+  // statusRun merges those so every "until when" reads the real end date; a
+  // genuine gap (back in camp in between) must stay two separate absences.
+  suite("helpers: statusRun (back-to-back re-issued statuses)");
+
+  const chainState = () => {
+    const s = baseState();
+    s.medical = [
+      // 1101: MC 25–26 Jun extended by a second MC 27–28 Jun → one run 25–28.
+      { d4: "1101", status: "MC", reason: "Fever", startDate: "25 Jun 2026", endDate: "26 Jun 2026" },
+      { d4: "1101", status: "MC", reason: "Fever", startDate: "27 Jun 2026", endDate: "28 Jun 2026" },
+      // 1102: MC 25–26 Jun, then a fresh MC after two days back → two runs.
+      { d4: "1102", status: "MC", reason: "Flu", startDate: "25 Jun 2026", endDate: "26 Jun 2026" },
+      { d4: "1102", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "30 Jun 2026" },
+      // 1103: a long MC with a shorter overlapping re-issue inside it.
+      { d4: "1103", status: "MC", reason: "Knee", startDate: "20 Jun 2026", endDate: "30 Jun 2026" },
+      { d4: "1103", status: "MC", reason: "Knee", startDate: "24 Jun 2026", endDate: "26 Jun 2026" },
+      // 1104: an away MC followed by an in-camp one — different dispositions,
+      // so they must NOT merge into one out-of-camp span.
+      { d4: "1104", status: "MC", reason: "Cough", startDate: "25 Jun 2026", endDate: "26 Jun 2026" },
+      { d4: "1104", status: "MC", reason: "Cough", startDate: "27 Jun 2026", endDate: "28 Jun 2026", inCamp: true }
+    ];
+    return s;
+  };
+
+  await test("adjacent re-issues merge into one run", () => {
+    const h = loadHelpers(chainState());
+    const run = h.medStatusRun(h.STATE.medical[0]);
+    eq(run.startIso, "2026-06-25", "run starts at the first record");
+    eq(run.endIso, "2026-06-28", "run ends at the extension");
+    eq(run.days, 4, "4 days total");
+    ok(run.chained, "flagged as chained");
+  });
+
+  await test("a gap keeps two absences separate", () => {
+    const h = loadHelpers(chainState());
+    const run = h.medStatusRun(h.STATE.medical[2]);
+    eq(run.endIso, "2026-06-26", "today's run still ends 26 Jun");
+    ok(!run.chained, "not chained across a real gap");
+  });
+
+  await test("an overlapping re-issue does not shorten the run", () => {
+    const h = loadHelpers(chainState());
+    // Picking the LATEST-starting record (what dedupeActiveRecordsByFamily
+    // does) used to report 26 Jun as the end, hiding the longer MC underneath.
+    const run = h.medStatusRun(h.STATE.medical[5]);
+    eq(run.startIso, "2026-06-20");
+    eq(run.endIso, "2026-06-30");
+  });
+
+  await test("away and consume-in-camp MCs never merge", () => {
+    const h = loadHelpers(chainState());
+    const run = h.medStatusRun(h.STATE.medical[6]);
+    eq(run.endIso, "2026-06-26", "away run ends before the in-camp record");
+    ok(!run.chained, "different dispositions are different runs");
+  });
+
+  await test("outOfCampMap carries the merged until/back date", () => {
+    const h = loadHelpers(chainState());
+    const info = h.outOfCampMap(DATE).get("1101");
+    eq(info.kind, "medical");
+    eq(info.until, "2026-06-28", "out until the end of the whole run");
+    eq(info.back, "2026-06-29", "back the day after");
+    // The recruit whose MC genuinely ends 26 Jun is back on the 27th.
+    eq(h.outOfCampMap(DATE).get("1102").back, "2026-06-27");
+  });
+
+  await test("recovery tag waits for the run to end, and prints once", () => {
+    const h = loadHelpers(chainState());
+    const [first, extension] = h.STATE.medical;
+    // 27 Jun: the first record has "ended" but the extension carries it on.
+    eq(h.medStatusTag(first, "2026-06-27"), null, "no MC+1 mid-run");
+    eq(h.medStatusTag(extension, "2026-06-27").tag, "MC", "still on MC");
+    // 29 Jun: the run is over — only the record that closed it ghost-tags.
+    eq(h.medStatusTag(first, "2026-06-29"), null, "inner record stays silent");
+    eq(h.medStatusTag(extension, "2026-06-29").tag, "MC+1");
+  });
+
+  await test("a copy of a record does not chain with its own original", () => {
+    // Renderers pass spread copies of a row; a copy must not look extended.
+    const s = baseState();
+    s.leave = [{ id: 7, d4: "1101", type: "Off-in-Lieu", startDate: "25 Jun 2026", endDate: "26 Jun 2026" }];
+    const h = loadHelpers(s);
+    const run = h.leaveRun({ ...s.leave[0], startIso: "2026-06-25", endIso: "2026-06-26" });
+    ok(!run.chained, "single record stays unchained");
+    eq(run.endIso, "2026-06-26");
+  });
+
+  await test("back-to-back leave of the same type is one absence", () => {
+    const s = baseState();
+    s.leave = [
+      { d4: "1101", type: "Off-in-Lieu", startDate: "25 Jun 2026", endDate: "26 Jun 2026" },
+      { d4: "1101", type: "Off-in-Lieu", startDate: "27 Jun 2026", endDate: "28 Jun 2026" },
+      // A different type on adjacent days stays its own record.
+      { d4: "1102", type: "Off-in-Lieu", startDate: "25 Jun 2026", endDate: "26 Jun 2026" },
+      { d4: "1102", type: "Annual Leave", startDate: "27 Jun 2026", endDate: "28 Jun 2026" }
+    ];
+    const h = loadHelpers(s);
+    eq(h.leaveRun(s.leave[0]).endIso, "2026-06-28");
+    ok(h.leaveRun(s.leave[0]).chained, "same type chains");
+    eq(h.leaveRun(s.leave[2]).endIso, "2026-06-26");
+    eq(h.outOfCampMap(DATE).get("1101").back, "2026-06-29", "back after both blocks");
+  });
+
   suite("helpers: IPPT multi-attempt series (drives the cross-conduct charts)");
 
   // 1101 improves 60→70→85; 1102 misses IPPT 2 and declines 80→70; 1103 is a

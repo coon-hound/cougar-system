@@ -105,4 +105,46 @@ module.exports = async function run() {
     ok(/C1201/.test(section(out, "ATTC")), "ticked borderline returnee is in ATTC");
     ok(!/C1201/.test(section(out, "OTHERS")), "not double-listed in OTHERS");
   });
+
+  // ── Back-to-back re-issues ───────────────────────────────
+  // An extended MC / a second block of leave is a NEW record starting the day
+  // after the last one ends. Reporting the covering record's own end date told
+  // the chat the recruit was back days before they actually are.
+  suite("parade: chained statuses report the whole run");
+
+  await test("ATTC states the extended MC's real end date and total days", () => {
+    const st = state();
+    // 1201's away MC is 29 Jun – 01 Jul; extend it with a second record.
+    st.medical.push({ d4: "1201", status: "MC", reason: "Flu", startDate: "02 Jul 2026", endDate: "04 Jul 2026", inCamp: false, location: "" });
+    const attc = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "ATTC");
+    ok(/Status: 6D MC \(extended\)/.test(attc), "6 days across both records: " + attc);
+    ok(/Duration: 290626 - 040726/.test(attc), "duration spans the run: " + attc);
+    ok(!/010726\b(?! -)/.test(attc.split("Duration:")[1] || ""), "no stray first-record end");
+  });
+
+  await test("a genuine gap is NOT merged into one run", () => {
+    const st = state();
+    // Back in camp 02–03 Jul, then a fresh MC — today's absence still ends 01 Jul.
+    st.medical.push({ d4: "1201", status: "MC", reason: "Flu", startDate: "04 Jul 2026", endDate: "05 Jul 2026", inCamp: false, location: "" });
+    const attc = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "ATTC");
+    ok(/Status: 3D MC$/m.test(attc), "unchanged 3D MC: " + attc);
+    ok(/Duration: 290626 - 010726/.test(attc), "ends at the real return: " + attc);
+  });
+
+  await test("OTHERS spans back-to-back leave of the same type", () => {
+    const st = state();
+    st.leave.push(
+      { id: 11, d4: "1405", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "family" },
+      { id: 12, d4: "1405", type: "Annual Leave", startDate: "01 Jul 2026", endDate: "02 Jul 2026", reason: "family" }
+    );
+    const others = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "OTHERS");
+    ok(/Duration: 290626 - 020726/.test(others), "leave run merged: " + others);
+  });
+
+  await test("strength still counts each body once across a run", () => {
+    const st = state();
+    st.medical.push({ d4: "1201", status: "MC", reason: "Flu", startDate: "02 Jul 2026", endDate: "04 Jul 2026", inCamp: false, location: "" });
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/CURRENT STRENGTH: 2/.test(out), "still 2 present, chaining is display-only");
+  });
 };

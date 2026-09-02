@@ -73,17 +73,21 @@ function normalizeParadeKey(rnRaw) {
 }
 
 // "5D MC (consume in camp)" → { raw, family:"MC", days:5, inCamp:true }.
-// family is the label minus the day-count prefix and in-camp suffix, so
-// "Excuse Running" and "Excuse Jumping" stay distinct families.
+// family is the label minus the day-count prefix and the parenthesised notes,
+// so "Excuse Running" and "Excuse Jumping" stay distinct families. "(extended)"
+// marks a status carried on by a back-to-back re-issue (see statusRun) — still
+// the same family, so it is stripped out and kept as its own flag; otherwise an
+// extended MC would diff against a plain MC as removed + added.
 function pcParseStatusLabel(raw) {
   const s = String(raw || "").trim();
   const inCamp = /consume in camp|kept in camp/i.test(s);
-  let core = s.replace(/\((?:consume in camp|kept in camp)\)/gi, "").trim();
+  const extended = /\(extended\)/i.test(s);
+  let core = s.replace(/\((?:consume in camp|kept in camp|extended)\)/gi, "").trim();
   let days = null;
   const dm = /^(\d+)\s*D\b\s*/i.exec(core);
   if (dm) { days = +dm[1]; core = core.slice(dm[0].length); }
   const family = core.replace(/\s+/g, " ").trim().toUpperCase();
-  return { raw: s, family: family || null, days, inCamp, startIso: "", endIso: "" };
+  return { raw: s, family: family || null, days, inCamp, extended, startIso: "", endIso: "" };
 }
 
 // Duration strings → {startIso, endIso}. Handles "180526 - 010626", a single

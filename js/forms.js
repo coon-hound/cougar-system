@@ -2077,26 +2077,35 @@ function paradeRN(d4) {
 
 // Duration label per chat samples ("Duration: 180526 - 010626"). Pending /
 // NIL records have no end date; emit a single-day note instead.
-function paradeDuration(record) {
-  const s = displayDateToISO(record.startDate || record.date || "");
-  const e = displayDateToISO(record.endDate || "");
+//
+// `run` is the merged span of back-to-back re-issues (statusRun / medStatusRun /
+// leaveRun). ALWAYS pass it: without it an MC extended by a second record
+// prints the first record's end date, and the chat reads it as the return
+// date — the recruit is then marked AWOL, or a body is counted twice.
+function paradeDuration(record, run) {
+  const s = (run && run.chained ? run.startIso : "") || displayDateToISO(record.startDate || record.date || "");
+  const e = (run && run.chained ? run.endIso : "") || displayDateToISO(record.endDate || "");
   if (s && e) return `${toDDMMYY(s)} - ${toDDMMYY(e)}`;
   if (s) return toDDMMYY(s);
   return "";
 }
 
-// Day count for the status line ("Status: 5D MC"). Inclusive of both ends.
-function paradeStatusLabel(record, dateIso) {
-  const s = displayDateToISO(record.startDate || "");
-  const e = displayDateToISO(record.endDate || "");
+// Day count for the status line ("Status: 5D MC"). Inclusive of both ends, and
+// counted across the whole run so an extended MC reads "4D MC (extended)"
+// rather than restarting at each re-issue.
+function paradeStatusLabel(record, dateIso, run) {
+  const chained = !!(run && run.chained);
+  const s = chained ? run.startIso : displayDateToISO(record.startDate || "");
+  const e = chained ? run.endIso : displayDateToISO(record.endDate || "");
   if (!record.status) return "";
   // A kept-in-camp MC/Warded reads "2D MC (consume in camp)" for a record flagged
   // inCamp, or "(kept in camp)" when a commander manually booked them in today.
   // The underlying status stays "MC".
-  const suffix = record.inCamp ? " (consume in camp)"
-    : (isForcedIn(STATE.roster.find(r => r.id === record.d4), dateIso || todayISO()) ? " (kept in camp)" : "");
+  const suffix = (record.inCamp ? " (consume in camp)"
+    : (isForcedIn(STATE.roster.find(r => r.id === record.d4), dateIso || todayISO()) ? " (kept in camp)" : ""))
+    + (chained ? " (extended)" : "");
   if (!s || !e) return record.status + suffix;
-  const days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
+  const days = daysBetween(s, e) + 1;
   return (days > 0 ? `${days}D ${record.status}` : record.status) + suffix;
 }
 
@@ -2116,12 +2125,16 @@ function findBorderlineReturnees(dateIso) {
   const y = new Date(dateIso); y.setDate(y.getDate() - 1);
   const yIso = y.toISOString().slice(0, 10);
   const awayMc = m => (m.status === "MC" || m.status === "Warded") && !m.inCamp;
+  const seen = new Set();
   return STATE.medical.filter(m =>
     awayMc(m) && displayDateToISO(m.endDate || "") === yIso &&
     // An extended MC is logged as a SECOND report-sick record (so the count of
     // report sicks is preserved). If any other away MC/Warded covers the parade
     // date, the recruit isn't a returnee — they're still out on the extension.
-    !STATE.medical.some(o => o !== m && o.d4 === m.d4 && awayMc(o) && medStatusActive(o, dateIso))
+    !STATE.medical.some(o => o !== m && o.d4 === m.d4 && awayMc(o) && medStatusActive(o, dateIso)) &&
+    // Overlapping re-issues can share an end date; the checklist is per person,
+    // so only offer each recruit once.
+    !seen.has(m.d4) && seen.add(m.d4)
   );
 }
 
@@ -2158,8 +2171,11 @@ function buildMedicalSection(label, dateIso, recordFilter, collectD4s) {
   }
   const byD4 = {};
   matches.forEach(m => { (byD4[m.d4] = byD4[m.d4] || []).push(m); });
-  // Collapse same-status duplicates per recruit (a re-issued MC) to the most
-  // recent record so it prints once, with the newest dates.
+  // Collapse same-status duplicates per recruit (a re-issued MC) to ONE record
+  // per family so it prints once. Dates then come from that record's merged run
+  // (medStatusRun), which spans every back-to-back re-issue — printing the
+  // single record's own end date is what made an extended MC look like it ended
+  // days early.
   Object.keys(byD4).forEach(d4 => { byD4[d4] = dedupeActiveRecordsByFamily(byD4[d4]); });
   // Order recruits by their most-severe status (MC/Warded > LD > Excuse > …) so
   // MEDICAL STATUS lists a consume-in-camp MC above LD/Excuse entries. Stable for
@@ -2185,13 +2201,14 @@ function buildMedicalSection(label, dateIso, recordFilter, collectD4s) {
     const locationLine = location ? `\nLocation: ${location}` : "";
 
     if (records.length === 1) {
-      const r = records[0];
-      return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus: ${paradeStatusLabel(r, dateIso)}\nDuration: ${paradeDuration(r)}`;
+      const r = records[0], run = medStatusRun(r);
+      return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus: ${paradeStatusLabel(r, dateIso, run)}\nDuration: ${paradeDuration(r, run)}`;
     }
     // Multi-status: stack numbered Status + Duration pairs under one R/N.
-    const subStatuses = records.map((r, i) =>
-      `${i + 1}. ${paradeStatusLabel(r, dateIso)}\nDuration: ${paradeDuration(r)}`
-    ).join("\n");
+    const subStatuses = records.map((r, i) => {
+      const run = medStatusRun(r);
+      return `${i + 1}. ${paradeStatusLabel(r, dateIso, run)}\nDuration: ${paradeDuration(r, run)}`;
+    }).join("\n");
     return `S/N: ${sn}\nR/N: ${rn}\nReason: ${reason}${locationLine}\nStatus received:\n${subStatuses}`;
   });
 
@@ -2285,7 +2302,9 @@ function buildOthersSection(dateIso, excludeD4s) {
         const s = displayDateToISO(x.startDate), e = displayDateToISO(x.endDate);
         return s && e && s <= dateIso && dateIso <= e;
       })());
-      const dur = l ? paradeDuration(l) : "";
+      // Same chaining rule as medical: two adjacent blocks of the same leave
+      // type are one absence, so the Duration must span both.
+      const dur = l ? paradeDuration(l, leaveRun(l)) : "";
       entries.push({ d4, reason: info.reason, extra: dur ? `\nDuration: ${dur}` : "" });
     } else {  // bookedout — appointment-driven, or ad-hoc out of camp
       // If they're booked out for an out-of-camp appointment today, render the
@@ -5062,9 +5081,13 @@ function buildConductChatFormat(attendanceId) {
           STATE.medical.filter(m => m.d4 === d.d4 && medStatusActive(m, date) && m.status !== "Pending")
         ).sort((x, y) => medSeverityRank(medStatusTag(y, date)?.tag) - medSeverityRank(medStatusTag(x, date)?.tag));
         if (med.length === 1) {
-          block += `\nStatus: ${paradeStatusLabel(med[0], date)}\nDuration: ${paradeDuration(med[0])}`;
+          const run = medStatusRun(med[0]);
+          block += `\nStatus: ${paradeStatusLabel(med[0], date, run)}\nDuration: ${paradeDuration(med[0], run)}`;
         } else if (med.length > 1) {
-          const sub = med.map((r, j) => `${j + 1}. ${paradeStatusLabel(r, date)}\n    Duration: ${paradeDuration(r)}`).join("\n");
+          const sub = med.map((r, j) => {
+            const run = medStatusRun(r);
+            return `${j + 1}. ${paradeStatusLabel(r, date, run)}\n    Duration: ${paradeDuration(r, run)}`;
+          }).join("\n");
           block += `\nStatus received:\n${sub}`;
         }
       }

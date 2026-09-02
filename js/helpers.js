@@ -479,6 +479,8 @@ function medStatusMoreSignificant(a, b) {
 // Collapse a recruit's active medical *records* to one per status family,
 // keeping the most recent (latest start date). Shared by the parade-state and
 // conduct-chat builders so a re-issued MC/LD prints only once (newest dates).
+// The record picked here is only the HANDLE on the family — for dates, ask
+// statusRun() for the merged span, never the record's own endDate.
 function dedupeActiveRecordsByFamily(records) {
   const best = {};
   (records || []).forEach(m => {
@@ -499,6 +501,104 @@ function daysBetween(isoA, isoB) {
   const b = new Date(isoB + "T00:00:00");
   if (isNaN(a) || isNaN(b)) return null;
   return Math.round((b - a) / 86400000);
+}
+
+// The day after an ISO date — "when are they back", given an inclusive end.
+function nextDayISO(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return "";
+  d.setDate(d.getDate() + 1);
+  const pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// ── Chained (back-to-back) status runs ───────────────────
+// A status is RE-ISSUED, not edited, when it gets extended: an MC for 02–03 Jul
+// that runs on is logged as a SECOND MC for 04–05 Jul (the two-record
+// convention keeps the report-sick count honest — see findBorderlineReturnees).
+// Read one record at a time, the recruit looks due back on the 4th when they
+// are really out until the 6th, which is exactly how a parade state gets
+// misread. A RUN is the maximal set of same-kind records for one person whose
+// date ranges touch or overlap; merged, it is the true span to display.
+//
+// Nothing may render "how long is this person out" from a single record's
+// endDate — go through statusRun (or medStatusRun / leaveRun) instead.
+
+// Do two inclusive ISO ranges belong to one unbroken run? True when they
+// overlap, or when the later one starts the very next day (a gapless re-issue).
+// A genuine gap — back in camp in between — keeps them separate.
+function rangesChain(aStart, aEnd, bStart, bEnd) {
+  if (!aStart || !aEnd || !bStart || !bEnd) return false;
+  const first = aStart <= bStart ? { e: aEnd } : { e: bEnd };
+  const second = aStart <= bStart ? { s: bStart } : { s: aStart };
+  const gap = daysBetween(first.e, second.s);
+  return gap !== null && gap <= 1;
+}
+
+// The unbroken run that `record` belongs to within `pool` (already narrowed to
+// one person + one kind of status). Grows outwards until nothing else touches
+// it, so three back-to-back MCs merge into a single span.
+// Returns { records (chronological), startIso, endIso, days, chained }.
+function statusRun(record, pool) {
+  const spanOf = r => ({
+    r,
+    s: displayDateToISO(r.startDate || r.date || "") || "",
+    e: displayDateToISO(r.endDate || "") || ""
+  });
+  const self = spanOf(record);
+  const single = { records: [record], startIso: self.s, endIso: self.e, days: null, chained: false };
+  if (!self.s || !self.e) return single;
+
+  // Exclude the record itself by id as well as identity: renderers pass spread
+  // COPIES of a row, and a copy would otherwise "chain" with its own original
+  // and mark every single-record absence as extended.
+  const isSelf = r => r === record || (record.id != null && r.id === record.id);
+  const rest = (pool || []).filter(r => !isSelf(r)).map(spanOf).filter(x => x.s && x.e);
+  const run = [self];
+  // Repeat until stable: a record that only touches a record we just absorbed
+  // still belongs to the run (02–03, 04–05, 06–07 chain in any pool order).
+  for (let grew = true; grew;) {
+    grew = false;
+    for (let i = rest.length - 1; i >= 0; i--) {
+      if (run.some(x => rangesChain(x.s, x.e, rest[i].s, rest[i].e))) {
+        run.push(rest.splice(i, 1)[0]);
+        grew = true;
+      }
+    }
+  }
+  run.sort((a, b) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
+  const startIso = run[0].s;
+  const endIso = run.reduce((max, x) => x.e > max ? x.e : max, run[0].e);
+  return {
+    records: run.map(x => x.r),
+    startIso,
+    endIso,
+    days: daysBetween(startIso, endIso) + 1,
+    chained: run.length > 1
+  };
+}
+
+// The run a medical record belongs to. Pooled by person + status family +
+// whether it is consumed in camp, so an away MC and an in-camp MC never merge
+// into one "out of camp" span — they mean opposite things for strength.
+function medStatusRun(record) {
+  if (!record) return null;
+  const fam = medStatusBaseFamily(record.status);
+  return statusRun(record, (STATE.medical || []).filter(m =>
+    m.d4 === record.d4 &&
+    medStatusBaseFamily(m.status) === fam &&
+    !!m.inCamp === !!record.inCamp
+  ));
+}
+
+// The run a leave record belongs to — same person, same leave type, so
+// back-to-back Off-in-Lieu blocks read as one absence.
+function leaveRun(record) {
+  if (!record) return null;
+  return statusRun(record, (STATE.leave || []).filter(l =>
+    l.d4 === record.d4 && (l.type || "") === (record.type || "")
+  ));
 }
 
 // Is this medical record's status active on the given ISO date?
@@ -540,42 +640,83 @@ function isForcedIn(r, dateIso) {
   return on && r.campInSince === (dateIso || todayISO());
 }
 
+// The last date a recruit stays out for the given reason, as ISO — the end of
+// the merged run, so a re-issued MC or a second block of leave extends it. Used
+// for the "out until / back on" that stops a parade state being misread.
+function outUntilISO(records, runOf) {
+  return (records || []).reduce((max, r) => {
+    const run = runOf(r);
+    const end = run ? run.endIso : "";
+    return end > max ? end : max;
+  }, "");
+}
+
 // Why a recruit is out of camp IGNORING any manual override — i.e. their
 // recorded medical (away MC/Warded, not consumed in camp) or active leave.
-// Returns { kind: "medical" | "leave", reason } or null. Shared by outOfCampMap,
-// the roster badge and bookOutToggle so the three never drift on what "out" means.
+// Returns { kind: "medical" | "leave", reason, until, back } or null (`until` is
+// the last day out, `back` the day they return — both ISO, both spanning
+// back-to-back re-issues). Shared by outOfCampMap, the roster badge and
+// bookOutToggle so the three never drift on what "out" means.
 function derivedCampOut(d4, dateIso) {
   dateIso = dateIso || todayISO();
-  const mc = STATE.medical.find(m => m.d4 === d4 && medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp);
-  if (mc) return { kind: "medical", reason: mc.status + (mc.reason ? " — " + mc.reason : "") };
-  const lv = STATE.leave.find(l => {
+  const awayMed = STATE.medical.filter(m => m.d4 === d4 && medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp);
+  if (awayMed.length) {
+    const mc = awayMed[0];
+    return withReturn({ kind: "medical", reason: mc.status + (mc.reason ? " — " + mc.reason : "") }, outUntilISO(awayMed, medStatusRun));
+  }
+  const onLeave = STATE.leave.filter(l => {
     const s = displayDateToISO(l.startDate), e = displayDateToISO(l.endDate);
     return l.d4 === d4 && s && e && s <= dateIso && dateIso <= e;
   });
-  if (lv) return { kind: "leave", reason: [lv.type, lv.reason].filter(Boolean).join(" — ") || "Leave" };
+  if (onLeave.length) {
+    const lv = onLeave[0];
+    return withReturn({ kind: "leave", reason: [lv.type, lv.reason].filter(Boolean).join(" — ") || "Leave" }, outUntilISO(onLeave, leaveRun));
+  }
   return null;
 }
 
-// d4 → { kind: "medical" | "leave" | "bookedout", reason } for everyone out of
-// camp on `dateIso`. Precedence: medical > leave > manual book-out.
+// Stamp the merged last-day-out + return date onto an out-of-camp entry.
+function withReturn(info, untilIso) {
+  info.until = untilIso || "";
+  info.back = untilIso ? nextDayISO(untilIso) : "";
+  return info;
+}
+
+// d4 → { kind: "medical" | "leave" | "bookedout", reason, until, back } for
+// everyone out of camp on `dateIso`. Precedence: medical > leave > manual
+// book-out. `until` / `back` span chained re-issues (see statusRun); a manual
+// book-out is same-day only, so it has neither.
 function outOfCampMap(dateIso) {
   dateIso = dateIso || todayISO();
   const map = new Map();
   // A manual "present" override wins over every out-reason for the day, so a
   // commander can count e.g. an in-camp-consuming MC recruit toward strength.
   const forcedIn = new Set((STATE.roster || []).filter(r => isForcedIn(r, dateIso)).map(r => r.id));
+  // Group per recruit before setting the entry: a recruit can hold more than one
+  // active away record (an MC plus a Warded), and the one they're out until is
+  // the LATEST run end across all of them, not whichever comes first in the tab.
+  const awayMed = {};
   STATE.medical.forEach(m => {
     // inCamp MC/Warded is consumed IN camp — counted present, so it never joins
     // the out-of-camp set (nor the dashboard "Out of Camp" tile / parade CURRENT).
-    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp && !forcedIn.has(m.d4) && !map.has(m.d4)) {
-      map.set(m.d4, { kind: "medical", reason: m.status + (m.reason ? " — " + m.reason : "") });
+    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp && !forcedIn.has(m.d4)) {
+      (awayMed[m.d4] = awayMed[m.d4] || []).push(m);
     }
   });
+  Object.keys(awayMed).forEach(d4 => {
+    const m = awayMed[d4][0];
+    map.set(d4, withReturn({ kind: "medical", reason: m.status + (m.reason ? " — " + m.reason : "") }, outUntilISO(awayMed[d4], medStatusRun)));
+  });
+  const onLeave = {};
   STATE.leave.forEach(l => {
     const s = displayDateToISO(l.startDate), e = displayDateToISO(l.endDate);
     if (s && e && s <= dateIso && dateIso <= e && !forcedIn.has(l.d4) && !map.has(l.d4)) {
-      map.set(l.d4, { kind: "leave", reason: [l.type, l.reason].filter(Boolean).join(" — ") || "Leave" });
+      (onLeave[l.d4] = onLeave[l.d4] || []).push(l);
     }
+  });
+  Object.keys(onLeave).forEach(d4 => {
+    const l = onLeave[d4][0];
+    map.set(d4, withReturn({ kind: "leave", reason: [l.type, l.reason].filter(Boolean).join(" — ") || "Leave" }, outUntilISO(onLeave[d4], leaveRun)));
   });
   (STATE.roster || []).forEach(r => {
     if (isBookedOut(r, dateIso) && !forcedIn.has(r.id) && !map.has(r.id)) {
@@ -598,8 +739,15 @@ function medStatusTag(record, todayIso) {
   const end = displayDateToISO(record.endDate || "");
   if (!end) return null;
   const offset = daysBetween(end, todayIso);
-  if (offset === 1 || offset === 2) return { tag: `${record.status}+${offset}`, ghostDay: offset };
-  return null;
+  if (offset !== 1 && offset !== 2) return null;
+  // Recovery only starts once the WHOLE run ends: a record that a re-issue
+  // carries on from is neither active nor recovering, and letting every record
+  // in a chain ghost-tag would print MC+1 once per record. Only the record
+  // that closes the run carries the tag. Checked last — this walks the medical
+  // layer, and it must not run for every record on every render.
+  const run = medStatusRun(record);
+  if (run && run.endIso > end) return null;
+  return { tag: `${record.status}+${offset}`, ghostDay: offset };
 }
 
 // Severity rank used to pick the most-restrictive tag when a recruit has
@@ -693,14 +841,22 @@ function medTagBadge(tag) {
 }
 
 // Format a record's date range as "16 May – 20 May (5D)" for display.
-function medDurationLabel(record) {
+// Pass `run` (from medStatusRun) wherever the label answers "how long is this
+// person out" — it merges back-to-back re-issues, so an extended MC reads
+// "16 May – 24 May (9D, extended)" instead of stopping at the first record's
+// end. Omit it for a history list, where each record shows its own dates.
+function medDurationLabel(record, run) {
   if (record.status === "Pending") return `${record.startDate || record.date || ""} · awaiting MO`;
   if (record.status === "NIL") return `${record.date || record.startDate || ""} · MO cleared, no status`;
   if (!record.startDate || !record.endDate) return record.startDate || "";
-  const start = displayDateToISO(record.startDate);
-  const end = displayDateToISO(record.endDate);
+  const chained = !!(run && run.chained);
+  const start = chained ? run.startIso : displayDateToISO(record.startDate);
+  const end = chained ? run.endIso : displayDateToISO(record.endDate);
   const days = start && end ? daysBetween(start, end) + 1 : null;
-  return `${record.startDate} – ${record.endDate}${days ? ` (${days}D)` : ""}`;
+  const startLabel = chained ? isoToDisplayDate(start) : record.startDate;
+  const endLabel = chained ? isoToDisplayDate(end) : record.endDate;
+  const note = [days ? `${days}D` : "", chained ? "extended" : ""].filter(Boolean).join(", ");
+  return `${startLabel} – ${endLabel}${note ? ` (${note})` : ""}`;
 }
 const badge = (text, cls) => `<span class="badge badge-${cls}">${text}</span>`;
 // Program pill — inline-styled (colour is dynamic per program, so it can't use
@@ -907,6 +1063,14 @@ function isoToDisplayDate(iso) {
   if (isNaN(d)) return iso;
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Compact date for tight cells: "6 Sep" this year, "6 Sep 2027" beyond it —
+// enough to be unambiguous without the year eating a phone column's width.
+function isoToShortDate(iso) {
+  const full = isoToDisplayDate(iso);
+  const year = String(iso || "").slice(0, 4);
+  return year === String(new Date().getFullYear()) ? full.replace(/\s+\d{4}$/, "") : full;
 }
 
 // "17 May 2026" or "17 May" → "2026-05-17" — for pre-filling <input type=date>.

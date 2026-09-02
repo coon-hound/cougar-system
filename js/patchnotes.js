@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 128;
+const APP_VERSION = 129;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 129,
+    date: "2 Sep 2026",
+    title: "Statuses show the full picture",
+    intro: "When someone's MC is extended, it is logged as a second MC starting the day after the first one ends. The parade state used to report only the first one, so the chat read as if they were back days early. Every status display now shows the whole stretch, plus the date they are actually back.",
+    items: [
+      { t: "🏥 Extended MC reads as one stretch", d: "MC 020726-030726 followed by MC 040726-050726 now prints \"Status: 4D MC (extended) / Duration: 020726 - 050726\" instead of stopping at 030726. Same for LD, Excuses and any custom status - and for two blocks of the same leave type back to back." },
+      { t: "🔙 \"Back <date>\" on the strength board", d: "Currently Out of Camp and the Roster's Camp column now say when each person is due back, worked out across every extension, so nobody has to add up the records themselves." },
+      { t: "🩹 Recovery tags wait for the real end", d: "The MC+1 / LD+2 recovery tags no longer fire on the day an extension picks up - they start after the whole stretch ends, and show once instead of once per record." },
+      { t: "📅 One absence, listed once", d: "Out today / This week no longer lists the same person twice when their leave continues into next week without a gap." },
+    ],
+  },
   {
     v: 128,
     date: "22 Jul 2026",
