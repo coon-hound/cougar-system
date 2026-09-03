@@ -1,0 +1,587 @@
+<title>Company Board</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* ── Company Board ────────────────────────────────────────────────────────────
+   Concept C. Single-theme by decision: a situation board, read the way a map is
+   read, so it commits to an ink-teal ground with a hairline grid and paints
+   every colour explicitly.
+   Chrome is sand — the accent never encodes data. State is carried by its own
+   four-colour scale (fit / status / out / injured) so the board is legible at a
+   zoom level where no text is drawn at all. */
+:root{
+  --ground:#091316; --grid:#122126; --board:#0C191D; --raised:#132329; --line:#1E343B;
+  --ink:#E4EDEB; --muted:#8AA3A5; --dim:#5B7276;
+  --sand:#E0CE9E; --sand-dim:#8C7C51; --sand-wash:#E0CE9E14;
+  --fit:#5FA37C; --status:#D9A441; --out:#D2685F; --msk:#A98CC8;
+  --spring:cubic-bezier(.22,1,.36,1); --pop:cubic-bezier(.34,1.45,.64,1);
+  --disp:'Barlow Condensed','Barlow',system-ui,sans-serif;
+  --sans:'Barlow',system-ui,-apple-system,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.42;
+  -webkit-font-smoothing:antialiased;overflow:hidden}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--sand);outline-offset:2px;border-radius:5px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.eyebrow{font-family:var(--disp);font-weight:600;font-size:11px;letter-spacing:.19em;
+  text-transform:uppercase;color:var(--muted)}
+
+/* ── Board surface ── */
+.wrap{position:fixed;inset:0;overflow:hidden;
+  background:
+    radial-gradient(1100px 620px at 50% 22%,#12262C,var(--ground) 76%),
+    var(--ground)}
+.grid{position:absolute;inset:0;pointer-events:none;opacity:.55;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(900px 560px at 50% 40%,#000 30%,transparent 88%)}
+.board{position:absolute;inset:0;cursor:grab;touch-action:none}
+.board.grabbing{cursor:grabbing}
+.world{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+
+/* Cluster labels sit on the board like map labels, not like headings */
+.clabel{position:absolute;font-family:var(--disp);font-weight:600;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--dim);font-size:13px;white-space:nowrap;pointer-events:none;
+  transition:opacity .4s var(--spring),transform .55s var(--spring)}
+.clabel b{color:var(--sand-dim);font-family:var(--mono);font-size:11px;letter-spacing:0;margin-left:8px}
+
+/* ── Node: one person. Three drawings, swapped by zoom level ── */
+.node{position:absolute;width:96px;height:96px;left:0;top:0;cursor:pointer;
+  transition:transform .62s var(--spring)}
+.node .plate{position:absolute;inset:0;border-radius:14px;background:var(--raised);
+  border:1px solid var(--line);overflow:hidden;
+  transition:transform .3s var(--pop),border-color .25s ease,background .45s ease,box-shadow .25s ease}
+.node:hover .plate{transform:scale(1.06);border-color:var(--sand-dim);z-index:2}
+.node[data-sel="1"] .plate{border-color:var(--sand);box-shadow:0 0 0 1px var(--sand),0 10px 30px -10px #E0CE9E4D}
+.node .bar{position:absolute;left:0;right:0;top:0;height:3px;background:var(--st);transition:background .45s ease}
+.node .dot{position:absolute;inset:0;display:grid;place-items:center}
+.node .dot i{width:20px;height:20px;border-radius:50%;background:var(--st);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--st) 22%,transparent);transition:background .45s ease}
+.node .mid,.node .full{position:absolute;inset:0;padding:9px 9px 8px;display:flex;flex-direction:column}
+.node .mid{align-items:center;justify-content:center;gap:5px}
+.node .ini{font-family:var(--disp);font-weight:700;font-size:23px;letter-spacing:.02em;line-height:1}
+.node .id{font-family:var(--mono);font-size:10.5px;line-height:1.2;color:var(--muted)}
+.node .nm{font-family:var(--disp);font-size:12.5px;font-weight:600;line-height:1.12;letter-spacing:.01em;
+  margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.node .st{font-family:var(--disp);font-size:10px;font-weight:600;letter-spacing:.09em;line-height:1.15;
+  text-transform:uppercase;color:var(--st);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical}
+.node .full .st{margin-top:3px}
+.node .sk{margin-top:auto;line-height:0}
+/* Level of detail — one layer visible at a time, cross-faded */
+.node .dot,.node .mid,.node .full{opacity:0;transition:opacity .28s ease,transform .32s var(--spring);pointer-events:none}
+.lod-far .node .dot{opacity:1}
+.lod-mid .node .mid{opacity:1}
+.lod-near .node .full{opacity:1}
+.lod-far .node .plate{border-radius:50%}
+.lod-far .node .bar{opacity:0}
+
+/* ── Floating control stacks ── */
+.hud{position:absolute;z-index:10;background:#0C191DE6;border:1px solid var(--line);border-radius:14px;
+  backdrop-filter:blur(9px)}
+.topleft{top:16px;left:16px;padding:13px 15px 14px;width:236px}
+.topleft h1{font-family:var(--disp);font-size:19px;font-weight:700;margin:0;letter-spacing:.02em}
+.topleft .sub{font-size:12.5px;color:var(--muted);margin:1px 0 12px}
+.grouprow{display:flex;gap:4px;background:#081215;border:1px solid var(--line);border-radius:10px;padding:3px;
+  position:relative;margin-bottom:12px}
+.grouprow .thumb{position:absolute;top:3px;bottom:3px;border-radius:8px;background:var(--sand-wash);
+  border:1px solid var(--sand-dim);transition:transform .44s var(--spring),width .44s var(--spring)}
+.grouprow button{position:relative;z-index:1;flex:1;height:26px;border:0;background:none;cursor:pointer;
+  font-family:var(--disp);font-size:12.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);transition:color .24s}
+.grouprow button[aria-pressed="true"]{color:var(--sand)}
+.legend{display:flex;flex-direction:column;gap:6px}
+.legend button{display:flex;align-items:center;gap:9px;width:100%;background:none;border:0;padding:2px 0;
+  cursor:pointer;text-align:left;color:var(--muted);font-size:12.5px;transition:color .2s,opacity .2s}
+.legend button:hover{color:var(--ink)}
+.legend button[data-off="1"]{opacity:.34}
+.legend i{width:9px;height:9px;border-radius:3px;flex:0 0 9px}
+.legend b{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink);font-weight:500}
+
+.topright{top:16px;right:16px;padding:12px 14px;width:180px}
+.topright .n{font-family:var(--mono);font-size:30px;font-weight:500;letter-spacing:-.02em;line-height:1;margin-top:3px}
+.topright .n small{font-size:14px;color:var(--dim)}
+.topright .d{font-size:12px;color:var(--muted);margin-top:5px}
+
+.zoomer{position:absolute;right:16px;bottom:108px;z-index:10;display:flex;flex-direction:column;gap:1px}
+.zoomer button{width:36px;height:34px;background:#0C191DE6;border:1px solid var(--line);color:var(--muted);
+  cursor:pointer;font-size:15px;display:grid;place-items:center;backdrop-filter:blur(9px);
+  transition:color .2s,background .2s}
+.zoomer button:first-child{border-radius:11px 11px 0 0}
+.zoomer button:last-child{border-radius:0 0 11px 11px;font-family:var(--disp);font-size:11px;font-weight:600;letter-spacing:.08em}
+.zoomer button:hover{color:var(--sand);background:#15282E}
+
+/* ── Scrubber: drag the cycle and watch the board change ── */
+.scrub{position:absolute;left:50%;transform:translateX(-50%);bottom:18px;z-index:12;width:min(680px,calc(100vw - 32px));
+  padding:11px 16px 13px}
+.scrub .row{display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+.scrub .row b{font-family:var(--disp);font-size:16px;font-weight:600;letter-spacing:.03em}
+.scrub .row .today{font-family:var(--disp);font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ground);background:var(--sand);border-radius:5px;padding:2px 7px}
+.scrub .row .sp{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.track{position:relative;height:30px}
+.track .line{position:absolute;left:0;right:0;top:13px;height:4px;border-radius:99px;background:#0A171B;
+  border:1px solid var(--line)}
+.track .fill{position:absolute;left:0;top:13px;height:4px;border-radius:99px;background:var(--sand-dim)}
+.track .mk{position:absolute;top:6px;width:2px;height:18px;border-radius:2px;background:#2A4A52}
+.track .mk[data-c="1"]{background:var(--sand-dim);height:22px;top:4px}
+.track input{position:absolute;inset:0;width:100%;height:30px;margin:0;background:none;
+  -webkit-appearance:none;appearance:none;cursor:ew-resize}
+.track input::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
+  background:var(--sand);border:3px solid var(--ground);box-shadow:0 2px 10px #0008;cursor:grab;margin-top:0}
+.track input::-moz-range-thumb{width:17px;height:17px;border-radius:50%;background:var(--sand);
+  border:3px solid var(--ground);cursor:grab}
+.track input:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px #E0CE9E66}
+.ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:1px}
+
+/* ── Detail rail ── */
+.rail{position:absolute;top:0;right:0;bottom:0;width:min(348px,86vw);z-index:20;background:#0B171BF7;
+  border-left:1px solid var(--line);backdrop-filter:blur(14px);transform:translateX(101%);
+  transition:transform .5s var(--spring);display:flex;flex-direction:column}
+.rail[data-open="1"]{transform:none}
+.rail header{padding:16px 16px 13px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start}
+.rail .av{width:44px;height:44px;flex:0 0 44px;border-radius:13px;display:grid;place-items:center;
+  background:var(--raised);border:1px solid var(--line);font-family:var(--disp);font-weight:700;font-size:17px}
+.rail h2{font-family:var(--disp);font-size:19px;font-weight:600;margin:0;letter-spacing:.02em}
+.rail .x{margin-left:auto;width:28px;height:28px;flex:0 0 28px;border-radius:8px;border:1px solid var(--line);
+  background:var(--raised);cursor:pointer;color:var(--muted);display:grid;place-items:center;
+  transition:transform .24s var(--pop),color .2s}
+.rail .x:hover{transform:rotate(90deg);color:var(--out)}
+.rail .b{overflow-y:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:15px}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kv div{background:#0A1519;border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.kv b{display:block;font-family:var(--mono);font-size:16px;font-weight:500;margin-top:1px}
+.chart{background:#0A1519;border:1px solid var(--line);border-radius:11px;padding:11px 11px 8px}
+.strip{display:flex;gap:3px}
+.strip span{flex:1;height:26px;border-radius:4px;background:#12242A;position:relative;
+  transition:transform .2s var(--pop)}
+.strip span:hover{transform:scaleY(1.16)}
+.stripwrap{display:flex;flex-direction:column;gap:5px}
+.striplab{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.tag{font-family:var(--disp);font-size:11.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+  padding:3px 8px;border-radius:6px;white-space:nowrap}
+
+.hint{position:absolute;left:16px;bottom:22px;z-index:10;font-size:12px;color:var(--dim);
+  display:flex;flex-direction:column;gap:3px;pointer-events:none}
+.hint kbd{font-family:var(--mono);font-size:10.5px;background:var(--raised);border:1px solid var(--line);
+  border-radius:4px;padding:1px 5px;color:var(--muted)}
+@media (max-width:900px){.hint,.topright{display:none}.topleft{width:210px}}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+</style>
+
+<div class="wrap">
+  <div class="grid"></div>
+  <div class="board" id="board"><div class="world" id="world"></div></div>
+
+  <div class="hud topleft">
+    <h1>Company Board</h1>
+    <p class="sub">51 people, one surface. Zoom for detail.</p>
+    <div class="grouprow" id="groupRow">
+      <span class="thumb"></span>
+      <button data-g="plt" aria-pressed="true">Platoon</button>
+      <button data-g="sect" aria-pressed="false">Section</button>
+      <button data-g="state" aria-pressed="false">State</button>
+    </div>
+    <div class="eyebrow" style="margin-bottom:7px">State · click to mute</div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="hud topright">
+    <div class="eyebrow">Present</div>
+    <div class="n" id="presentN">—<small id="presentTot"></small></div>
+    <div class="d" id="presentD">—</div>
+  </div>
+
+  <div class="zoomer">
+    <button id="zIn" aria-label="Zoom in">+</button>
+    <button id="zOut" aria-label="Zoom out">–</button>
+    <button id="zFit" aria-label="Fit board to screen">FIT</button>
+  </div>
+
+  <div class="hud scrub">
+    <div class="row"><b id="scrubDate">—</b><span class="today" id="todayTag">today</span>
+      <span class="sp" id="scrubNote"></span></div>
+    <div class="track" id="track">
+      <div class="line"></div><div class="fill" id="fill"></div>
+      <div id="marks"></div>
+      <input type="range" id="range" min="-35" max="0" value="0" step="1" aria-label="Day in the training cycle">
+    </div>
+    <div class="ticks"><span id="tickA"></span><span id="tickB"></span></div>
+  </div>
+
+  <div class="hint">
+    <span><kbd>drag</kbd> pan · <kbd>scroll</kbd> pan · <kbd>⌘/ctrl + scroll</kbd> zoom</span>
+    <span><kbd>double-click</kbd> a person to zoom in</span>
+  </div>
+
+  <aside class="rail" id="rail" data-open="0" aria-hidden="true"></aside>
+</div>
+
+<script>
+// ── Synthetic company (mirrors scripts/dev-seed.mjs; these people do not exist) ──
+const GIVEN=["WEI MING","JUN HAO","ZHI HAO","YI XUAN","JIA JUN","KAI XIN","ARJUN","FAIZAL","RYAN","MARCUS","DARREN","ELROY","SHAWN","BENJAMIN"];
+const SUR=["TAN","LIM","LEE","NG","WONG","CHAN","KUMAR","RAHMAN","GOH","TEO","ONG","SIM","YEO","CHUA","KOH","LOW","ANG","HO"];
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const d2=n=>String(n).padStart(2,"0");
+const at=o=>{const d=new Date();d.setDate(d.getDate()+o);return d};
+const day=(o=0)=>{const d=at(o);return d.getDate()+" "+MONTHS[d.getMonth()]};
+const dayLong=o=>{const d=at(o);return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`};
+const frac=(i,s)=>{const v=Math.sin(i*12.9898+s*78.233)*43758.5453;return v-Math.floor(v)};
+const pick=(a,i)=>a[i%a.length];
+const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const REDUCE=matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+const PEOPLE=[];
+for(let plt=1;plt<=3;plt++)for(let n=1;n<=15;n++){
+  const i=PEOPLE.length,ht=165+(i%20),wt=55+(i%25);
+  PEOPLE.push({idx:i,id:"C"+plt+"1"+d2(n),name:pick(GIVEN,i)+" "+pick(SUR,i),plt,sect:Math.ceil(n/5),
+    role:"Recruit",bmi:+(wt/((ht/100)**2)).toFixed(1),rsi:Math.floor(frac(i,3)*5),
+    ippt:61+Math.floor(frac(i,9)*34),
+    hr:Array.from({length:6},(_,k)=>132+Math.round(frac(i,k+1)*46))});
+}
+for(let c=1;c<=6;c++)PEOPLE.push({idx:PEOPLE.length,id:d2(c).padStart(4,"0"),
+  name:pick(GIVEN,c+2)+" "+pick(SUR,c+5),plt:Math.ceil(c/2),sect:0,role:"Commander",
+  rank:pick(["CPT","LTA","3SG","2SG"],c),bmi:23.4,rsi:0,ippt:78,hr:[150,148,152,145,149,147]});
+
+// Status windows. Today's picture is hand-written; the rest of the cycle is
+// generated so scrubbing back through the six weeks shows a company that moves.
+const EVENTS=[];
+const add=(i,status,from,to,detail)=>EVENTS.push({i,status,from,to,detail});
+add(3,"MC",-1,2,"Fever · MO Camp");
+add(24,"MC+1",0,0,"Trailing tag, auto");
+add(7,"LD",-4,3,"Light Duty · ankle");
+add(12,"Excuse Heavy Load",-10,9,"Lower back");
+add(16,"RMJ",-2,2,"Excuse Run March Jump");
+add(21,"Warded",-3,4,"SGH Ward 44");
+add(28,"Leave",0,1,"Off-in-Lieu");
+add(31,"Course",-1,1,"SISPEC brief");
+add(33,"MA",0,0,"1400h NUH · out of camp");
+add(38,"Guard Duty",0,0,"Camp guard, 2nd relief");
+add(41,"MSK",-18,14,"R knee · physio wk 3");
+add(9,"MSK",-9,5,"L ankle · cleared soon");
+add(22,"MSK",-26,21,"Lower back · 3rd episode");
+const HIST=["MC","LD","Leave","MSK","RMJ","Course"];
+PEOPLE.forEach(p=>{
+  const n=Math.floor(frac(p.idx,17)*2.4);
+  for(let k=0;k<n;k++){
+    const start=-34+Math.floor(frac(p.idx,k+31)*30);
+    const len=1+Math.floor(frac(p.idx,k+47)*4);
+    add(p.idx,pick(HIST,p.idx+k),start,start+len,"Earlier in the cycle");
+  }
+});
+const OUTSIDE=["MC","Warded","Leave","Course","MA"];
+function stateAt(p,d){
+  const ev=EVENTS.filter(e=>e.i===p.idx&&d>=e.from&&d<=e.to)
+    .sort((a,b)=>OUTSIDE.indexOf(b.status)-OUTSIDE.indexOf(a.status))[0];
+  if(!ev)return{k:"fit",status:"",detail:""};
+  const k=OUTSIDE.includes(ev.status)?"out":ev.status==="MSK"?"msk":"status";
+  return{k,status:ev.status,detail:ev.detail};
+}
+const CONDUCTS=[{name:"Orientation Run",at:-33},{name:"Metabolic Circuit 1",at:-26},
+  {name:"Route March 4km",at:-19},{name:"IPPT 1",at:-12},{name:"Strength Training 1",at:-5},
+  {name:"2.4km Run",at:0}];
+const COLOR={fit:"var(--fit)",status:"var(--status)",out:"var(--out)",msk:"var(--msk)"};
+const LABEL={fit:"In camp, no status",status:"On a status",out:"Out of camp",msk:"MSK / physio"};
+const ini=p=>p.name.split(" ").map(w=>w[0]).slice(0,2).join("");
+const sparkPath=(v,w,h)=>{const mn=Math.min(...v),mx=Math.max(...v),r=mx-mn||1;
+  return v.map((n,i)=>(i?"L":"M")+(i*(w/(v.length-1))).toFixed(1)+" "+(h-((n-mn)/r)*h).toFixed(1)).join(" ")};
+
+// ── View state ───────────────────────────────────────────────────────────────
+const S={x:0,y:0,z:1,group:"plt",d:0,sel:null,mute:{}};
+const $=s=>document.querySelector(s);
+const board=$("#board"),world=$("#world"),rail=$("#rail");
+const CELL=114,NODE=96;
+// Where each node sits in board space. Kept here rather than read back out of
+// style.transform — the browser normalises that string, and parsing it back is
+// how a fit-to-screen silently starts fitting the wrong box.
+let POS={};
+
+// Build nodes once; every later change is a transform or a colour.
+world.innerHTML=PEOPLE.map(p=>`
+  <div class="node" data-id="${p.id}" data-idx="${p.idx}" style="--st:var(--fit)">
+    <div class="plate">
+      <div class="bar"></div>
+      <div class="dot"><i></i></div>
+      <div class="mid"><div class="ini">${ini(p)}</div></div>
+      <div class="full">
+        <div class="id">${p.id}</div>
+        <div class="nm">${esc(p.role==="Commander"?p.rank+" "+p.name:p.name)}</div>
+        <div class="sk"></div>
+        <div class="st"></div>
+      </div>
+    </div>
+  </div>`).join("")+
+  ["l1","l2","l3","l4"].map(k=>`<div class="clabel" data-l="${k}"></div>`).join("");
+const NODES=[...world.querySelectorAll(".node")];
+NODES.forEach((el,i)=>{
+  const p=PEOPLE[i];
+  if(p.hr.length)el.querySelector(".sk").innerHTML=
+    `<svg width="66" height="16" viewBox="0 0 66 16" aria-hidden="true">
+      <path d="${sparkPath(p.hr,66,14)}" fill="none" stroke="var(--st)" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round" opacity=".9" transform="translate(0,1)"/></svg>`;
+});
+
+// ── Layout: positions are transforms, so regrouping animates for free ────────
+function layout(){
+  const pos={},labels=[];
+  const visible=PEOPLE.filter(p=>!S.mute[stateAt(p,S.d).k]);
+  if(S.group==="plt"||S.group==="sect"){
+    // Four quadrants: three platoons and company HQ. Each row of five is one
+    // section, so the block you see is the block that falls in.
+    const COLS=5,QX=COLS*CELL+78,QY=3*CELL+78;
+    [1,2,3].forEach((plt,pi)=>{
+      const g=visible.filter(p=>p.plt===plt&&p.role==="Recruit");
+      const ordered=S.group==="sect"
+        ? g.slice().sort((a,b)=>a.sect-b.sect||a.id.localeCompare(b.id)) : g;
+      const x0=(pi%2)*QX, y0=Math.floor(pi/2)*QY;
+      ordered.forEach((p,i)=>{pos[p.idx]={x:x0+(i%COLS)*CELL,y:y0+Math.floor(i/COLS)*CELL}});
+      labels.push({k:"l"+(pi+1),x:x0,y:y0-34,t:`Platoon ${plt}`,n:g.length});
+    });
+    const cm=visible.filter(p=>p.role==="Commander");
+    const hx=QX,hy=QY;
+    cm.forEach((p,i)=>{pos[p.idx]={x:hx+(i%COLS)*CELL,y:hy+Math.floor(i/COLS)*CELL}});
+    labels.push({k:"l4",x:hx,y:hy-34,t:"Company HQ",n:cm.length});
+  }else{
+    // Stacked bands, worst first. Regrouping is the whole point of the board:
+    // the same 51 tiles fly into a shape that answers a different question.
+    const COLS=12;let y0=0;
+    ["out","status","msk","fit"].forEach((k,ki)=>{
+      const g=visible.filter(p=>stateAt(p,S.d).k===k);
+      g.forEach((p,i)=>{pos[p.idx]={x:(i%COLS)*CELL,y:y0+Math.floor(i/COLS)*CELL}});
+      labels.push({k:"l"+(ki+1),x:0,y:y0-32,t:LABEL[k],n:g.length});
+      y0+=Math.max(1,Math.ceil(g.length/COLS))*CELL+64;
+    });
+  }
+  POS=pos;
+  NODES.forEach((el,i)=>{
+    const p=pos[i];
+    if(!p){el.style.opacity="0";el.style.pointerEvents="none";return}
+    el.style.opacity="1";el.style.pointerEvents="";
+    el.style.transform=`translate(${p.x}px,${p.y}px)`;
+  });
+  world.querySelectorAll(".clabel").forEach(el=>{el.style.opacity="0"});
+  labels.forEach(l=>{
+    const el=world.querySelector(`[data-l="${l.k}"]`);if(!el)return;
+    el.innerHTML=`${esc(l.t)}<b>${l.n}</b>`;el.style.opacity="1";
+    el.style.transform=`translate(${l.x}px,${l.y}px)`;
+  });
+  return labels;
+}
+
+// ── Paint: state colours for the scrubbed day ────────────────────────────────
+function paint(){
+  const counts={fit:0,status:0,out:0,msk:0};
+  NODES.forEach((el,i)=>{
+    const s=stateAt(PEOPLE[i],S.d);
+    counts[s.k]++;
+    el.style.setProperty("--st",COLOR[s.k]);
+    el.querySelectorAll(".st").forEach(x=>x.textContent=s.status||"In camp");
+  });
+  $("#legend").innerHTML=["fit","status","msk","out"].map(k=>
+    `<button data-k="${k}"${S.mute[k]?' data-off="1"':""}><i style="background:${COLOR[k]}"></i>
+      <span>${LABEL[k]}</span><b>${counts[k]}</b></button>`).join("");
+  const present=PEOPLE.length-counts.out;
+  $("#presentN").innerHTML=`${present}<small> / ${PEOPLE.length}</small>`;
+  $("#presentD").textContent=`${counts.out} out · ${counts.status+counts.msk} on a status`;
+  const c=CONDUCTS.find(x=>x.at===S.d);
+  $("#scrubDate").textContent=dayLong(S.d);
+  $("#todayTag").style.display=S.d===0?"":"none";
+  $("#scrubNote").textContent=c?c.name:(S.d===0?"":`${-S.d} days ago`);
+  return counts;
+}
+
+// ── Camera ───────────────────────────────────────────────────────────────────
+function applyCam(){
+  world.style.transform=`translate(${S.x}px,${S.y}px) scale(${S.z})`;
+  // Three drawings of a person. The thresholds are set so that a whole-company
+  // fit lands in "mid" — initials and a state bar, legible at 50px — rather
+  // than dropping straight to dots the moment you look at everyone at once.
+  const lod=S.z<.5?"lod-far":S.z<1.05?"lod-mid":"lod-near";
+  board.classList.remove("lod-far","lod-mid","lod-near");board.classList.add(lod);
+}
+function bounds(){
+  let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
+  Object.values(POS).forEach(({x,y})=>{
+    mnx=Math.min(mnx,x);mny=Math.min(mny,y);mxx=Math.max(mxx,x+NODE);mxy=Math.max(mxy,y+NODE);
+  });
+  if(mnx>mxx)return{x:0,y:0,w:600,h:400};
+  // The cluster labels sit 34px above the top row; leave room for them.
+  return{x:mnx,y:mny-48,w:mxx-mnx,h:mxy-mny+48};
+}
+function fit(animate=true){
+  const b=bounds(),W=innerWidth,H=innerHeight;
+  // Asymmetric padding: the control stack owns the left edge, the strength
+  // readout the right, and the scrubber the bottom.
+  const wide=W>900;
+  const padL=wide?266:24,padR=wide?208:24,padTop=104,padBot=132;
+  const z=Math.min((W-padL-padR)/b.w,(H-padTop-padBot)/b.h,1.55);
+  const nz=Math.max(.42,Math.min(2.4,z));
+  const nx=padL+((W-padL-padR)-b.w*nz)/2-b.x*nz;
+  const ny=padTop+((H-padTop-padBot)-b.h*nz)/2-b.y*nz;
+  camTo(nx,ny,nz,animate);
+}
+let camAnim;
+function camTo(x,y,z,animate=true){
+  cancelAnimationFrame(camAnim);
+  if(!animate||REDUCE){S.x=x;S.y=y;S.z=z;applyCam();return}
+  const x0=S.x,y0=S.y,z0=S.z,t0=performance.now(),dur=620;
+  const step=t=>{const k=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-k,3);
+    S.x=x0+(x-x0)*e;S.y=y0+(y-y0)*e;S.z=z0+(z-z0)*e;applyCam();
+    if(k<1)camAnim=requestAnimationFrame(step)};
+  camAnim=requestAnimationFrame(step);
+}
+function zoomAt(cx,cy,factor){
+  const nz=Math.max(.45,Math.min(2.4,S.z*factor));
+  const k=nz/S.z;
+  S.x=cx-(cx-S.x)*k;S.y=cy-(cy-S.y)*k;S.z=nz;applyCam();
+}
+
+// Pan with inertia
+let drag=null,vx=0,vy=0,inertia;
+board.addEventListener("pointerdown",e=>{
+  if(e.target.closest(".hud,.rail"))return;
+  cancelAnimationFrame(inertia);cancelAnimationFrame(camAnim);
+  drag={x:e.clientX,y:e.clientY,t:performance.now(),moved:0};
+  board.classList.add("grabbing");board.setPointerCapture(e.pointerId);
+});
+board.addEventListener("pointermove",e=>{
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y,dt=Math.max(1,performance.now()-drag.t);
+  S.x+=dx;S.y+=dy;vx=dx/dt*16;vy=dy/dt*16;drag.moved+=Math.abs(dx)+Math.abs(dy);
+  drag.x=e.clientX;drag.y=e.clientY;drag.t=performance.now();applyCam();
+});
+const endDrag=()=>{
+  if(!drag)return;
+  const moved=drag.moved;drag=null;board.classList.remove("grabbing");
+  if(REDUCE||moved<4)return;
+  const glide=()=>{vx*=.92;vy*=.92;S.x+=vx;S.y+=vy;applyCam();
+    if(Math.abs(vx)>.08||Math.abs(vy)>.08)inertia=requestAnimationFrame(glide)};
+  inertia=requestAnimationFrame(glide);
+};
+board.addEventListener("pointerup",endDrag);
+board.addEventListener("pointercancel",endDrag);
+board.addEventListener("wheel",e=>{
+  if(e.target.closest(".hud,.rail"))return;
+  e.preventDefault();cancelAnimationFrame(inertia);
+  if(e.ctrlKey||e.metaKey)zoomAt(e.clientX,e.clientY,Math.pow(.99,e.deltaY));
+  else{S.x-=e.deltaX;S.y-=e.deltaY;applyCam()}
+},{passive:false});
+$("#zIn").onclick=()=>zoomAt(innerWidth/2,innerHeight/2,1.35);
+$("#zOut").onclick=()=>zoomAt(innerWidth/2,innerHeight/2,1/1.35);
+$("#zFit").onclick=()=>fit();
+
+// ── Selection ────────────────────────────────────────────────────────────────
+board.addEventListener("click",e=>{
+  const n=e.target.closest(".node");
+  if(!n)return;
+  select(n.dataset.id);
+});
+board.addEventListener("dblclick",e=>{
+  const n=e.target.closest(".node");if(!n)return;
+  const p=POS[+n.dataset.idx];if(!p)return;
+  const z=1.7,cx=p.x+NODE/2,cy=p.y+NODE/2;
+  camTo(innerWidth/2-cx*z-90,innerHeight/2-cy*z,z);
+});
+function select(id){
+  const p=PEOPLE.find(x=>x.id===id);if(!p)return;
+  S.sel=id;
+  NODES.forEach(el=>{if(el.dataset.id===id)el.setAttribute("data-sel","1");else el.removeAttribute("data-sel")});
+  const s=stateAt(p,S.d);
+  const v=p.hr.length?p.hr:[145,150,148,155,152,158];
+  const w=310,h=70;
+  rail.innerHTML=`<header>
+      <div class="av" style="color:${COLOR[s.k]}">${ini(p)}</div>
+      <div style="min-width:0"><h2>${esc(p.role==="Commander"?p.rank+" "+p.name:p.name)}</h2>
+        <div class="mono" style="font-size:12px;color:var(--muted)">${p.id} · ${p.role==="Commander"?"Company HQ":"P"+p.plt+" Sect "+p.sect}</div></div>
+      <button class="x" id="railClose" aria-label="Close">✕</button></header>
+    <div class="b">
+      <div class="tag" style="color:${COLOR[s.k]};background:color-mix(in srgb,${COLOR[s.k]} 15%,transparent);align-self:flex-start">
+        ${esc(s.status||"In camp, no status")}</div>
+      ${s.detail?`<div style="font-size:13px;color:var(--muted);margin-top:-9px">${esc(s.detail)}</div>`:""}
+      <div class="kv">
+        <div><span class="eyebrow">BMI</span><b>${p.bmi}</b></div>
+        <div><span class="eyebrow">IPPT</span><b>${p.ippt}</b></div>
+        <div><span class="eyebrow">RSI</span><b style="color:${p.rsi>=3?"var(--out)":"inherit"}">${p.rsi}</b></div>
+      </div>
+      <div class="stripwrap">
+        <div class="eyebrow">Six weeks, day by day</div>
+        <div class="strip">${Array.from({length:36},(_,k)=>{
+          const d=-35+k,st=stateAt(p,d);
+          return `<span title="${dayLong(d)} — ${esc(st.status||"in camp")}" style="background:${
+            st.k==="fit"?"#12242A":COLOR[st.k]};${d===S.d?"outline:1.5px solid var(--sand);outline-offset:1px":""}"></span>`}).join("")}</div>
+        <div class="striplab"><span>${day(-35)}</span><span>today</span></div>
+      </div>
+      <div><div class="eyebrow" style="margin-bottom:7px">Avg heart rate, last 6 conducts</div>
+        <div class="chart">
+          <svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:70px" aria-hidden="true">
+            <line x1="0" y1="${h-1}" x2="${w}" y2="${h-1}" stroke="var(--line)" stroke-width="1"/>
+            <path d="${sparkPath(v,w,h-8)}" fill="none" stroke="var(--sand)" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" transform="translate(0,4)"/>
+          </svg>
+          <div class="mono" style="display:flex;justify-content:space-between;font-size:10px;color:var(--dim);margin-top:3px">
+            <span>${Math.min(...v)} bpm</span><span>peak ${Math.max(...v)} bpm</span></div>
+        </div></div>
+      <div><div class="eyebrow" style="margin-bottom:6px">Conducts this cycle</div>
+        ${CONDUCTS.slice().reverse().map(c=>{
+          const st=stateAt(p,c.at);
+          return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px">
+            <span class="mono" style="font-size:11px;color:var(--dim);flex:0 0 46px">${day(c.at)}</span>
+            <span style="flex:1">${esc(c.name)}</span>
+            <span class="tag" style="color:${st.k==="fit"?"var(--fit)":COLOR[st.k]};background:color-mix(in srgb,${st.k==="fit"?"var(--fit)":COLOR[st.k]} 14%,transparent)">${
+              st.k==="out"?"Absent":st.k==="fit"?"Took part":esc(st.status)}</span></div>`}).join("")}
+      </div>
+    </div>`;
+  rail.dataset.open="1";rail.setAttribute("aria-hidden","false");
+}
+rail.addEventListener("click",e=>{if(e.target.closest("#railClose"))closeRail()});
+function closeRail(){rail.dataset.open="0";rail.setAttribute("aria-hidden","true");S.sel=null;
+  NODES.forEach(el=>el.removeAttribute("data-sel"))}
+addEventListener("keydown",e=>{if(e.key==="Escape"&&rail.dataset.open==="1")closeRail()});
+
+// ── Controls ─────────────────────────────────────────────────────────────────
+const gr=$("#groupRow");
+function groupThumb(){const b=gr.querySelector('[aria-pressed="true"]'),t=gr.querySelector(".thumb");
+  t.style.width=b.offsetWidth+"px";t.style.transform=`translateX(${b.offsetLeft-3}px)`}
+gr.addEventListener("click",e=>{
+  const b=e.target.closest("button[data-g]");if(!b)return;
+  gr.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+  S.group=b.dataset.g;groupThumb();layout();setTimeout(()=>fit(),120);
+});
+$("#legend").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-k]");if(!b)return;
+  S.mute[b.dataset.k]=!S.mute[b.dataset.k];paint();layout();
+});
+
+// Scrubber
+const range=$("#range");
+$("#marks").innerHTML=CONDUCTS.map(c=>
+  `<div class="mk" data-c="1" style="left:${((c.at+35)/35*100).toFixed(2)}%"></div>`).join("");
+$("#tickA").textContent=day(-35);$("#tickB").textContent="today";
+range.addEventListener("input",()=>{
+  S.d=+range.value;
+  $("#fill").style.width=((S.d+35)/35*100).toFixed(2)+"%";
+  paint();
+  if(S.group==="state")layout();
+  if(S.sel)select(S.sel);
+});
+$("#fill").style.width="100%";
+
+// ── Go ───────────────────────────────────────────────────────────────────────
+paint();layout();groupThumb();
+requestAnimationFrame(()=>{
+  fit(false);
+  // A short settle-in so the board reads as arriving, not as a jump cut. It
+  // starts from a visible state and eases the last 6% of the zoom.
+  if(!REDUCE){
+    const x=S.x,y=S.y,z=S.z;
+    S.z=z*.94;S.x=x+(innerWidth/2)*(1-.94);S.y=y+(innerHeight/2)*(1-.94);applyCam();
+    requestAnimationFrame(()=>camTo(x,y,z,true));
+  }
+});
+addEventListener("resize",()=>fit(false));
+</script>

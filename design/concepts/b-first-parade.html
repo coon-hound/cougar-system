@@ -1,0 +1,723 @@
+<title>First Parade</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Saira+Condensed:wght@500;600;700&family=Saira:wght@400;500;600;700&display=swap">
+<style>
+/* ── First Parade ─────────────────────────────────────────────────────────────
+   Concept B. Single-theme by decision: this is read outdoors at 0630 on a phone
+   held at arm's length, so it commits to a daylight-legible light UI and paints
+   every colour explicitly rather than borrowing the host ground.
+   Accent is a deep field olive — the uniform's own colour — which leaves amber
+   and red to mean only "watch this" and "wrong". */
+:root{
+  --paper:#F4F6F1; --card:#FFFFFF; --sunk:#EDF0E8;
+  --ink:#161B14; --body:#3E463A; --muted:#727C6C; --line:#DFE4D7; --line-soft:#EAEEE4;
+  --olive:#3F5B2E; --olive-lift:#6E8C3A; --olive-wash:#E9EFDD; --olive-ink:#26361B;
+  --warn:#A9660B; --warn-wash:#FBF0DF; --crit:#9E241A; --crit-wash:#FBE9E6;
+  --slate:#33566B; --slate-wash:#E6EEF2;
+  --spring:cubic-bezier(.22,1,.36,1); --pop:cubic-bezier(.34,1.5,.64,1);
+  --disp:'Saira Condensed','Saira',system-ui,sans-serif;
+  --sans:'Saira',system-ui,-apple-system,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.45;
+  -webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--olive);outline-offset:2px;border-radius:6px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.eyebrow{font-family:var(--disp);font-weight:600;font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted)}
+
+/* ── Page: pitch note beside the device on desktop, device alone on a phone ── */
+.pitch{max-width:1180px;margin:0 auto;padding:34px 24px 44px;display:grid;
+  grid-template-columns:minmax(0,1fr) auto;gap:52px;align-items:center;min-height:100vh}
+.note h1{font-family:var(--disp);font-size:clamp(30px,4.4vw,46px);font-weight:700;line-height:1.02;
+  letter-spacing:-.005em;margin:0 0 4px;text-wrap:balance}
+.note .kicker{font-family:var(--disp);font-size:12px;font-weight:600;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--olive);margin-bottom:12px}
+.note p{max-width:56ch;color:var(--body);margin:0 0 22px;font-size:16px}
+.note ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:14px;max-width:52ch}
+.note li{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
+.note li b{display:block;font-family:var(--disp);font-size:15px;letter-spacing:.01em}
+.note li span{color:var(--body);font-size:14px}
+.note li .n{font-family:var(--mono);font-size:11px;color:var(--olive);background:var(--olive-wash);
+  border-radius:6px;padding:3px 7px;line-height:1.2;margin-top:2px}
+.try{margin-top:26px;display:inline-flex;align-items:center;gap:9px;font-size:13.5px;color:var(--muted);
+  border:1px dashed var(--line);border-radius:9px;padding:9px 13px}
+@media (max-width:1000px){.pitch{grid-template-columns:1fr;gap:30px;padding:26px 18px 34px}}
+
+/* ── Device ── */
+.device{width:392px;height:min(806px,calc(100vh - 68px));min-height:620px;flex:0 0 auto;
+  background:var(--card);border-radius:46px;padding:11px;position:relative;
+  box-shadow:0 2px 3px #1A2A0E14,0 26px 60px -22px #1A2A0E4D,0 0 0 1.5px #D4DACB inset;
+  border:1px solid #C9D0BF}
+.screen{position:relative;height:100%;border-radius:36px;overflow:hidden;background:var(--paper);
+  display:flex;flex-direction:column;isolation:isolate}
+@media (max-width:560px){
+  body{background:var(--paper)}
+  .pitch{padding:0;gap:0;min-height:0}
+  .note{padding:22px 18px 6px}
+  .device{width:100%;height:100dvh;min-height:0;border-radius:0;padding:0;border:0;box-shadow:none}
+  .screen{border-radius:0}
+}
+
+/* ── App chrome ── */
+.statusbar{height:26px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+  padding:0 22px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.appbar{flex:0 0 auto;padding:4px 18px 10px}
+.appbar .d{font-family:var(--disp);font-size:12px;font-weight:600;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--olive)}
+.appbar h2{font-family:var(--disp);font-size:26px;font-weight:700;margin:0;letter-spacing:-.01em}
+.scroll{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0 14px 96px;
+  -webkit-overflow-scrolling:touch}
+.scroll::-webkit-scrollbar{width:0}
+
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.stagger>*{animation:rise .5s var(--spring) both;animation-delay:calc(var(--i,0)*34ms)}
+
+/* Strength band — the number the whole morning turns on */
+.band{background:linear-gradient(158deg,var(--olive),#2E4520);color:#F2F6EA;border-radius:20px;
+  padding:16px 18px 15px;margin-bottom:12px;position:relative;overflow:hidden}
+.band::after{content:"";position:absolute;right:-38px;top:-38px;width:150px;height:150px;border-radius:50%;
+  background:#8FB05433;pointer-events:none}
+.band .eyebrow{color:#BFD3A2}
+.band .big{display:flex;align-items:baseline;gap:9px;margin-top:2px}
+.band .big b{font-family:var(--mono);font-size:44px;font-weight:500;letter-spacing:-.03em;line-height:1}
+.band .big span{font-family:var(--mono);font-size:17px;color:#C4D7A9}
+.band .split{display:flex;gap:18px;margin-top:12px;padding-top:11px;border-top:1px solid #FFFFFF26}
+.band .split div{display:flex;flex-direction:column}
+.band .split b{font-family:var(--mono);font-size:17px;font-weight:500}
+.band .split span{font-family:var(--disp);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#BFD3A2}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;margin-bottom:12px;overflow:hidden}
+.card>header{display:flex;align-items:center;gap:9px;padding:13px 15px 10px}
+.card>header h3{font-family:var(--disp);font-size:16px;font-weight:600;margin:0;letter-spacing:.005em}
+.card>header .count{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);
+  background:var(--sunk);border-radius:7px;padding:2px 8px}
+
+/* Ready-to-send card: the product a PC actually needs at 0630 */
+.ready{background:var(--card);border:1px solid var(--olive);border-radius:18px;margin-bottom:12px;
+  padding:14px 15px;box-shadow:0 1px 0 #3F5B2E14}
+.ready .top{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.ready .top b{font-family:var(--disp);font-size:16px;font-weight:600}
+.msg{background:var(--sunk);border-radius:13px;padding:11px 12px;font-family:var(--mono);font-size:11.5px;
+  line-height:1.62;color:var(--body);max-height:118px;overflow:hidden;position:relative;white-space:pre-wrap}
+.msg::after{content:"";position:absolute;left:0;right:0;bottom:0;height:34px;
+  background:linear-gradient(180deg,#EDF0E800,var(--sunk))}
+.btn{height:44px;border-radius:13px;border:1px solid var(--olive);background:var(--olive);color:#F3F7EC;
+  font-family:var(--disp);font-size:15px;font-weight:600;letter-spacing:.02em;cursor:pointer;width:100%;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:transform .2s var(--pop),background .2s ease,filter .2s ease}
+.btn:active{transform:scale(.975)}
+.btn.ghost{background:var(--card);color:var(--olive)}
+.btn.done{background:var(--olive-lift);border-color:var(--olive-lift)}
+.btn.small{height:38px;font-size:14px;width:auto;padding:0 15px}
+
+/* Segmented control with a sliding thumb */
+.seg{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--sunk);
+  border-radius:13px;padding:3px;margin-bottom:11px}
+.seg .thumb{position:absolute;top:3px;bottom:3px;border-radius:10px;background:var(--card);
+  box-shadow:0 1px 3px #1A2A0E1F;transition:transform .42s var(--spring),width .42s var(--spring)}
+.seg button{position:relative;z-index:1;height:34px;border:0;background:none;cursor:pointer;
+  font-family:var(--disp);font-size:13.5px;font-weight:600;color:var(--muted);transition:color .24s ease;
+  display:flex;align-items:center;justify-content:center;gap:6px}
+.seg button[aria-selected="true"]{color:var(--olive)}
+.seg .badge{font-family:var(--mono);font-size:10.5px;background:var(--line-soft);border-radius:6px;padding:1px 5px;color:var(--muted)}
+.seg button[aria-selected="true"] .badge{background:var(--olive-wash);color:var(--olive)}
+
+/* Person lines */
+.person{display:flex;align-items:center;gap:11px;padding:10px 15px;width:100%;background:none;border:0;
+  border-top:1px solid var(--line-soft);cursor:pointer;text-align:left;
+  transition:background .18s ease}
+.person:first-of-type{border-top:0}
+.person:active{background:var(--sunk)}
+.ini{width:36px;height:36px;flex:0 0 36px;border-radius:11px;display:grid;place-items:center;
+  background:var(--olive-wash);color:var(--olive-ink);font-family:var(--disp);font-weight:700;font-size:13.5px}
+.person .who{min-width:0;flex:1}
+.person .nm{font-size:14.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.person .mt{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{font-family:var(--disp);font-size:11.5px;font-weight:600;letter-spacing:.04em;padding:3px 8px;
+  border-radius:8px;white-space:nowrap;flex:0 0 auto}
+.p-ok{background:var(--olive-wash);color:var(--olive)}
+.p-warn{background:var(--warn-wash);color:var(--warn)}
+.p-crit{background:var(--crit-wash);color:var(--crit)}
+.p-info{background:var(--slate-wash);color:var(--slate)}
+.p-mute{background:var(--sunk);color:var(--muted)}
+
+/* Tab bar */
+.tabs{position:absolute;left:0;right:0;bottom:0;height:76px;padding:0 10px 14px;
+  background:linear-gradient(180deg,#F4F6F100,var(--paper) 42%);display:flex;align-items:flex-end;gap:2px;z-index:5}
+.tabs button{flex:1;height:52px;border:0;background:none;cursor:pointer;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:3px;color:var(--muted);font-family:var(--disp);font-size:11px;
+  font-weight:600;letter-spacing:.06em;text-transform:uppercase;transition:color .2s ease}
+.tabs button .ic{font-size:17px;line-height:1;transition:transform .4s var(--pop)}
+.tabs button[aria-current="page"]{color:var(--olive)}
+.tabs button[aria-current="page"] .ic{transform:translateY(-2px) scale(1.1)}
+.fab{width:56px;height:56px;flex:0 0 56px;border-radius:19px;border:0;cursor:pointer;
+  background:var(--olive);color:#F3F7EC;font-size:24px;line-height:1;display:grid;place-items:center;
+  box-shadow:0 6px 18px -4px #3F5B2E80;margin-bottom:1px;
+  transition:transform .26s var(--pop)}
+.fab:active{transform:scale(.93)}
+
+/* ── Log conduct flow: a full screen that grows out of the + button ── */
+.flow{position:absolute;inset:0;background:var(--paper);z-index:20;display:flex;flex-direction:column;
+  transform:scale(.86);opacity:0;pointer-events:none;transform-origin:calc(100% - 42px) calc(100% - 44px);
+  transition:transform .46s var(--spring),opacity .3s ease}
+.flow[data-open="1"]{transform:none;opacity:1;pointer-events:auto}
+.flowbar{flex:0 0 auto;padding:14px 16px 10px;display:flex;align-items:center;gap:12px}
+.flowbar h3{font-family:var(--disp);font-size:19px;font-weight:600;margin:0}
+.icx{width:34px;height:34px;flex:0 0 34px;border-radius:11px;border:1px solid var(--line);background:var(--card);
+  cursor:pointer;color:var(--body);display:grid;place-items:center;font-size:15px;
+  transition:transform .24s var(--pop),color .2s}
+.icx:active{transform:scale(.9)}
+.rail{display:flex;gap:5px;padding:0 16px 12px}
+.rail i{height:3px;flex:1;border-radius:99px;background:var(--line);overflow:hidden;position:relative}
+.rail i::after{content:"";position:absolute;inset:0;background:var(--olive);transform:scaleX(0);
+  transform-origin:left;transition:transform .5s var(--spring)}
+.rail i[data-on="1"]::after{transform:scaleX(1)}
+.steps{flex:1;position:relative;overflow:hidden}
+.step{position:absolute;inset:0;overflow-y:auto;padding:0 14px 108px;
+  transition:transform .44s var(--spring),opacity .3s ease}
+.step[data-pos="left"]{transform:translateX(-34px);opacity:0;pointer-events:none}
+.step[data-pos="right"]{transform:translateX(34px);opacity:0;pointer-events:none}
+.step[data-pos="in"]{transform:none;opacity:1}
+.flowfoot{position:absolute;left:0;right:0;bottom:0;padding:12px 16px 18px;display:flex;gap:9px;
+  background:linear-gradient(180deg,#F4F6F100,var(--paper) 38%);z-index:3}
+
+.field{margin-bottom:11px}
+.field label{display:block;font-family:var(--disp);font-size:11px;font-weight:600;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.field input,.field select{width:100%;height:46px;padding:0 13px;border-radius:13px;border:1px solid var(--line);
+  background:var(--card);font-size:15px;transition:border-color .2s}
+.field input:focus,.field select:focus{border-color:var(--olive);outline:none}
+.chiprow{display:flex;gap:7px;flex-wrap:wrap}
+.chiprow button{height:38px;padding:0 13px;border-radius:12px;border:1px solid var(--line);background:var(--card);
+  font-family:var(--disp);font-size:13.5px;font-weight:600;cursor:pointer;color:var(--body);
+  transition:transform .2s var(--pop),border-color .2s,background .2s,color .2s}
+.chiprow button:active{transform:scale(.96)}
+.chiprow button[aria-pressed="true"]{background:var(--olive-wash);border-color:var(--olive);color:var(--olive)}
+
+/* Tick rows — the heart of step 2 */
+.grouphead{display:flex;align-items:center;gap:8px;padding:14px 4px 7px}
+.grouphead .eyebrow{flex:1}
+.tick{display:flex;align-items:center;gap:12px;width:100%;padding:11px 13px;border-radius:15px;
+  border:1px solid var(--line);background:var(--card);margin-bottom:7px;cursor:pointer;text-align:left;
+  transition:border-color .24s ease,background .24s ease,transform .22s var(--spring)}
+.tick:active{transform:scale(.985)}
+.tick[data-on="1"]{background:var(--olive-wash);border-color:#B9CB99}
+.tick[data-locked="1"]{background:var(--sunk);cursor:default;opacity:.94}
+.box{width:26px;height:26px;flex:0 0 26px;border-radius:9px;border:1.5px solid var(--line);
+  background:var(--card);display:grid;place-items:center;transition:background .24s var(--spring),border-color .24s}
+.tick[data-on="1"] .box,.tick[data-locked="1"] .box{background:var(--olive);border-color:var(--olive)}
+.box svg{width:14px;height:14px}
+.box path{stroke:#F3F7EC;stroke-width:2.4;fill:none;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:20;stroke-dashoffset:20;transition:stroke-dashoffset .34s var(--spring) .04s}
+.tick[data-on="1"] .box path,.tick[data-locked="1"] .box path{stroke-dashoffset:0}
+.tick .who{flex:1;min-width:0}
+.tick .nm{font-size:14.5px;font-weight:500}
+.tick .mt{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.reason{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--spring)}
+.reason[data-open="1"]{grid-template-rows:1fr}
+.reason>div{overflow:hidden;min-height:0}
+.reason .inner{padding:2px 0 9px 38px;display:flex;gap:6px;flex-wrap:wrap}
+.reason button{height:32px;padding:0 11px;border-radius:10px;border:1px solid var(--line);background:var(--card);
+  font-family:var(--disp);font-size:12.5px;font-weight:600;cursor:pointer;color:var(--muted)}
+.reason button[aria-pressed="true"]{background:var(--crit-wash);border-color:#E0B4AE;color:var(--crit)}
+
+/* Live message — assembles as you tick */
+.live{background:#1D2419;border-radius:17px;padding:14px 15px;color:#DDE6D2;font-family:var(--mono);
+  font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-x:auto}
+/* One parade-state line. Used in the dark step-3 block and in the light preview
+   card on Today, so the block rule cannot live under .live alone. */
+.ln{display:block}
+.live .hd{color:#A9C47D;font-weight:600}
+.live .dim{color:#8C9A80}
+.msg .hd{color:var(--olive);font-weight:600}
+.msg .dim{color:var(--muted)}
+@keyframes lineIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.live .new{animation:lineIn .38s var(--spring) both}
+.tot{display:flex;gap:9px;margin-bottom:12px}
+.tot div{flex:1;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:9px 11px}
+.tot b{display:block;font-family:var(--mono);font-size:20px;font-weight:500;margin-top:1px}
+.tot .g{color:var(--olive)}.tot .r{color:var(--crit)}
+
+/* ── Bottom sheet with drag-to-dismiss ── */
+.scrim{position:absolute;inset:0;background:#141B1266;z-index:24;opacity:0;pointer-events:none;
+  transition:opacity .32s ease;backdrop-filter:blur(1.5px)}
+.scrim[data-open="1"]{opacity:1;pointer-events:auto}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:25;background:var(--card);
+  border-radius:26px 26px 0 0;box-shadow:0 -12px 40px -12px #1A2A0E40;max-height:82%;
+  display:flex;flex-direction:column;transform:translateY(101%);touch-action:none;
+  transition:transform .46s var(--spring)}
+.sheet[data-open="1"]{transform:none}
+.sheet.dragging{transition:none}
+.grab{padding:9px 0 3px;display:grid;place-items:center;cursor:grab}
+.grab i{width:38px;height:4px;border-radius:99px;background:var(--line)}
+.sheet .head{display:flex;gap:12px;align-items:center;padding:6px 18px 13px;border-bottom:1px solid var(--line-soft)}
+.sheet .head .ini{width:44px;height:44px;flex:0 0 44px;border-radius:14px;font-size:16px}
+.sheet .head h3{font-family:var(--disp);font-size:19px;font-weight:600;margin:0}
+.sheet .b{overflow-y:auto;padding:14px 18px 26px;display:flex;flex-direction:column;gap:15px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stats div{background:var(--sunk);border-radius:13px;padding:9px 11px}
+.stats b{display:block;font-family:var(--mono);font-size:19px;font-weight:500;margin-top:1px}
+.hr-chart{background:var(--sunk);border-radius:14px;padding:12px 12px 9px}
+.timeline{display:flex;flex-direction:column}
+.timeline div{display:flex;gap:11px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:13.5px}
+.timeline div:last-child{border-bottom:0}
+.timeline .dt{font-family:var(--mono);font-size:11.5px;color:var(--muted);flex:0 0 48px}
+
+.toast{position:absolute;left:16px;right:16px;bottom:92px;z-index:30;background:#1D2419;color:#E4EDD8;
+  border-radius:14px;padding:12px 15px;font-size:13.5px;display:flex;align-items:center;gap:9px;
+  transform:translateY(18px) scale(.97);opacity:0;pointer-events:none;
+  transition:transform .42s var(--spring),opacity .28s ease}
+.toast[data-open="1"]{transform:none;opacity:1}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important}
+}
+</style>
+
+<div class="pitch">
+  <div class="note">
+    <div class="kicker">Concept B</div>
+    <h1>First Parade</h1>
+    <p>The version built for the person holding a phone in the dark at 0625, not the person at a desk. One screen is the day; everything else is one tap off it.</p>
+    <ul>
+      <li><span class="n">01</span><div><b>The message writes itself</b><span>Tap <em>+</em> and walk the wizard — the battalion parade-state text assembles line by line as you tick. Copy at the end.</span></div></li>
+      <li><span class="n">02</span><div><b>Status personnel come pre-ticked</b><span>Anyone on a live MC, LD or RMJ is already excluded and locked. You only add today's report sick and fallout.</span></div></li>
+      <li><span class="n">03</span><div><b>Nothing is a modal</b><span>People open as a sheet you can throw back down with your thumb.</span></div></li>
+    </ul>
+    <div class="try">Try it: tap <b style="margin:0 2px">+</b>, then drag a person's sheet down to dismiss.</div>
+  </div>
+
+  <div class="device">
+    <div class="screen" id="screen">
+      <div class="statusbar"><span id="clock">06:24</span><span>▮▮▮ ▼ 87%</span></div>
+      <div class="appbar">
+        <div class="d" id="dline">Wed 3 Sep · First parade 0630</div>
+        <h2 id="title">Today</h2>
+      </div>
+      <div class="scroll" id="scroll"></div>
+
+      <div class="tabs">
+        <button data-tab="today" aria-current="page"><span class="ic">◈</span>Today</button>
+        <button data-tab="people"><span class="ic">▤</span>People</button>
+        <button class="fab" id="fab" aria-label="Log a conduct">+</button>
+        <button data-tab="med"><span class="ic">✚</span>Medical</button>
+        <button data-tab="more"><span class="ic">⋯</span>More</button>
+      </div>
+
+      <!-- Log conduct flow -->
+      <div class="flow" id="flow" data-open="0" aria-hidden="true">
+        <div class="flowbar">
+          <button class="icx" id="flowClose" aria-label="Close">✕</button>
+          <h3 id="flowTitle">Log a conduct</h3>
+        </div>
+        <div class="rail"><i data-on="1"></i><i></i><i></i></div>
+        <div class="steps" id="steps"></div>
+        <div class="flowfoot">
+          <button class="btn ghost" id="back" style="flex:0 0 96px">Back</button>
+          <button class="btn" id="next">Next</button>
+        </div>
+      </div>
+
+      <div class="scrim" id="scrim"></div>
+      <div class="sheet" id="sheet" data-open="0" aria-hidden="true"></div>
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Synthetic company (mirrors scripts/dev-seed.mjs; these people do not exist) ──
+const GIVEN=["WEI MING","JUN HAO","ZHI HAO","YI XUAN","JIA JUN","KAI XIN","ARJUN","FAIZAL","RYAN","MARCUS","DARREN","ELROY","SHAWN","BENJAMIN"];
+const SUR=["TAN","LIM","LEE","NG","WONG","CHAN","KUMAR","RAHMAN","GOH","TEO","ONG","SIM","YEO","CHUA","KOH","LOW","ANG","HO"];
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const d2=n=>String(n).padStart(2,"0");
+const at=o=>{const d=new Date();d.setDate(d.getDate()+o);return d};
+const day=(o=0)=>{const d=at(o);return d.getDate()+" "+MONTHS[d.getMonth()]};
+const frac=(i,s)=>{const v=Math.sin(i*12.9898+s*78.233)*43758.5453;return v-Math.floor(v)};
+const pick=(a,i)=>a[i%a.length];
+const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+const PEOPLE=[];
+for(let plt=1;plt<=3;plt++)for(let n=1;n<=15;n++){
+  const i=PEOPLE.length,ht=165+(i%20),wt=55+(i%25);
+  PEOPLE.push({id:"C"+plt+"1"+d2(n),name:pick(GIVEN,i)+" "+pick(SUR,i),plt,sect:Math.ceil(n/5),
+    role:"Recruit",bmi:+(wt/((ht/100)**2)).toFixed(1),rsi:Math.floor(frac(i,3)*5),
+    state:"in",status:"",detail:"",until:null,ippt:61+Math.floor(frac(i,9)*34),
+    hr:Array.from({length:6},(_,k)=>132+Math.round(frac(i,k+1)*46))});
+}
+for(let c=1;c<=6;c++)PEOPLE.push({id:d2(c).padStart(4,"0"),name:pick(GIVEN,c+2)+" "+pick(SUR,c+5),
+  plt:Math.ceil(c/2),sect:0,role:"Commander",rank:pick(["CPT","LTA","3SG","2SG"],c),state:"in",status:"",
+  detail:"",until:null,rsi:0,bmi:23.4,ippt:78,hr:[]});
+
+[[3,"out","MC","Fever · MO Camp",2],[24,"in","MC+1","Trailing tag, auto",0],
+ [7,"in","LD","Light Duty · ankle",3],[12,"in","Excuse Heavy Load","Lower back",9],
+ [16,"in","RMJ","Excuse Run March Jump",2],[21,"out","Warded","SGH Ward 44",null],
+ [28,"out","Leave","Off-in-Lieu",1],[31,"out","Course","SISPEC brief",1],
+ [33,"out","MA","1400h NUH · out of camp",0],[38,"in","Guard Duty","Camp guard, 2nd relief",0],
+ [41,"in","MSK","R knee · physio wk 3",14],[9,"in","MSK","L ankle · cleared soon",5],
+ [22,"in","MSK","Lower back · 3rd episode",21]
+].forEach(([i,state,status,detail,until])=>Object.assign(PEOPLE[i],{state,status,detail,until}));
+
+const PILL={MC:"p-crit",Warded:"p-crit",LD:"p-warn","MC+1":"p-warn",RMJ:"p-warn",
+  "Excuse Heavy Load":"p-warn",MSK:"p-warn",Leave:"p-info",Course:"p-info",MA:"p-info","Guard Duty":"p-mute"};
+const ini=p=>p.name.split(" ").map(w=>w[0]).slice(0,2).join("");
+const recs=PEOPLE.filter(p=>p.role==="Recruit");
+const outNow=()=>PEOPLE.filter(p=>p.state==="out");
+const onStatus=()=>PEOPLE.filter(p=>p.state==="in"&&p.status&&p.status!=="Guard Duty");
+const appts=()=>PEOPLE.filter(p=>p.status==="MA");
+const REDUCE=matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+const S={tab:"today",seg:"out",step:0,ticks:{},reasons:{},copied:false};
+onStatus().forEach(p=>{S.ticks[p.id]="status";S.reasons[p.id]=p.status});
+outNow().forEach(p=>{S.ticks[p.id]="status";S.reasons[p.id]=p.status});
+
+const $=s=>document.querySelector(s),scroll=$("#scroll");
+const now=new Date();
+$("#dline").textContent=`${DAYS[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]} · First parade 0630`;
+$("#clock").textContent="06:24";
+
+function tween(el,to,dur=700){
+  if(REDUCE){el.textContent=to;return}
+  const t0=performance.now();
+  const s=t=>{const k=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-k,3);
+    el.textContent=Math.round(to*e);if(k<1)requestAnimationFrame(s)};
+  requestAnimationFrame(s);
+}
+const sparkPath=(v,w,h)=>{const mn=Math.min(...v),mx=Math.max(...v),r=mx-mn||1;
+  return v.map((n,i)=>(i?"L":"M")+(i*(w/(v.length-1))).toFixed(1)+" "+(h-((n-mn)/r)*h).toFixed(1)).join(" ")};
+
+// ── Parade state text, derived from the ticks ────────────────────────────────
+function paradeLines(){
+  const others=PEOPLE.filter(p=>["Leave","Course"].includes(p.status));
+  const ma=appts();
+  const mc=PEOPLE.filter(p=>p.status==="MC");
+  const warded=PEOPLE.filter(p=>p.status==="Warded");
+  const sick=Object.keys(S.ticks).filter(id=>S.ticks[id]==="sick");
+  const outCount=outNow().length+sick.length;
+  const L=[];
+  const push=(k,t,c="")=>L.push({k,t,c});
+  push("h1","40 SAR COUGAR — FIRST PARADE","hd");
+  push("h2",`${day(0)} ${at(0).getFullYear()} · 0630`,"dim");
+  push("b1","","");
+  push("str",`STR ${PEOPLE.length}   PRESENT ${PEOPLE.length-outCount}   OUT ${outCount}`,"hd");
+  push("b2","","");
+  push("oh",`OTHERS (${others.length})`,"hd");
+  others.forEach((p,i)=>push("o"+p.id,`${i+1}. ${p.id} ${p.name} — ${p.status.toUpperCase()}${p.until?" TILL "+day(p.until).toUpperCase():""}`));
+  push("b3","","");
+  push("mah",`MEDICAL APPT (${ma.length})`,"hd");
+  ma.forEach((p,i)=>push("m"+p.id,`${i+1}. ${p.id} ${p.name} — ${p.detail.toUpperCase()}`));
+  push("b4","","");
+  push("mch",`MC / WARDED (${mc.length+warded.length})`,"hd");
+  [...mc,...warded].forEach((p,i)=>push("c"+p.id,`${i+1}. ${p.id} ${p.name} — ${p.status.toUpperCase()}${p.until?" TILL "+day(p.until).toUpperCase():""}`));
+  if(sick.length){
+    push("b5","","");
+    push("rsh",`REPORT SICK TODAY (${sick.length})`,"hd");
+    sick.forEach((id,i)=>{const p=PEOPLE.find(x=>x.id===id);
+      push("r"+id,`${i+1}. ${p.id} ${p.name} — ${(S.reasons[id]||"RSI").toUpperCase()}`)});
+  }
+  return L;
+}
+let seenLines=new Set();
+function renderLive(el,animate=true){
+  const L=paradeLines();
+  el.innerHTML=L.map(l=>{
+    const isNew=animate&&!REDUCE&&!seenLines.has(l.k);
+    return `<span class="ln ${l.c} ${isNew?"new":""}">${esc(l.t)||"&nbsp;"}</span>`}).join("");
+  seenLines=new Set(L.map(l=>l.k));
+}
+const paradeText=()=>paradeLines().map(l=>l.t).join("\n");
+
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+const TITLES={today:"Today",people:"People",med:"Medical",more:"More"};
+document.querySelectorAll(".tabs button[data-tab]").forEach(b=>b.onclick=()=>{
+  S.tab=b.dataset.tab;
+  document.querySelectorAll(".tabs button[data-tab]").forEach(x=>{
+    if(x===b)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current")});
+  $("#title").textContent=TITLES[S.tab];render()});
+
+function render(){
+  scroll.scrollTop=0;
+  scroll.innerHTML=({today:vToday,people:vPeople,med:vMed,more:vMore}[S.tab])();
+  scroll.querySelectorAll("[data-tween]").forEach(el=>tween(el,+el.dataset.tween));
+  const live=scroll.querySelector("#msgPreview");
+  if(live)renderLive(live,false);
+  const seg=scroll.querySelector(".seg");if(seg)moveThumb(seg);
+}
+
+function vToday(){
+  const o=outNow(),st=onStatus(),ma=appts();
+  const lists={out:o,status:st,appt:ma};
+  const cur=lists[S.seg];
+  return `<div class="stagger">
+    <div class="band" style="--i:0">
+      <div class="eyebrow">Strength</div>
+      <div class="big"><b data-tween="${PEOPLE.length-o.length}">0</b><span>/ ${PEOPLE.length} present</span></div>
+      <div class="split">
+        <div><b data-tween="${o.length}">0</b><span>Out of camp</span></div>
+        <div><b data-tween="${st.length}">0</b><span>On status</span></div>
+        <div><b data-tween="${ma.length}">0</b><span>Appointment</span></div>
+      </div>
+    </div>
+
+    <div class="ready" style="--i:1">
+      <div class="top"><span class="pill p-ok">Ready</span><b>First parade state</b></div>
+      <div class="msg" id="msgPreview"></div>
+      <div style="height:10px"></div>
+      <button class="btn" id="copyMsg">Copy for WhatsApp</button>
+    </div>
+
+    <div class="seg" style="--i:2" role="tablist">
+      <span class="thumb"></span>
+      <button data-seg="out" role="tab" aria-selected="${S.seg==="out"}">Out<span class="badge">${o.length}</span></button>
+      <button data-seg="status" role="tab" aria-selected="${S.seg==="status"}">Status<span class="badge">${st.length}</span></button>
+      <button data-seg="appt" role="tab" aria-selected="${S.seg==="appt"}">Appt<span class="badge">${ma.length}</span></button>
+    </div>
+
+    <div class="card" style="--i:3">
+      ${cur.length?cur.map(p=>personRow(p)).join(""):`<div style="padding:26px 16px;text-align:center;color:var(--muted)">Nobody in this list today.</div>`}
+    </div>
+
+    <div class="card" style="--i:4">
+      <header><h3>2.4km Run</h3><span class="count">0730</span></header>
+      <div style="padding:0 15px 15px">
+        <div class="tot" style="margin-bottom:0">
+          <div><span class="eyebrow">Took part</span><b class="g">38</b></div>
+          <div><span class="eyebrow">Fallout</span><b class="r">2</b></div>
+          <div><span class="eyebrow">LMS</span><b>36</b></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function personRow(p){
+  return `<button class="person" data-person="${p.id}">
+    <span class="ini">${ini(p)}</span>
+    <span class="who"><span class="nm">${esc(p.role==="Commander"?p.rank+" "+p.name:p.name)}</span>
+      <span class="mt">${p.id} · ${p.role==="Commander"?"HQ":"P"+p.plt+" Sect "+p.sect}${p.detail?" · "+esc(p.detail):""}</span></span>
+    <span class="pill ${PILL[p.status]||"p-ok"}">${esc(p.status||"In camp")}</span></button>`;
+}
+function vPeople(){
+  return `<div class="stagger">${[1,2,3].map((n,i)=>`
+    <div class="card" style="--i:${i}"><header><h3>Platoon ${n}</h3>
+      <span class="count">${recs.filter(p=>p.plt===n).length}</span></header>
+      ${recs.filter(p=>p.plt===n).map(p=>personRow(p)).join("")}</div>`).join("")}</div>`;
+}
+function vMed(){
+  const st=PEOPLE.filter(p=>p.status&&["MC","MC+1","LD","RMJ","Warded","Excuse Heavy Load","MSK"].includes(p.status));
+  return `<div class="stagger">
+    <div class="card" style="--i:0"><header><h3>On status</h3><span class="count">${st.length}</span></header>
+      ${st.map(p=>personRow(p)).join("")}</div>
+    <div class="card" style="--i:1"><header><h3>Ghost tags, computed</h3></header>
+      <div style="padding:0 15px 15px;color:var(--body);font-size:14px">
+        MC+1 and LD+1 appear on their own for the trailing days after a status ends. Nobody types them.</div></div>
+  </div>`;
+}
+function vMore(){
+  return `<div class="stagger"><div class="card" style="--i:0"><header><h3>Concept scope</h3></header>
+    <div style="padding:0 15px 15px;color:var(--body);font-size:14px">
+      Today, People, Medical and the log-conduct flow are built out. IPPT, Polar and Sync sit behind this tab in the real thing.</div></div></div>`;
+}
+
+// Segmented thumb
+function moveThumb(seg){
+  const b=seg.querySelector('[aria-selected="true"]'),t=seg.querySelector(".thumb");
+  if(!b||!t)return;t.style.width=b.offsetWidth+"px";t.style.transform=`translateX(${b.offsetLeft-3}px)`;
+}
+scroll.addEventListener("click",e=>{
+  const s=e.target.closest("[data-seg]");
+  if(s){S.seg=s.dataset.seg;render();return}
+  const p=e.target.closest("[data-person]");
+  if(p){openSheet(p.dataset.person);return}
+  if(e.target.closest("#copyMsg")){copyMsg(e.target.closest("#copyMsg"));return}
+});
+function copyMsg(btn){
+  const t=paradeText();
+  if(navigator.clipboard)navigator.clipboard.writeText(t).catch(()=>{});
+  btn.classList.add("done");btn.textContent="✓ Copied — paste into the group";
+  if(!REDUCE)btn.animate([{transform:"scale(1)"},{transform:"scale(1.03)"},{transform:"scale(1)"}],
+    {duration:420,easing:"cubic-bezier(.34,1.5,.64,1)"});
+  setTimeout(()=>{btn.classList.remove("done");btn.textContent="Copy for WhatsApp"},2100);
+}
+
+// ── Log conduct flow ─────────────────────────────────────────────────────────
+const flow=$("#flow"),steps=$("#steps");
+$("#fab").onclick=()=>{S.step=0;flow.dataset.open="1";flow.setAttribute("aria-hidden","false");renderSteps()};
+$("#flowClose").onclick=closeFlow;
+function closeFlow(){flow.dataset.open="0";flow.setAttribute("aria-hidden","true")}
+const STEP_TITLES=["Log a conduct","Who is not participating","Check and send"];
+
+function renderSteps(){
+  $("#flowTitle").textContent=STEP_TITLES[S.step];
+  document.querySelectorAll(".rail i").forEach((el,i)=>{
+    if(i<=S.step)el.setAttribute("data-on","1");else el.removeAttribute("data-on")});
+  $("#back").style.visibility=S.step===0?"hidden":"visible";
+  $("#next").textContent=S.step===2?"Save conduct":"Next";
+  const html=[step1,step2,step3][S.step]();
+  const old=steps.querySelector(".step");
+  const el=document.createElement("div");
+  el.className="step";el.dataset.pos=old?"right":"in";el.innerHTML=html;
+  steps.appendChild(el);
+  if(old){requestAnimationFrame(()=>{old.dataset.pos="left";el.dataset.pos="in";
+    setTimeout(()=>old.remove(),460)})}
+  const live=el.querySelector("#liveMsg");if(live)renderLive(live,false);
+  el.querySelectorAll("[data-tween]").forEach(x=>tween(x,+x.dataset.tween,520));
+}
+function step1(){
+  return `<div class="field"><label>Date</label><input value="${day(0)} ${at(0).getFullYear()}"></div>
+  <div class="field"><label>Time</label>
+    <div class="chiprow" id="timeRow">${["0630","0730","0900","1400","1930"].map((t,i)=>
+      `<button aria-pressed="${i===1}">${t}</button>`).join("")}</div></div>
+  <div class="field" style="margin-top:11px"><label>Conduct</label>
+    <select><option>2.4km Run</option><option>Metabolic Circuit 2</option>
+      <option>Route March 8km</option><option>SOC Familiarisation</option><option>IPPT 2</option></select></div>
+  <div class="field"><label>Strength</label><input value="${PEOPLE.length}" inputmode="numeric"></div>
+  <div class="card" style="margin-top:6px"><header><h3>Already accounted for</h3>
+    <span class="count">${onStatus().length+outNow().length}</span></header>
+    <div style="padding:0 15px 14px;color:var(--body);font-size:13.5px">
+      ${onStatus().length} on a live status and ${outNow().length} out of camp carry into the next step pre-ticked and locked. You add today's report sick and fallout only.</div></div>`;
+}
+function step2(){
+  const locked=[...outNow(),...onStatus()];
+  const free=recs.filter(p=>!locked.includes(p));
+  return `<div class="grouphead"><span class="eyebrow">Locked · carried from status</span>
+    <span class="pill p-mute">${locked.length}</span></div>
+  ${locked.map(p=>tickRow(p,true)).join("")}
+  <div class="grouphead"><span class="eyebrow">Tap anyone who fell out or reported sick</span>
+    <span class="pill p-ok" id="sickCount">${Object.values(S.ticks).filter(v=>v==="sick").length}</span></div>
+  ${free.map(p=>tickRow(p,false)).join("")}`;
+}
+function tickRow(p,locked){
+  const on=S.ticks[p.id]==="sick";
+  return `<div>
+    <button class="tick" data-tick="${p.id}" ${locked?'data-locked="1" disabled':""} ${on?'data-on="1"':""}>
+      <span class="box"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg></span>
+      <span class="who"><span class="nm">${esc(p.name)}</span>
+        <span class="mt">${p.id} · P${p.plt} Sect ${p.sect}${locked?" · "+esc(p.status||"out of camp"):""}</span></span>
+      ${locked?`<span class="pill ${PILL[p.status]||"p-mute"}">${esc(p.status||"Out")}</span>`:""}
+    </button>
+    <div class="reason" data-reason="${p.id}" ${on?'data-open="1"':""}><div><div class="inner">
+      ${["Report sick","Fallout","RSI","Excuse"].map(r=>
+        `<button data-r="${p.id}" data-v="${r}" aria-pressed="${(S.reasons[p.id]||"Report sick")===r}">${r}</button>`).join("")}
+    </div></div></div>
+  </div>`;
+}
+function step3(){
+  const sick=Object.values(S.ticks).filter(v=>v==="sick").length;
+  const part=recs.length-onStatus().filter(p=>p.role==="Recruit").length-outNow().filter(p=>p.role==="Recruit").length-sick;
+  return `<div class="tot">
+    <div><span class="eyebrow">Strength</span><b data-tween="${recs.length}">0</b></div>
+    <div><span class="eyebrow">Took part</span><b class="g" data-tween="${part}">0</b></div>
+    <div><span class="eyebrow">Did not</span><b class="r" data-tween="${recs.length-part}">0</b></div>
+  </div>
+  <div class="grouphead" style="padding-top:2px"><span class="eyebrow">Parade state · built from your ticks</span></div>
+  <div class="live" id="liveMsg"></div>
+  <div style="height:11px"></div>
+  <button class="btn ghost" id="copyLive">Copy for WhatsApp</button>`;
+}
+steps.addEventListener("click",e=>{
+  const t=e.target.closest("[data-tick]");
+  if(t&&!t.disabled){
+    const id=t.dataset.tick,on=S.ticks[id]==="sick";
+    if(on){delete S.ticks[id];t.removeAttribute("data-on")}
+    else{S.ticks[id]="sick";S.reasons[id]=S.reasons[id]||"Report sick";t.setAttribute("data-on","1")}
+    const r=steps.querySelector(`[data-reason="${id}"]`);
+    if(r){if(S.ticks[id])r.setAttribute("data-open","1");else r.removeAttribute("data-open")}
+    const c=steps.querySelector("#sickCount");
+    if(c)c.textContent=Object.values(S.ticks).filter(v=>v==="sick").length;
+    return;
+  }
+  const r=e.target.closest("[data-r]");
+  if(r){S.reasons[r.dataset.r]=r.dataset.v;
+    steps.querySelectorAll(`[data-r="${r.dataset.r}"]`).forEach(b=>
+      b.setAttribute("aria-pressed",String(b===r)));return}
+  const tr=e.target.closest("#timeRow button");
+  if(tr){steps.querySelectorAll("#timeRow button").forEach(b=>b.setAttribute("aria-pressed",String(b===tr)));return}
+  if(e.target.closest("#copyLive")){copyMsg(e.target.closest("#copyLive"));return}
+});
+$("#next").onclick=()=>{
+  if(S.step<2){S.step++;renderSteps()}
+  else{closeFlow();toast("Conduct saved · pushed to the sheet");render()}
+};
+$("#back").onclick=()=>{if(S.step>0){S.step--;renderSteps()}};
+
+// ── Bottom sheet, thrown away with a thumb ───────────────────────────────────
+const sheet=$("#sheet"),scrim=$("#scrim");
+function openSheet(id){
+  const p=PEOPLE.find(x=>x.id===id);if(!p)return;
+  const v=p.hr.length?p.hr:[142,150,146,158,152,160];
+  sheet.innerHTML=`<div class="grab" id="grab"><i></i></div>
+    <div class="head"><span class="ini">${ini(p)}</span>
+      <div style="min-width:0"><h3>${esc(p.role==="Commander"?p.rank+" "+p.name:p.name)}</h3>
+        <div class="mono" style="font-size:12px;color:var(--muted)">${p.id} · ${p.role==="Commander"?"HQ":"P"+p.plt+" Sect "+p.sect}</div></div>
+      ${p.status?`<span class="pill ${PILL[p.status]}" style="margin-left:auto">${esc(p.status)}</span>`:""}</div>
+    <div class="b">
+      ${p.status?`<div style="background:var(--sunk);border-radius:13px;padding:11px 13px;font-size:13.5px">
+        <b style="font-family:var(--disp)">${esc(p.status)}</b> — ${esc(p.detail)}${p.until?` · ends ${day(p.until)}`:""}</div>`:""}
+      <div class="stats">
+        <div><span class="eyebrow">BMI</span><b>${p.bmi}</b></div>
+        <div><span class="eyebrow">IPPT</span><b>${p.ippt}</b></div>
+        <div><span class="eyebrow">RSI</span><b style="color:${p.rsi>=3?"var(--crit)":"inherit"}">${p.rsi}</b></div>
+      </div>
+      <div><div class="eyebrow" style="margin-bottom:7px">Avg heart rate, last 6 conducts</div>
+        <div class="hr-chart">
+          <svg width="100%" viewBox="0 0 300 70" preserveAspectRatio="none" style="height:70px" aria-hidden="true">
+            <line x1="0" y1="69" x2="300" y2="69" stroke="#DFE4D7" stroke-width="1"/>
+            <path d="${sparkPath(v,300,62)}" fill="none" stroke="#3F5B2E" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round" transform="translate(0,4)"/>
+          </svg>
+          <div class="mono" style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-top:3px">
+            <span>${Math.min(...v)} bpm</span><span>peak ${Math.max(...v)} bpm</span></div>
+        </div></div>
+      <div><div class="eyebrow" style="margin-bottom:5px">Recent conducts</div>
+        <div class="timeline">
+          ${[["2.4km Run",0],["Strength Training 1",-5],["IPPT 1",-12],["Route March 4km",-19]].map(([n,o],i)=>
+            `<div><span class="dt">${day(o)}</span><span style="flex:1">${n}</span>
+             <span class="pill ${i===0&&p.state==="out"?"p-crit":i===3?"p-warn":"p-ok"}">${
+               i===0&&p.state==="out"?"Absent":i===3?"Fallout":"Took part"}</span></div>`).join("")}
+        </div></div>
+      <button class="btn ghost" data-act="1">Log report sick for ${esc(p.name.split(" ")[0])}</button>
+    </div>`;
+  sheet.dataset.open="1";sheet.setAttribute("aria-hidden","false");scrim.dataset.open="1";
+  sheet.style.transform="";
+  bindDrag();
+}
+function closeSheet(){sheet.dataset.open="0";sheet.setAttribute("aria-hidden","true");
+  scrim.dataset.open="0";sheet.style.transform=""}
+scrim.onclick=closeSheet;
+sheet.addEventListener("click",e=>{if(e.target.closest("[data-act]")){closeSheet();toast("Report sick logged · pushed")}});
+
+function bindDrag(){
+  const grab=$("#grab");if(!grab)return;
+  let y0=0,dy=0,t0=0,drag=false;
+  const down=e=>{drag=true;y0=e.clientY;t0=performance.now();dy=0;
+    sheet.classList.add("dragging");grab.setPointerCapture(e.pointerId)};
+  const move=e=>{if(!drag)return;dy=e.clientY-y0;
+    // Rubber band upward: the sheet resists being pulled past its open position.
+    const y=dy<0?dy*0.22:dy;
+    sheet.style.transform=`translateY(${y}px)`};
+  const up=e=>{if(!drag)return;drag=false;sheet.classList.remove("dragging");
+    const v=dy/Math.max(1,performance.now()-t0);
+    if(dy>112||v>0.55){sheet.style.transform="";closeSheet()}
+    else sheet.style.transform=""};
+  grab.onpointerdown=down;grab.onpointermove=move;grab.onpointerup=up;grab.onpointercancel=up;
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+let toastT;
+function toast(msg){
+  const t=$("#toast");t.innerHTML=`<span>✓</span><span>${esc(msg)}</span>`;
+  t.dataset.open="1";clearTimeout(toastT);
+  toastT=setTimeout(()=>t.dataset.open="0",2400);
+}
+addEventListener("keydown",e=>{
+  if(e.key!=="Escape")return;
+  if(flow.dataset.open==="1")closeFlow();
+  else if(sheet.dataset.open==="1")closeSheet();
+});
+
+render();
+</script>
