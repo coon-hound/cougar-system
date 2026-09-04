@@ -192,6 +192,26 @@ try {
               "written".padStart(9) + "skipped".padStart(9));
   console.log("-".repeat(46));
 
+  // A dry run that only counts source rows proves nothing about whether the
+  // import would work. Run the real transform against the real target schema —
+  // read-only — so schema drift shows up BEFORE the cutover rather than as
+  // silently-shelved data afterwards.
+  const audit = {};
+  for (const [tab, { table, rows }] of Object.entries(source)) {
+    const columns = await columnsOf(sql, table);
+    if (!columns.size) { audit[tab] = { missingTable: true }; continue; }
+    const unknown = new Set(), denied = new Set(), encrypted = new Set();
+    let noId = 0;
+    for (const raw of rows) {
+      const { real, extra } = shape(tab, raw, columns);
+      for (const k of Object.keys(extra)) unknown.add(k);
+      for (const k of Object.keys(raw)) if ((DENY[tab] ?? new Set()).has(k)) denied.add(k);
+      for (const k of Object.keys(real)) if (ENCRYPTED.has(k)) encrypted.add(k);
+      if (!NO_ID.has(tab) && !real.id) noId++;
+    }
+    audit[tab] = { unknown: [...unknown], denied: [...denied], encrypted: [...encrypted], noId };
+  }
+
   const report = {};
   if (COMMIT) {
     await sql.begin(async (tx) => {
@@ -220,6 +240,40 @@ try {
   }
   console.log("-".repeat(46));
   console.log("TOTAL".padEnd(16), String(sourceTotal).padStart(8), String(writtenTotal).padStart(8));
+
+  // ── Transform audit ───────────────────────────────────────────────────────
+  const missing = Object.entries(audit).filter(([, a]) => a.missingTable);
+  if (missing.length) {
+    console.error(`\nNO SUCH TABLE for: ${missing.map(([t]) => t).join(", ")}`);
+    console.error("The schema in supabase/migrations is not applied, or is older than this script.");
+    process.exitCode = 1;
+  }
+
+  const drift = Object.entries(audit).filter(([, a]) => a.unknown?.length);
+  if (drift.length) {
+    console.log("\nCOLUMNS NOT IN THE SCHEMA — these land in `extra` as JSON, not as real");
+    console.log("columns. Harmless for data the app reads through extra; a bug if the sheet");
+    console.log("gained a field the app now expects to query.");
+    for (const [tab, a] of drift) console.log(`  ${tab.padEnd(16)} ${a.unknown.join(", ")}`);
+  }
+
+  const dropped = Object.entries(audit).filter(([, a]) => a.denied?.length);
+  if (dropped.length) {
+    console.log("\nDROPPED ON PURPOSE (deny-list — minimisation, not a bug):");
+    for (const [tab, a] of dropped) console.log(`  ${tab.padEnd(16)} ${a.denied.join(", ")}`);
+  }
+
+  const enc = Object.entries(audit).filter(([, a]) => a.encrypted?.length);
+  if (enc.length) {
+    console.log("\nENCRYPTED AT REST (pgp_sym_encrypt, key from COUGAR_ENC_KEY):");
+    for (const [tab, a] of enc) console.log(`  ${tab.padEnd(16)} ${a.encrypted.join(", ")}`);
+  }
+
+  const orphans = Object.entries(audit).filter(([, a]) => a.noId > 0);
+  if (orphans.length) {
+    console.log("\nROWS WITH NO USABLE id — these are SKIPPED, not imported:");
+    for (const [tab, a] of orphans) console.log(`  ${tab.padEnd(16)} ${a.noId} rows`);
+  }
 
   if (COMMIT && sourceTotal !== writtenTotal) {
     console.error("\nMISMATCH: source and written row counts differ. Investigate before cutover.");

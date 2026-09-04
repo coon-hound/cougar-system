@@ -59,3 +59,6 @@ cougar_fitness_tracker.xlsx
 
 # Backend-connected demo entry page (scripts/demo.sh)
 __demo.html
+
+# Supabase CLI scratch (project ref, pooler creds) — written by `npx supabase`.
+supabase/.temp/

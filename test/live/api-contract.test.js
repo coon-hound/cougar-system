@@ -19,16 +19,41 @@
 //
 //   ./scripts/dev-env.sh up
 //
-// SAFETY: run this against a DEV database only. It writes and deletes rows.
-// Every row it creates is prefixed T_ / keyed 99xx, SOC is used as the
-// full-tab-replace sandbox (the tab is empty by design — see 0001_init.sql),
-// and everything is cleaned up at the end.
+// SAFETY: run this against a SCRATCH database only, and nothing else.
+//
+// Most of the file is harmless: rows are prefixed T_ / keyed 99xx and removed
+// at the end. Two suites are not. The full-tab-replace tests REPLACE THE WHOLE
+// OF SOC AND MSK, whatever is in them — that is the operation under test, so
+// there is no version of it that leaves existing rows alone. MSK has no `id`
+// and therefore no tombstone, so on that tab the loss is permanent.
+//
+// The tabs are snapshotted and written back at the end, which covers a
+// populated dev database. It does not cover a crash midway, and it cannot
+// restore a tab that started empty. Hence the guard below: any target that is
+// not localhost has to be named as scratch out loud.
 // ============================================================================
 
 const { suite, test, ok, eq, summary } = require("../_tap");
 
 const API = process.env.COUGAR_API || "http://127.0.0.1:8000/";
 const TOKEN = process.env.COUGAR_TOKEN || "dev-token";
+
+// A local URL is self-evidently a dev box. Anything else — a Supabase project,
+// a staging host — has to say so, because this file destroys SOC and MSK and
+// the person pointing it at a URL is usually mid-cutover and in a hurry.
+const IS_LOCAL = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/)/.test(API);
+if (!IS_LOCAL && process.env.COUGAR_LIVE_TEST_SCRATCH !== "1") {
+  console.error(
+    `\nREFUSING to run against ${API}\n\n` +
+    "This test replaces the entire contents of the SOC and MSK tabs. MSK has no\n" +
+    "`id` column, so its rows are hard-deleted with nothing to restore from.\n\n" +
+    "If that really is a scratch database, say so:\n" +
+    "  COUGAR_LIVE_TEST_SCRATCH=1 COUGAR_API=… COUGAR_TOKEN=… node test/live/api-contract.test.js\n\n" +
+    "To check a PRODUCTION backend instead, use the read-only comparison:\n" +
+    "  node scripts/verify-migration.mjs <backup-dir>\n"
+  );
+  process.exit(1);
+}
 
 // ── Wire helpers ────────────────────────────────────────────────────────────
 //
@@ -61,6 +86,11 @@ const T = (n) => `T_${n}`;
 const TEST_4D = "9901";
 
 module.exports = async function run() {
+  // Whatever these two tabs hold before the full-tab-replace suites run. They
+  // are put back in cleanup, so a run against a populated dev database (the
+  // demo, say) is not a data-loss event.
+  const SNAPSHOT = { SOC: await rowsOf("SOC"), MSK: await rowsOf("MSK") };
+
   // ── Reads ─────────────────────────────────────────────────────────────────
   suite("live API: reads");
 
@@ -345,6 +375,17 @@ module.exports = async function run() {
     eq(rows[0].socNum, "9", "the surviving row took the new value");
   });
 
+  await test("an empty full-tab write is refused, not obeyed", async () => {
+    // writeTab bailed on an empty array (apps-script-Code.gs:832) and so must
+    // this. It is the difference between a no-op and erasing a tab company-wide:
+    // the per-tab "↻ Re-push all" button (js/render.js:1851) pushes whatever
+    // STATE holds, and STATE holds [] on a device whose pull never landed.
+    const before = await rowsOf("SOC");
+    const res = await post({ action: "write", tab: "SOC", baseRev: await revOf("SOC"), data: [] });
+    eq(res.error, "Data must be a non-empty array of objects", "the old backend's wording");
+    eq((await rowsOf("SOC")).length, before.length, "and nothing was erased");
+  });
+
   await test("a full-tab write never destroys a column the payload omits", async () => {
     // writeTab (apps-script-Code.gs:842-844) rebuilt the sheet's headers from
     // data[0] ALONE, so a key missing from the first row was dropped for the
@@ -471,14 +512,32 @@ module.exports = async function run() {
       await post({ action: "deleteRowById", tab: "Leave", id });
     }
     await post({ action: "deleteRowById", tab: "Roster", id: TEST_4D });
-    await post({ action: "write", tab: "SOC", baseRev: await revOf("SOC"), data: [] });
-    await post({ action: "write", tab: "MSK", baseRev: await revOf("MSK"), data: [] });
     await post({ action: "deleteRowById", tab: "ParadeStates", id: T("P1") });
+
+    // Put SOC and MSK back the way they were found. `write` refuses an empty
+    // payload by design, so a tab that STARTED empty cannot be emptied again
+    // through the API — SOC's rows carry ids and come out one by one; MSK's do
+    // not, and one marker row is the honest cost of testing a no-id tab.
+    for (const tab of ["SOC", "MSK"]) {
+      if (SNAPSHOT[tab].length) {
+        await post({ action: "write", tab, baseRev: await revOf(tab), data: SNAPSHOT[tab] });
+      }
+    }
+    for (const r of await rowsOf("SOC")) {
+      if (String(r.id).startsWith("T_")) {
+        await post({ action: "deleteRowById", tab: "SOC", id: r.id });
+      }
+    }
 
     const leftovers = [
       ...(await rowsOf("Leave")), ...(await rowsOf("SOC")), ...(await rowsOf("Roster")),
     ].filter((r) => String(r.id).startsWith("T_") || r.id === TEST_4D);
     eq(leftovers, [], "no test rows left behind");
+
+    eq((await rowsOf("SOC")).length, SNAPSHOT.SOC.length, "SOC restored to what it held");
+    if (SNAPSHOT.MSK.length) {
+      eq((await rowsOf("MSK")).length, SNAPSHOT.MSK.length, "MSK restored to what it held");
+    }
   });
 };
 

@@ -24,7 +24,7 @@
 
 import postgres from "npm:postgres@3.4.4";
 
-const BUILD = "2026-08-29-1";
+const BUILD = "2026-09-03-1";
 
 const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, {
   prepare: false,
@@ -536,10 +536,27 @@ Deno.serve(async (req) => {
     let out: Record<string, unknown>;
 
     switch (action) {
-      case "write":
-        out = await withRev(tab, baseRev, true, (tx) =>
-          writeWholeTab(tx, tab, (body.data ?? []) as Record<string, unknown>[]));
+      case "write": {
+        const data = (body.data ?? []) as Record<string, unknown>[];
+        out = await withRev(tab, baseRev, true, (tx) => {
+          // Same guard, same wording as writeTab (apps-script-Code.gs:832).
+          // Without it an empty payload WIPES the tab for every device: the
+          // per-tab "↻ Re-push all" button (js/render.js:1851) calls pushTab
+          // with whatever STATE holds, and STATE holds [] on a device whose
+          // pull for that tab never landed. Sheets refused that; Postgres would
+          // obey it, and for MSK there is no tombstone to recover from.
+          //
+          // It sits INSIDE withRev, not before it, because the old backend ran
+          // the staleness check first (withRevLock wraps writeTab, :205) — so a
+          // stale empty write is still a conflict, not this error. withRev
+          // skips the revision bump on any {error}, so nothing moves either way.
+          if (!Array.isArray(data) || data.length === 0) {
+            return Promise.resolve({ error: "Data must be a non-empty array of objects" });
+          }
+          return writeWholeTab(tx, tab, data);
+        });
         break;
+      }
       case "append":
         out = await withRev(tab, baseRev, false, (tx) =>
           appendOne(tx, tab, (body.row ?? {}) as Record<string, unknown>));
