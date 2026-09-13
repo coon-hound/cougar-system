@@ -1697,7 +1697,18 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
       return iso && iso >= startIso && iso <= endIso;
     })
   );
-  const totalCoyConducts = countCompanyConductsInWindow(startIso, endIso);
+  // Universe = "polar-tracked conducts": the set of (date, conductId) tuples
+  // in the window where at least one company-wide Polar entry exists. Admin
+  // sessions / briefings / conducts without watches don't appear here, so
+  // they don't dilute either the attended or joined ratio. This makes the
+  // report read as "how present were you when training was being measured".
+  const polarTrackedTuples = new Set();
+  STATE.polar.forEach(p => {
+    if (!p.conductId) return;
+    const iso = displayDateToISO(p.date);
+    if (iso && iso >= startIso && iso <= endIso) polarTrackedTuples.add(`${iso}|${p.conductId}`);
+  });
+  const totalCoyConducts = polarTrackedTuples.size;
 
   // Conducts in this window where this recruit was logged as not
   // participating. ReportSick is excluded — it happens mid-day, after the
@@ -1707,18 +1718,32 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
     const iso = displayDateToISO(c.date);
     return iso && iso >= startIso && iso <= endIso;
   });
-  const skippedRows = conductDetailRows.filter(c => c.type === "PX" || c.type === "RSI" || c.type === "Fallout");
+  // Restrict misses to polar-tracked tuples so the math stays consistent with
+  // the new denominator. A "missed" entry for a non-polar-tracked conduct
+  // would otherwise push conductsAttended below zero or skew the rate.
+  const skippedRows = conductDetailRows.filter(c => {
+    if (c.type !== "PX" && c.type !== "RSI" && c.type !== "Fallout") return false;
+    const iso = displayDateToISO(c.date);
+    return iso && c.conductId && polarTrackedTuples.has(`${iso}|${c.conductId}`);
+  });
   const missedCount = skippedRows.length;
   const missedBreakdown = ["PX", "RSI", "Fallout"]
     .map(t => ({ t, n: skippedRows.filter(m => m.type === t).length }))
     .filter(x => x.n > 0)
     .map(x => `${x.n} ${x.t}`).join(" · ") || "none";
 
-  // Conducts attended = total minus those they were absent from.
+  // Conducts attended = polar-tracked conducts minus those they were absent from.
   // Polar classes joined = how many of those conducts they wore the watch for.
   const conductsAttended = Math.max(0, totalCoyConducts - missedCount);
   const attendanceRate = totalCoyConducts ? Math.round((conductsAttended / totalCoyConducts) * 100) : 0;
-  const polarJoined = polar.length;
+  // Strict polar-joined: only count this recruit's polar entries that map to
+  // a tracked tuple. Drops orphan polar rows (missing conductId) so the
+  // ratio is always ≤ 1.
+  const polarJoined = STATE.polar.filter(p => {
+    if (p.d4 !== d4 || !p.conductId) return false;
+    const iso = displayDateToISO(p.date);
+    return iso && iso >= startIso && iso <= endIso;
+  }).length;
   const polarRate = totalCoyConducts ? Math.round((polarJoined / totalCoyConducts) * 100) : 0;
   // Report Sick = times the recruit was sent to MO mid-day after the
   // conduct (ReportSick conductDetail entries). Discrete countable events;
@@ -1928,6 +1953,70 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
 // Opens the report modal with date pickers, recruit picker, preview,
 // test send, and bulk send. Fetches sender identity + quota on open so
 // the user knows exactly which Gmail account emails will come from.
+// ─── FITNESS-REPORT SENT LOG (client-side dedup) ─────────
+// Gmail caps the script owner at 100 sends/day. When the user has more
+// recipients than that, the bulk loop hits quota=0 and bails — we record
+// each successful send so the next day they can resume without re-emailing
+// anyone. Scoped per report period (start→end) so a May report and a June
+// report don't shadow each other.
+const FITNESS_SENT_KEY = "cougar-fitness-sent";
+
+function fitnessSentKey(startIso, endIso) {
+  return `${startIso}→${endIso}`;
+}
+
+function getFitnessSentAll() {
+  try { return JSON.parse(localStorage.getItem(FITNESS_SENT_KEY) || "{}"); }
+  catch { return {}; }
+}
+
+// Returns { d4: sentAtIso, … } for the given period.
+function getFitnessSentMap(startIso, endIso) {
+  return getFitnessSentAll()[fitnessSentKey(startIso, endIso)] || {};
+}
+
+function markFitnessSent(startIso, endIso, d4) {
+  const all = getFitnessSentAll();
+  const k = fitnessSentKey(startIso, endIso);
+  if (!all[k]) all[k] = {};
+  all[k][d4] = new Date().toISOString();
+  localStorage.setItem(FITNESS_SENT_KEY, JSON.stringify(all));
+}
+
+function clearFitnessSent(startIso, endIso) {
+  const all = getFitnessSentAll();
+  delete all[fitnessSentKey(startIso, endIso)];
+  localStorage.setItem(FITNESS_SENT_KEY, JSON.stringify(all));
+}
+
+// Refreshes the "X already sent · Y pending" line whenever the user picks
+// new dates or after a batch finishes. Also enables/disables the Clear-log
+// button. Called from date input oninput and after sendAllReports completes.
+function refreshFitnessSentStatus() {
+  const el = document.getElementById("fitness-sent-status");
+  if (!el) return;
+  const startIso = gv("rep-start"), endIso = gv("rep-end");
+  if (!startIso || !endIso) { el.innerHTML = ""; return; }
+  const allRecipients = filteredRoster().filter(r => r.role !== "Commander" && r.email);
+  const sentMap = getFitnessSentMap(startIso, endIso);
+  const sentCount = allRecipients.filter(r => sentMap[r.id]).length;
+  const pending = allRecipients.length - sentCount;
+  const clearBtn = sentCount
+    ? ` <button class="btn" style="font-size:10px;padding:2px 8px;margin-left:6px" onclick="confirmClearFitnessSent()">Clear sent log</button>`
+    : "";
+  el.innerHTML = sentCount
+    ? `<span style="color:var(--accent)">✓ ${sentCount} already sent</span> · <strong>${pending} pending</strong> for ${startIso} → ${endIso}${clearBtn}`
+    : `<span style="color:var(--muted)">No sends recorded yet for ${startIso} → ${endIso}.</span>`;
+}
+
+function confirmClearFitnessSent() {
+  const startIso = gv("rep-start"), endIso = gv("rep-end");
+  if (!startIso || !endIso) return;
+  if (!confirm(`Clear sent log for ${startIso} → ${endIso}? Next bulk send will email everyone in scope again, including recruits who already received it.`)) return;
+  clearFitnessSent(startIso, endIso);
+  refreshFitnessSentStatus();
+}
+
 function openFitnessReportModal() {
   const today = todayISO();
   const monthAgo = new Date(today); monthAgo.setMonth(monthAgo.getMonth() - 1);
@@ -1953,9 +2042,10 @@ function openFitnessReportModal() {
       </div>
 
       <div class="form-row">
-        ${formField("rep-start", "Start date", "date", "", `value="${monthAgoIso}" required`)}
-        ${formField("rep-end", "End date", "date", "", `value="${today}" required`)}
+        ${formField("rep-start", "Start date", "date", "", `value="${monthAgoIso}" required oninput="refreshFitnessSentStatus()"`)}
+        ${formField("rep-end",   "End date",   "date", "", `value="${today}" required oninput="refreshFitnessSentStatus()"`)}
       </div>
+      <div id="fitness-sent-status" style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;display:flex;align-items:center;flex-wrap:wrap"></div>
 
       <div class="form-group">
         <label>Preview / Test recipient</label>
@@ -1978,6 +2068,9 @@ function openFitnessReportModal() {
 
       <div id="fitness-report-progress" style="display:none;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px"></div>
     </div>`);
+
+  // Populate the pending/already-sent status now that the modal DOM exists.
+  refreshFitnessSentStatus();
 
   // Async: fetch sender identity + quota. Three possible outcomes:
   //  1. Both succeed → show sender + quota
@@ -2079,13 +2172,25 @@ async function sendTestReport() {
 
 // Sequential send loop — fires one email at a time so we can read the
 // remaining quota after each call and abort cleanly when it hits 0.
+// Recipients already recorded in the period's sent log are skipped, so
+// hitting quota on day 1 leaves only the un-sent recruits queued for day 2.
 async function sendAllReports() {
   const startIso = gv("rep-start");
   const endIso = gv("rep-end");
   if (!startIso || !endIso) { alert("Pick a start and end date first."); return; }
-  const recipients = filteredRoster().filter(r => r.role !== "Commander" && r.email);
-  if (!recipients.length) { alert("No recruits with email in current scope."); return; }
-  if (!confirm(`Send fitness reports to ${recipients.length} recruits? This cannot be undone.`)) return;
+  const allRecipients = filteredRoster().filter(r => r.role !== "Commander" && r.email);
+  if (!allRecipients.length) { alert("No recruits with email in current scope."); return; }
+
+  const sentMap = getFitnessSentMap(startIso, endIso);
+  const recipients = allRecipients.filter(r => !sentMap[r.id]);
+  const alreadySent = allRecipients.length - recipients.length;
+
+  if (!recipients.length) {
+    alert(`All ${allRecipients.length} recipients already received the report for ${startIso} → ${endIso}.\n\nUse "Clear sent log" if you need to resend.`);
+    return;
+  }
+  const skippedNote = alreadySent ? `\n(skipping ${alreadySent} already sent for this period)` : "";
+  if (!confirm(`Send fitness reports to ${recipients.length} recruits?${skippedNote}\n\nThis cannot be undone.`)) return;
 
   const progress = document.getElementById("fitness-report-progress");
   progress.style.display = "block";
@@ -2097,7 +2202,7 @@ async function sendAllReports() {
 
   for (let i = 0; i < recipients.length; i++) {
     const r = recipients[i];
-    progress.innerHTML = `Sending ${i + 1}/${recipients.length} — currently <strong>${displayPersonLabel(r.id)}</strong><br><span style="color:var(--muted)">✓ ${sent} sent · ⚠ ${failed} failed · quota left: ${lastQuota}</span>`;
+    progress.innerHTML = `Sending ${i + 1}/${recipients.length} — currently <strong>${displayPersonLabel(r.id)}</strong><br><span style="color:var(--muted)">✓ ${sent} sent · ⚠ ${failed} failed${alreadySent ? ` · ⏭ ${alreadySent} skipped (already sent)` : ""} · quota left: ${lastQuota}</span>`;
     try {
       const { htmlForEmail, inlineImages } = buildFitnessReportHTML(r.id, startIso, endIso);
       const res = await API.sendEmail(r.email, subject, htmlForEmail, inlineImages);
@@ -2109,6 +2214,9 @@ async function sendAllReports() {
         }
       } else {
         sent++;
+        // Persist BEFORE checking quota so a 0-quota response after a
+        // successful send still records that one.
+        markFitnessSent(startIso, endIso, r.id);
         lastQuota = res.remainingQuota ?? "?";
         if (res.remainingQuota === 0 && i < recipients.length - 1) {
           skippedQuota = recipients.length - i - 1;
@@ -2120,7 +2228,11 @@ async function sendAllReports() {
     }
   }
 
-  progress.innerHTML = `<strong style="color:var(--green)">✓ Done.</strong> ${sent} sent · ${failed} failed${skippedQuota ? ` · ${skippedQuota} not sent (daily quota hit — retry tomorrow)` : ""} · quota left: ${lastQuota}`;
+  const quotaRetryNote = skippedQuota ? ` · ${skippedQuota} not sent (daily quota hit — retry tomorrow)` : "";
+  const skipNote = alreadySent ? ` · ${alreadySent} skipped (already sent earlier)` : "";
+  progress.innerHTML = `<strong style="color:var(--green)">✓ Done.</strong> ${sent} sent · ${failed} failed${quotaRetryNote}${skipNote} · quota left: ${lastQuota}`;
+  // Refresh the pending/sent indicator so the user sees the new pending count.
+  refreshFitnessSentStatus();
 }
 
 // ─── CONDUCT REGISTRY MIGRATION ──────────────────────────
