@@ -53,7 +53,32 @@ the literal string `local-dev-key` and the auth token is `dev-token`. They are
 deliberately worthless, because the database they protect holds nothing real.
 No deployment should ever reuse either.
 
-## The toolchain (installed without sudo)
+## The toolchain
+
+The scripts detect the platform and find the binaries themselves, so `up` works
+on either.
+
+### macOS (Homebrew)
+
+```bash
+brew install deno postgresql@16 supabase/tap/supabase
+```
+
+`postgresql@16` is keg-only, so its `bin` is not on the default `PATH`;
+`dev-env.sh` prepends it rather than relying on the shell.
+Three Linux-isms the scripts avoid on Darwin: `ss` and `grep -oP` (port lookup
+goes through `lsof` instead), `setsid` (`nohup`), and `LD_LIBRARY_PATH`, which
+Homebrew does not need.
+
+The Edge Function runs with `--node-modules-dir=none`, and
+`supabase/functions/api/deno.json` stops Deno from walking up to the repo's
+`package.json`.
+Without that boundary Deno resolves the repo's devDependencies before serving a
+request, so a failed Playwright download takes the API down with it.
+Production Edge Functions never see `package.json` at all, so the boundary also
+makes local resolution match deployed resolution.
+
+### Linux (installed without sudo)
 
 Everything lives under `~/.local` and was assembled by unpacking Ubuntu
 packages into a private root, so nothing was installed system-wide:

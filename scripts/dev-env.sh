@@ -19,7 +19,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN="$HOME/.cougar-dev"; mkdir -p "$RUN"
 
 PG_HOME="$HOME/.local/pgsql"
-PG_BIN="$PG_HOME/root/usr/lib/postgresql/16/bin"
 PGDATA="$PG_HOME/data"
 PGPORT=55432
 DB=cougar_dev
@@ -28,8 +27,19 @@ DBUSER=cougar
 API_PORT=8000
 WEB_PORT=5600
 
-export LD_LIBRARY_PATH="$PG_HOME/root/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
-export PATH="$HOME/.local/deno/bin:$HOME/.local/node-v20/bin:$PATH"
+# ── Where the toolchain lives, per platform ─────────────────────────────────
+# Linux: unpacked Ubuntu debs under ~/.local (DEV-ENV.md), needing an explicit
+# LD_LIBRARY_PATH for libpq. macOS: Homebrew, which is self-contained but keeps
+# postgresql@16 keg-only, so its bin directory is not on the default PATH.
+if [ "$(uname -s)" = "Darwin" ]; then
+  BREW_PREFIX="$(brew --prefix 2>/dev/null || echo /opt/homebrew)"
+  PG_BIN="$BREW_PREFIX/opt/postgresql@16/bin"
+  export PATH="$PG_BIN:$BREW_PREFIX/bin:$PATH"
+else
+  PG_BIN="$PG_HOME/root/usr/lib/postgresql/16/bin"
+  export LD_LIBRARY_PATH="$PG_HOME/root/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+  export PATH="$HOME/.local/deno/bin:$HOME/.local/node-v20/bin:$PATH"
+fi
 
 # Dev-only secrets. NOT the values any real deployment should ever use.
 export SUPABASE_DB_URL="postgres://$DBUSER@127.0.0.1:$PGPORT/$DB"
@@ -38,16 +48,26 @@ export APPS_SCRIPT_URL="${APPS_SCRIPT_URL:-}"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 psql_() { "$PG_BIN/psql" -h 127.0.0.1 -p "$PGPORT" -U "$DBUSER" -d "$DB" "$@"; }
-port_pid() { ss -lptn "sport = :$1" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1; }
+# lsof rather than `ss`, which macOS does not ship; `-sTCP:LISTEN` keeps this
+# from matching a client connected to the port from elsewhere.
+port_pid() { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null | head -1; }
+
+# setsid is GNU coreutils and absent on macOS; nohup detaches well enough for a
+# dev daemon, and the subshell already drops the controlling terminal.
+if have setsid; then detach() { setsid "$@"; }; else detach() { nohup "$@"; }; fi
 
 require_deps() {
   local missing=0
   [ -x "$PG_BIN/postgres" ] || { echo "  missing: Postgres at $PG_BIN"; missing=1; }
-  have deno  || { echo "  missing: deno (expected ~/.local/deno/bin/deno)"; missing=1; }
+  have deno  || { echo "  missing: deno"; missing=1; }
   have python3 || { echo "  missing: python3 (serves the frontend)"; missing=1; }
   if [ "$missing" = 1 ]; then
     echo
-    echo "See DEV-ENV.md for how these were installed (all no-sudo, under ~/.local)."
+    if [ "$(uname -s)" = "Darwin" ]; then
+      echo "  brew install deno postgresql@16"
+    else
+      echo "See DEV-ENV.md for how these were installed (all no-sudo, under ~/.local)."
+    fi
     exit 1
   fi
 }
@@ -86,7 +106,11 @@ api_up() {
   # them the backgrounded child inherits this script's stdout, so `dev-env.sh up
   # | tail` (or any pipe, including the one verify.sh runs under) never sees EOF
   # and hangs forever after the work is done.
-  ( cd "$ROOT" && setsid deno run -A --node-modules-dir=auto \
+  # --node-modules-dir=none: the function needs npm:postgres and nothing else,
+  # and supabase/functions/api/deno.json keeps Deno from resolving the repo's
+  # package.json on the way up. Both together mean a Playwright download
+  # failure cannot stop the API — which is how it first failed on macOS.
+  ( cd "$ROOT" && detach deno run -A --node-modules-dir=none \
       supabase/functions/api/index.ts > "$RUN/edge.log" 2>&1 < /dev/null & ) \
     > /dev/null 2>&1 < /dev/null
   for _ in $(seq 1 30); do
@@ -97,7 +121,7 @@ api_up() {
 
 web_up() {
   if [ -n "$(port_pid $WEB_PORT)" ]; then echo "  web already on :$WEB_PORT"; return; fi
-  ( cd "$ROOT" && setsid python3 -m http.server "$WEB_PORT" --bind 127.0.0.1 \
+  ( cd "$ROOT" && detach python3 -m http.server "$WEB_PORT" --bind 127.0.0.1 \
       > "$RUN/web.log" 2>&1 < /dev/null & ) \
     > /dev/null 2>&1 < /dev/null
   sleep 1
