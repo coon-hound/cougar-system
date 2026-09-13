@@ -34,10 +34,24 @@ end $$;
 -- display-only on the profile card (js/forms.js:101-125), and the only filters
 -- in the app are role/plt/sect/program/group (js/state.js:226-236).
 
+-- WHY THE EXPLICIT search_path: pgcrypto does not live in the same schema
+-- everywhere. A plain `create extension if not exists pgcrypto` (0001) puts it
+-- in `public` on a stock Postgres, but Supabase ships it preinstalled in
+-- `extensions` — so the 0001 statement no-ops there and pgp_sym_encrypt is not
+-- on the default path. Postgres validates SQL function bodies at CREATE time,
+-- so this migration failed outright on Supabase with
+-- `function pgp_sym_encrypt(text, text, unknown) does not exist`.
+-- Listing both schemas resolves it in either environment: a schema named in
+-- search_path that does not exist is silently ignored. Pinning the path also
+-- satisfies Supabase's function_search_path_mutable lint, which exists because
+-- a caller-controlled search_path is a privilege-escalation vector.
+--
 -- VOLATILE (the default), not IMMUTABLE: pgp_sym_encrypt uses a random IV per
 -- call, so marking this immutable would let the planner constant-fold it.
 create or replace function enc_col(p_val text, p_key text) returns bytea
-  language sql strict as $$
+  language sql strict
+  set search_path = public, extensions
+as $$
     select pgp_sym_encrypt(p_val, p_key, 'compress-algo=0, cipher-algo=aes256')
 $$;
 
@@ -45,7 +59,9 @@ $$;
 -- rather than silently yielding blanks that a full-tab write would then
 -- persist over the real values.
 create or replace function dec_col(p_val bytea, p_key text) returns text
-  language sql strict immutable as $$
+  language sql strict immutable
+  set search_path = public, extensions
+as $$
     select pgp_sym_decrypt(p_val, p_key)
 $$;
 
