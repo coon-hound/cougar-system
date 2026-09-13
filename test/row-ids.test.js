@@ -57,6 +57,13 @@ module.exports = async function run() {
     eq(h.__eval("typeof nextId()"), "string");
   });
 
+  // This is the assertion that caught a REAL defect in the first version of the
+  // generator: Date.now() plus 6 random base36 chars is ~2.2e9 values per
+  // millisecond, and 50,000 ids minted inside one millisecond collided in
+  // roughly 1 run in 30 (measured 2/60). A monotonic counter makes it
+  // structural rather than probable. Reachable in production wherever a bulk
+  // action mints many rows at once — leaveMany over a platoon, the conduct
+  // wizard writing a detail row per recruit.
   await test("50k ids in a tight loop are all distinct", () => {
     const h = load("js/helpers.js");
     const n = h.__eval("(() => { const s = new Set(); for (let i=0;i<50000;i++) s.add(nextId()); return s.size; })()");

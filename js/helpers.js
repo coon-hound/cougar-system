@@ -266,12 +266,29 @@ function commanderLeaveBalance(d4) {
 // FIRST matching row, so editing one of those silently overwrites the other
 // person's record.
 //
-// Time prefix + random suffix in base36: ordered by creation, ~2.8 billion
-// suffixes per millisecond, and no shared state to collide on. Returns a STRING
-// — ids are text everywhere now (normId, js/state.js), and a string cannot be
-// silently coerced into some other row's id.
+// Time prefix + per-session salt + monotonic counter, all base36:
+//
+//   WITHIN a session ids cannot collide at all — the counter strictly
+//   increases, so it does not matter how many rows a bulk action mints inside
+//   the same millisecond (leaveMany over a platoon, the conduct wizard writing
+//   a detail row per recruit). A purely random suffix would only be PROBABLY
+//   unique: 36^6 values per millisecond sounds ample, but 50,000 ids collide
+//   roughly one run in thirty — measured, not estimated — and the failure mode
+//   is the catastrophic one above, one row silently overwriting another
+//   person's. Probable uniqueness is not good enough for a medical record.
+//
+//   ACROSS sessions the salt is what separates two devices. Unlike the old
+//   4-digit seed it is ~2.2 billion wide, and a clash would additionally have
+//   to land in the same millisecond at the same counter value.
+//
+// Returns a STRING because ids are text everywhere now (normId, js/state.js),
+// and because a string cannot be silently coerced into a different row's id.
+// The "-" also guarantees an id is never all-digits, so `+id` is NaN rather
+// than a truthy number that then fails === against its own row.
+const _idSalt = Math.random().toString(36).slice(2, 8);
+let _idSeq = 0;
 const nextId = () =>
-  Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  Date.now().toString(36) + "-" + _idSalt + "-" + (++_idSeq).toString(36);
 
 // Smart CSV column resolver — case-insensitive, handles aliases
 function col(row, ...names) {
