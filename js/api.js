@@ -61,7 +61,7 @@ const PULL_ASSIGN = {
   appointments:  d => STATE.appointments = padD4OnLayer(d),
   leave:         d => STATE.leave = normalizeLeave(d),
   msk:           d => STATE.msk = normalizeMSK(d),
-  conducts:      d => STATE.conducts = d
+  conducts:      d => STATE.conducts = padD4OnLayer(d)
 };
 
 const API = {

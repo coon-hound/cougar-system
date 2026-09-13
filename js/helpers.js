@@ -255,9 +255,23 @@ function commanderLeaveBalance(d4) {
   return { used, quota, remaining: quota - used };
 }
 
-// Short sequential IDs instead of timestamps
-let _idCounter = Math.floor(Math.random() * 9000) + 1000;
-const nextId = () => ++_idCounter;
+// Row ids, unique across devices.
+//
+// The previous generator seeded a counter with Math.random()*9000+1000 once per
+// SESSION and incremented from there. Two phones opening the app the same
+// morning had a 1-in-9000 chance of the same base, and then minted identical
+// ids in lockstep. That is not theoretical — the live sheet has 11 Medical and
+// 5 Leave rows whose id belongs to a DIFFERENT person's record (id 1404 is both
+// 4214's back pain and 1311's fever). findRowByIdIndex_ resolves an id to the
+// FIRST matching row, so editing one of those silently overwrites the other
+// person's record.
+//
+// Time prefix + random suffix in base36: ordered by creation, ~2.8 billion
+// suffixes per millisecond, and no shared state to collide on. Returns a STRING
+// — ids are text everywhere now (normId, js/state.js), and a string cannot be
+// silently coerced into some other row's id.
+const nextId = () =>
+  Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 
 // Smart CSV column resolver — case-insensitive, handles aliases
 function col(row, ...names) {
