@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 129;
+const APP_VERSION = 130;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 130,
+    date: "13 Sep 2026",
+    title: "Records stop overwriting each other",
+    intro: "Every record you add gets an ID, and the app had been picking those IDs in a way that let two phones land on the same number. When that happened the two records became one: editing one person's entry quietly rewrote someone else's. This release fixes how IDs are made and how records are matched.",
+    items: [
+      { t: "🆔 No two records share an ID again", d: "IDs used to start from a random number each time you opened the app, so two phones that opened it the same morning could hand out identical IDs all day. They are now built from the exact time plus a random tail, so they cannot clash." },
+      { t: "🏥 Editing an entry edits that entry", d: "16 medical and leave records in the system currently share an ID with a different person's record - one medical ID belongs to both a back injury in May and a fever in July. Editing either one used to overwrite the first match. New records can no longer collide this way." },
+      { t: "✏️ Edit buttons keep working on new records", d: "The edit and delete buttons on every table now handle the new ID format, so records added from today behave exactly like older ones." },
+    ],
+  },
   {
     v: 129,
     date: "2 Sep 2026",

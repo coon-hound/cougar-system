@@ -331,7 +331,7 @@ function normalizeMedical(records) {
     let status = r.status || "";
     if (/^Excused /.test(status)) status = status.replace(/^Excused /, "Excuse ");
     return {
-      id: r.id,
+      id: normId(r.id),
       d4: padD4(r.d4 || ""),
       date: r.date || "",
       reason: r.reason || "",
@@ -357,16 +357,38 @@ function normalizeLeave(records) {
   return (records || []).map(r => {
     if (!r) return r;
     const out = r.d4 != null ? { ...r, d4: padD4(r.d4) } : { ...r };
+    if ("id" in out) out.id = normId(out.id);
     if (out.type === "Leave") out.type = "Annual Leave";
     return out;
   });
 }
 
-// Generic d4-padding pass for layers that don't have their own normalizer.
-// Applied at every read boundary (loadLocal, pullAll) so commander 4Ds
-// stay 4 digits regardless of how Sheets mangles them on round-trip.
+// Row ids are TEXT, always.
+//
+// Sheets types its id column as a NUMBER, so `row.id === +editId` happened to
+// work. Nothing guarantees that. A row whose id was typed as text (and every
+// id minted after this change is text — see nextId, js/helpers.js) compares
+// false against a `+`-coerced editId, and the failure is silent and
+// destructive: submitMedical falls through its editId branch and APPENDS a
+// duplicate instead of updating in place.
+//
+// Same class as the coercions normalizeMedical does for inCamp and
+// normalizeRoster for outOfCamp/campIn: pin the type at the read boundary so
+// the whole app is on one side of the line and `===` is correct everywhere.
+const normId = v => (v === null || v === undefined) ? "" : String(v).trim();
+
+// Generic d4-padding + id-stringifying pass for layers without their own
+// normalizer. Applied at every read boundary (loadLocal, pullAll) so commander
+// 4Ds stay 4 digits regardless of how Sheets mangles them on round-trip, and
+// so an id is a string no matter how it was stored.
 function padD4OnLayer(records) {
-  return (records || []).map(r => r && r.d4 != null ? { ...r, d4: padD4(r.d4) } : r);
+  return (records || []).map(r => {
+    if (!r) return r;
+    const out = { ...r };
+    if (out.d4 != null) out.d4 = padD4(out.d4);
+    if ("id" in out) out.id = normId(out.id);
+    return out;
+  });
 }
 
 // Conduct records (Attendance, ConductDetail) gained a `program` field (PTP /
@@ -374,7 +396,7 @@ function padD4OnLayer(records) {
 // values to "Combined" — so writeTab (which derives headers from the first
 // row's keys) never strips the column on a full "Re-push all".
 function normalizeAttendance(records) {
-  return (records || []).map(r => r ? { ...r, program: r.program || "Combined" } : r);
+  return padD4OnLayer(records).map(r => r ? { ...r, program: r.program || "Combined" } : r);
 }
 function normalizeConductDetail(records) {
   return padD4OnLayer(records).map(r => r ? { ...r, program: r.program || "Combined" } : r);
@@ -447,7 +469,7 @@ function loadLocal() {
     STATE.appointments = padD4OnLayer(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
     STATE.msk = normalizeMSK(d.msk);
-    STATE.conducts = Array.isArray(d.conducts) ? d.conducts : [];
+    STATE.conducts = padD4OnLayer(Array.isArray(d.conducts) ? d.conducts : []);
     STATE.rev = (d.rev && typeof d.rev === "object") ? d.rev : {};
   } catch { /* fall through to empty state */ }
 }
