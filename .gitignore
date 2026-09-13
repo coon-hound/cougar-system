@@ -62,3 +62,6 @@ __demo.html
 
 # Supabase CLI scratch (project ref, pooler creds) — written by `npx supabase`.
 supabase/.temp/
+
+# Claude Code worktrees — each is its own checkout on its own pushed branch.
+.claude/worktrees/
