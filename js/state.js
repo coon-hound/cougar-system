@@ -2,18 +2,31 @@
 // the Google Sheet via API.pullAll() on launch, or from localStorage on
 // subsequent loads.
 
-// The backend URL. This is no longer a secret — auth is enforced server-side
-// by per-device tokens issued via the invite flow.
-// PASTE YOUR DEPLOYMENT URL HERE after redeploying:
+// The backend. Neither URL is a secret — authorization is enforced server-side
+// by per-device tokens issued through the invite flow (auth_tokens), which is
+// why this file being public code changes nothing.
+//
+// THE DEFAULT IS NOW POSTGRES. The Supabase Edge Function speaks the exact
+// protocol js/api.js and js/sync.js already spoke, so nothing else in the app
+// had to change for this line to move — which was the whole point of building
+// the migration that way.
+const SUPABASE_API_URL = "https://oyowmrclgpindpckyxgl.supabase.co/functions/v1/api";
+
+// The old Google Sheets backend. Kept as the documented way back: it is still
+// deployed and still holds the data as it stood at the cutover, so
+// `localStorage.setItem("cougar-api-url", COUGAR_SHEETS_URL)` in a console
+// returns a device to it. Anything written there after the cutover is stranded,
+// so this is a rollback lever, not a second home.
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzazMTu4y4XjjDXBGWN_aAE51fzP_z23zQUZnuKjWWPJ3fNNjUPbp3DbZW9T66OQysr/exec"
 
-// Per-device backend override. Two jobs:
-//   1. Cutover lever — point one device at a new backend without shipping a
-//      build, and clear the key to roll straight back.
-//   2. Lets the e2e suite pin a sentinel URL, so specs script the backend by
+// Per-device backend override. Three jobs:
+//   1. Rollback lever — point one device back at the Sheet, or forward at a
+//      replacement, without shipping a build.
+//   2. Lets a single device trial a new backend before everyone moves.
+//   3. Lets the e2e suite pin a sentinel URL, so specs script the backend by
 //      protocol rather than by hardcoding whoever is hosting it today.
 const API_URL_KEY = "cougar-api-url";
-const API_URL = localStorage.getItem(API_URL_KEY) || APPS_SCRIPT_URL;
+const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 
 // Storage key is versioned so we can invalidate stale caches in users' browsers.
 const STORAGE_KEY = "cougar-data-v2";
