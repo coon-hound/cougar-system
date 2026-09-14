@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 131;
+const APP_VERSION = 132;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 132,
+    date: "14 Sep 2026",
+    title: "Changes from other phones show up twice as fast",
+    intro: "The app checks for other people\u2019s changes on a timer, and that timer was twenty seconds. It is now ten. Nothing you do changes \u2014 edits made on someone else\u2019s phone simply appear about twice as quickly on yours.",
+    items: [
+      { t: "\u23f1\ufe0f About six seconds instead of eleven", d: "Book someone out on one phone and the next phone picks it up in roughly six seconds on average, rather than eleven. The check itself was never the slow part \u2014 the wait between checks was." },
+      { t: "\ud83d\udcf5 Still nothing while the app is closed", d: "Checks only run while the app is open on screen. A backgrounded app makes none at all, and picking your phone back up triggers an immediate check rather than waiting for the next one." },
+    ],
+  },
   {
     v: 131,
     date: "14 Sep 2026",

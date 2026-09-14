@@ -20,7 +20,8 @@ scripts/ship.sh "feat: my thing"           # verify → commit → push → open
 
 ## The verify gate (`scripts/verify.sh`)
 
-Runs every applicable check and tees "one-look" evidence to `EVIDENCE.md` (diffstat + captured output + manual-test steps + PASS/FAIL):
+Runs every applicable check and tees "one-look" evidence to `EVIDENCE.md` (diffstat + captured output + manual-test steps + PASS/FAIL).
+`EVIDENCE.md` is git-ignored: `ship.sh` sends it as the PR body, so the evidence is durable on the PR without a generated file rewriting itself on every branch and conflicting at merge.
 
 - Always: `node test/run.js` — sync units, multi-tab e2e, and static load-time guards (duplicate-declaration parse, uniform `?v=`, unbumped-write scan, raw-`setValues` scan). Zero-install.
 - If `apps-script-Code.gs` changed: `node --check` on a copy — paste-safety, since the backend is deployed by pasting this file.
@@ -52,5 +53,5 @@ The two halves of the app deploy differently — state which one a change needs.
 ## Why this shape
 
 - Worktrees give true isolation: an agent can build, test, and screenshot a feature without ever touching another's files or the main checkout.
-- `EVIDENCE.md` + a green CI check is the "one-look" proof a reviewer needs — captured test output, a real-browser screenshot, and exact manual-repro steps, all in the PR.
+- The `EVIDENCE.md` PR body + a green CI check is the "one-look" proof a reviewer needs: captured test output, a real-browser screenshot, and exact manual-repro steps, all in the PR.
 - Independent branches off `master` mean features merge in any order and roll back individually.

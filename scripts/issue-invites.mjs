@@ -72,7 +72,18 @@
 
 import crypto from "node:crypto";
 import { pathToFileURL } from "node:url";
-import postgres from "postgres";
+
+// `postgres` is loaded LAZILY, inside main(), and deliberately not imported at
+// the top of the file.
+//
+// The CI `test` job runs `node test/run.js` with NO `npm install` — it is
+// dependency-free on purpose (.github/workflows/test.yml), which is what keeps
+// it a fast gate that cannot be broken by a bad lockfile. test/issue-invites.js
+// imports this module to reach its pure helpers, so a top-level npm import here
+// takes that whole job down with ERR_MODULE_NOT_FOUND — as it did.
+//
+// Nothing above main() may import an npm package. Node builtins are fine.
+let postgres;
 
 const DEFAULT_BASE_URL = "https://coon-hound.github.io/cougar-system/";
 
@@ -407,6 +418,7 @@ async function modeRevokeInvite(token) {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
+  ({ default: postgres } = await import("postgres"));
   opt.commit = has("--commit");
   opt.json = has("--json");
   opt.baseUrl = flag("--base-url", DEFAULT_BASE_URL);
