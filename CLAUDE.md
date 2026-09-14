@@ -1,7 +1,9 @@
 # CLAUDE.md
 
 Condensed working notes for coding agents.
-The long-form reasoning behind all of this is in [docs/HANDOFF.md](docs/HANDOFF.md); read it before any non-trivial change.
+The long-form reasoning behind all of this is in [docs/HANDOFF.md](docs/HANDOFF.md); read it before any non-trivial change
+(note it predates the Postgres backend and still describes Sheets in places).
+[DEV-ENV.md](DEV-ENV.md) gets a real backend running locally.
 
 ## What this is
 
