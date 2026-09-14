@@ -29,8 +29,13 @@ const API_URL_KEY = "cougar-api-url";
 const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 
 // Storage key is versioned so we can invalidate stale caches in users' browsers.
-const STORAGE_KEY = "cougar-data-v2";
-const STORAGE_KEY_LEGACY = "cougar-data"; // v1 — contained hardcoded personnel fallback
+// Bumped at a change of intake: every phone in the field still holds the
+// PREVIOUS cohort, and until it drops that cache it keeps showing a company
+// that has gone home. See docs/INTAKE-MIGRATION.md.
+//   v1 "cougar-data"     - contained a hardcoded personnel fallback
+//   v2 "cougar-data-v2"  - the BMT cohort, archived at intake 16
+const STORAGE_KEY = "cougar-data-v3";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
@@ -491,8 +496,15 @@ function saveLocal() {
 }
 
 function loadLocal() {
-  if (localStorage.getItem(STORAGE_KEY_LEGACY)) {
-    localStorage.removeItem(STORAGE_KEY_LEGACY);
+  // A cache under an older key is not merely stale, it belongs to a cohort that
+  // has been archived. Drop the PENDING WRITES with it: the 4Ds they name have
+  // been reissued to different people, so replaying one would file a commander's
+  // unpushed edit against a stranger. Losing an unsent edit for a recruit who
+  // has left is the lesser harm by a long way, and it is the window that
+  // bumping this key exists to close.
+  if (STORAGE_KEY_LEGACY.some(k => localStorage.getItem(k))) {
+    STORAGE_KEY_LEGACY.forEach(k => localStorage.removeItem(k));
+    [DIRTY_KEY, DIRTY_OPS_KEY].forEach(k => localStorage.removeItem(k));
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
