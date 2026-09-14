@@ -91,7 +91,7 @@ export function parseArgs(argv) {
 
 /**
  * Keyed digest. Keyed, not plain, because the only thing ever hashed is an NRIC
- * suffix — about 260,000 possible values, which a plain SHA-256 gives straight
+ * - a space small enough that a plain SHA-256 gives it straight
  * back to anyone holding the digest and a wordlist. With the key held only in
  * the environment, the stored digest is useless on its own.
  */

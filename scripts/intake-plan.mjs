@@ -187,20 +187,30 @@ export function parseCsv(text) {
 }
 
 /**
- * The last four characters of an NRIC — three digits and the checksum letter,
- * e.g. "123A". Only ever used to seed a digest, never stored.
+ * The WHOLE NRIC, normalised - a letter, seven digits and a letter. Only ever
+ * used to seed a keyed digest, never stored and never returned.
  *
- * Exactly three digits, not three-or-four. An NRIC is a letter, seven digits
- * and a letter, so "the last 4" is unambiguously \d{3}[A-Z]; allowing four
- * digits makes the pattern greedy and yields "2123A" from S9912123A, which
- * would then not match the same person's "123A" on a roll that supplied only
- * the suffix. Accepts a full NRIC or a bare suffix, and gives the same key for
- * both — which is the whole point.
+ * This used to key on the last four characters only, on the reasoning that a
+ * roll might carry just the suffix. That is wrong, and the first real
+ * changeover proved it: among 96 enlistees there were TWO pairs of different
+ * people sharing a last-4 (T0627509A/T0410509A and T0808034D/T0473034D). The
+ * suffix is three digits and a checksum letter - about 260,000 values - so at
+ * company strength a collision is likelier than not over a handful of intakes.
+ *
+ * The unique index on people.nric_hash turned the first collision into an
+ * aborted run, which is the benign outcome. The malignant one is the next
+ * changeover: a stranger who happens to share a suffix with someone on file
+ * would be matched as that person and inherit their medical history, silently
+ * and with a tier that says "exact". An identifier that is not unique must not
+ * drive an exact match.
+ *
+ * So: a full NRIC keys, a bare suffix does NOT. A roll carrying only suffixes
+ * falls back to name matching, which asks a human about anything it is unsure
+ * of - slower, and correct.
  */
 export function nricKey(nric) {
   const s = String(nric ?? "").toUpperCase().replace(/[^0-9A-Z]/g, "");
-  const m = s.match(/(\d{3}[A-Z])$/);
-  return m ? m[1] : "";
+  return /^[STFGM]\d{7}[A-Z]$/.test(s) ? s : "";
 }
 
 // ── Carry rules ─────────────────────────────────────────────────────────────

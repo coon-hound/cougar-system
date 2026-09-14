@@ -38,7 +38,7 @@ If all you can get is those two columns, the changeover still works.
 
 | Column | Why it earns its place |
 |---|---|
-| `NRIC` | The single most valuable optional column. It is what makes recognising a returning enlistee exact instead of a name comparison. Only the last four characters are used, and the raw value is never stored anywhere. See [What happens to the NRIC](#what-happens-to-the-nric). |
+| `NRIC` | The single most valuable optional column. It is what makes recognising a returning enlistee exact instead of a name comparison. Only a one-way digest of it is used, and the raw value is never stored anywhere. See [What happens to the NRIC](#what-happens-to-the-nric). |
 | `Rank` | Defaults to `REC` if absent. |
 | `Phone` | Used for contact and for the Telegram bot. |
 | `Date of Birth`, `Blood Type`, `Allergies`, `Other Medical` | Shown on the profile card and relevant in an emergency. Encrypted at rest. |
@@ -101,10 +101,14 @@ The NRIC is used for one purpose: matching a returning enlistee to the person we
 
 It is never stored.
 
-Of the NRIC, only the last four characters are used, and only as the input to a keyed one-way digest.
+The whole NRIC is used, and only as the input to a keyed one-way digest.
 What is kept is the digest, which cannot be reversed without a secret key held outside the database.
 The raw value does not reach the database, the archive, the audit log, or the run's own output.
 There is a test that fails the build if it ever appears anywhere in the plan.
+
+Send the **full** value or leave the column blank.
+A partial NRIC is no use here: the last four characters are three digits and a checksum letter, and among a single intake of 96 enlistees two separate pairs of people shared theirs.
+A roll carrying only suffixes keys nothing and falls back to matching on names.
 
 If the roll cannot carry an NRIC, nothing breaks.
 Matching falls back to names, which works, and the run will ask about anything it is not sure of.

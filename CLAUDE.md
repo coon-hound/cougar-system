@@ -75,9 +75,15 @@ on conflict (token) do nothing;
 - Eight roster columns are encrypted at rest (`0002_security.sql`). Do not read
   them into a script unless that script genuinely needs them; matching people by
   name does not.
-- NRIC is never stored. Only a **keyed** digest of the last four characters. An
-  unkeyed hash is not good enough - the space is about 260k values and is walked
-  offline in under a second, so the digest would effectively be the value.
+- NRIC is never stored. Only a **keyed** digest of the **whole** NRIC. An
+  unkeyed hash is not good enough - the space is small enough to walk offline,
+  so the digest would effectively be the value.
+- Do not key on the last four characters. It was built that way and the first
+  real changeover found two collisions among 96 enlistees
+  (`T0627509A`/`T0410509A`, `T0808034D`/`T0473034D`). The unique index turns
+  the first collision into an aborted run; the quiet failure is a later intake
+  matching a stranger onto someone else's medical history at tier NRIC. A bare
+  suffix now keys to `""` and falls back to name matching.
 
 ## Names in this dataset
 

@@ -428,7 +428,7 @@ module.exports = async function () {
   });
 
   await test("an NRIC in the roll matches across a name change", () => {
-    const nricHash = fakeHash("nric:123A");
+    const nricHash = fakeHash("nric:S9912123A");
     const plan = run(P, {
       people: [{ pid: "PABC", name: "OLD RECORDED NAME", name_key: P.nameKey("OLD RECORDED NAME"), nric_hash: nricHash, last_d4: "1101", d4_history: ["1101"] }],
       roll: [rollRow({ "4D": "2205", Name: "TAN WEI MING", NRIC: "S9912123A" })],
@@ -436,6 +436,24 @@ module.exports = async function () {
     ok(plan.ok);
     eq(plan.matches[0].tier, P.TIER.NRIC);
     eq(plan.returnees[0].oldD4, "1101");
+  });
+
+  await test("two people sharing an NRIC suffix are NOT the same person", () => {
+    // The real collision that aborted the first changeover. Keying on the last
+    // four would give these one digest, and the unique index on
+    // people.nric_hash would reject the run - or worse, on a later intake,
+    // match a stranger onto someone else's medical history.
+    ok(P.nricKey("T0627509A") !== P.nricKey("T0410509A"));
+    ok(P.nricKey("T0808034D") !== P.nricKey("T0473034D"));
+  });
+
+  await test("a bare NRIC suffix does not key at all", () => {
+    // An identifier that is not unique must not drive an exact match; a roll
+    // carrying only suffixes falls back to name matching.
+    eq(P.nricKey("123A"), "");
+    eq(P.nricKey(""), "");
+    eq(P.nricKey("S9912123A"), "S9912123A");
+    eq(P.nricKey("s99-121 23a"), "S9912123A");
   });
 
   await test("the raw NRIC never leaves the planner", () => {

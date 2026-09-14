@@ -117,18 +117,23 @@ create table if not exists people (
   updated_at   timestamptz not null default now()
 );
 
--- NRIC IS NEVER STORED, only a digest of the last-4-plus-checksum, and only
+-- NRIC IS NEVER STORED, only a digest of the WHOLE value, and only
 -- when the nominal roll happens to carry it. It exists for one purpose: to make
 -- returnee matching exact instead of a name comparison.
 --
 -- The digest is keyed with a secret (COUGAR_ENC_KEY, the same one 0002 uses for
 -- column encryption) and never computed in the database. An unkeyed hash would
--- be worthless here: the space of NRIC suffixes is about 260,000 values, so a
--- plain SHA-256 of one is walked offline in under a second and the digest IS
--- the value. Keyed, and with the key held only in the function environment, a
+-- be worthless here: the NRIC space is small enough that a plain SHA-256 is
+-- walked offline in under a second and the digest IS the value.
+--
+-- Keyed on the WHOLE NRIC, not its last four characters. The suffix is three
+-- digits and a checksum letter, and the first real changeover found two
+-- colliding pairs among 96 enlistees; the unique index below is what caught
+-- it. A non-unique identifier must never drive an exact match, so a roll
+-- carrying only suffixes keys nothing and falls back to names. Keyed, and with the key held only in the function environment, a
 -- database dump yields nothing.
 comment on column people.nric_hash is
-  'Keyed digest of the NRIC last-4+checksum, computed client-side by '
+  'Keyed digest of the whole NRIC, computed client-side by '
   'scripts/intake-migrate.mjs. Never the raw value; never derivable without '
   'COUGAR_ENC_KEY.';
 
