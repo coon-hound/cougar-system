@@ -176,4 +176,63 @@ module.exports = async function run() {
       "unquoted id interpolation in an inline handler — a string id throws " +
       "ReferenceError there: " + JSON.stringify(offenders, null, 1));
   });
+
+  await test("the unit suite stays runnable with no node_modules", () => {
+    // .github/workflows/test.yml runs `node test/run.js` WITHOUT `npm install`,
+    // on purpose: a dependency-free gate is fast and cannot be broken by a bad
+    // lockfile. That guarantee is easy to lose by accident — a unit test
+    // imports a script to reach its pure helpers, and that script imports an
+    // npm package at the top level. It passes locally, where node_modules
+    // exists, and fails only in CI with ERR_MODULE_NOT_FOUND.
+    //
+    // That is exactly how scripts/issue-invites.mjs broke the job: it imported
+    // `postgres` at the top, so merely importing the module for padD4 pulled in
+    // a package CI never installs. The fix was a lazy import inside main().
+    //
+    // So: nothing reachable from a unit test may import a bare package
+    // specifier at the top level. Node builtins (node:*) and relative paths
+    // are fine.
+    const bareImport = /^\s*(?:import\s[^;]*?from\s*|import\s*)["']([^."'][^"']*)["']/gm;
+    const isNpm = (spec) => !spec.startsWith("node:") && !spec.startsWith(".");
+
+    // Every unit test, plus every local module they pull in.
+    const reachable = new Set();
+    const testFiles = fs.readdirSync(path.join(ROOT, "test"))
+      .filter((f) => f.endsWith(".test.js"))
+      .map((f) => path.join("test", f));
+    for (const t of testFiles) {
+      reachable.add(t);
+      const src = fs.readFileSync(path.join(ROOT, t), "utf8");
+      // Two shapes are used in this repo, and BOTH must be followed:
+      //   import("../scripts/x.mjs")                     — a relative specifier
+      //   path.join(ROOT, "scripts/x.mjs")               — a repo-relative
+      //     string handed to pathToFileURL, which is how the ESM script tests
+      //     actually do it. Missing this shape is why the first version of this
+      //     guard passed while CI was red.
+      let m;
+      const relRe = /(?:import|require)\(\s*["'](\.\.?\/[^"']+)["']/g;
+      while ((m = relRe.exec(src)) !== null) {
+        const resolved = path.normalize(path.join(path.dirname(t), m[1]));
+        if (fs.existsSync(path.join(ROOT, resolved))) reachable.add(resolved);
+      }
+      const rootRe = /["']((?:scripts|js)\/[\w.-]+\.(?:mjs|js))["']/g;
+      while ((m = rootRe.exec(src)) !== null) {
+        if (fs.existsSync(path.join(ROOT, m[1]))) reachable.add(m[1]);
+      }
+    }
+
+    const offenders = [];
+    for (const file of reachable) {
+      const src = fs.readFileSync(path.join(ROOT, file), "utf8");
+      let m;
+      bareImport.lastIndex = 0;
+      while ((m = bareImport.exec(src)) !== null) {
+        if (isNpm(m[1])) offenders.push(`${file} imports "${m[1]}" at the top level`);
+      }
+    }
+    ok(offenders.length === 0,
+      "a unit test reaches code that imports an npm package at the top level; " +
+      "CI runs `node test/run.js` with no node_modules, so this fails there " +
+      "and passes here: " + JSON.stringify(offenders, null, 1));
+  });
 };
