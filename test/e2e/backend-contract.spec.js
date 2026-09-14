@@ -13,7 +13,7 @@
 // ============================================================================
 
 const { test, expect } = require("@playwright/test");
-const { seedAndGoto, SEED } = require("./support");
+const { seedAndGoto, SEED, DATA_KEY } = require("./support");
 const { makeBackend } = require("./fake-backend");
 
 // Mirrors padD4 (js/state.js:284): the client canonicalises every 4D on read,
@@ -29,7 +29,7 @@ const padD4 = (v) => {
 // anything seeded here is something the client then knows about. The stale-model
 // asymmetry has to be introduced after that pull - see the partial-upsert spec.
 function rosterSeed(extra = {}) {
-  return SEED["cougar-data-v2"].roster.map((r) => ({ ...r, id: padD4(r.id), ...extra }));
+  return SEED[DATA_KEY].roster.map((r) => ({ ...r, id: padD4(r.id), ...extra }));
 }
 
 async function bootAuthed(page, opts = {}) {

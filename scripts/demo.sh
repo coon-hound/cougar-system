@@ -69,7 +69,7 @@ cat > __demo.html <<HTML
   // Cached app state from a previous session (or from scripts/preview.sh,
   // which seeds these same keys for its OFFLINE demo) would render first and
   // make the launch pull look like a no-op. Start clean.
-  for (const k of ["cougar-data-v2", "cougar-data", "cougar-filter",
+  for (const k of ["cougar-data-v3", "cougar-data-v2", "cougar-data", "cougar-filter",
                    "cougar-programs", "cougar-combined-groups", "cougar-dirty-tabs",
                    "cougar-dirty-ops-v1", "cougar-parade-snapshots",
                    "cougar-custom-statuses", "cougar-fitness-sent"]) {

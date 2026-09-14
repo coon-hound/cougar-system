@@ -3,8 +3,12 @@
 *.txt
 *.md.bak
 *.csv
-# ...except the import fixture that is deliberately tracked.
+# ...except the two files that are deliberately tracked: the import fixture,
+# and the nominal-roll template (entirely invented names, and the thing a new
+# operator is pointed at). The blanket *.csv rule above exists to keep REAL
+# personnel rolls out of the repo, and it still does.
 !sample_polar.csv
+!docs/nominal-roll-template.csv
 
 # ── Secrets & local config ─────────────────────────
 # Anything that could carry a real API key or per-machine config.
