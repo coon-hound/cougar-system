@@ -293,7 +293,20 @@ async function upsertOne(tx: postgres.TransactionSql, tab: string, row: Record<s
   const id = str(real["id"]);
   if (!id) return { error: `Row for '${tab}' has no id` };
 
-  const [existing] = await tx`select 1 from ${tx(table)} where "id" = ${id}`;
+  // Capture the row as it stands so the audit log can record what changed, not
+  // merely that something did.
+  //
+  // NOTE the encrypted columns are deliberately NOT read back here. Two
+  // reasons, and the second is the one that matters: pgp_sym_encrypt uses a
+  // random IV, so the same value re-encrypted is different bytes and would
+  // register as a change on every write; and decrypting them into this function
+  // just to hand them to the audit log would put plaintext dates of birth and
+  // next-of-kin details on a path that exists to be kept for two years.
+  // log_audit redacts as a second line of defence, but the values are not sent
+  // in the first place.
+  const [existing] = await tx`
+    select api_row(to_jsonb(t)) as row from ${tx(table)} t where t."id" = ${id}`;
+  const before = existing ? (existing.row as Record<string, unknown>) : null;
   if (!existing) await tx`insert into ${tx(table)} ("id") values (${id})`;
 
   await tx`
@@ -303,7 +316,15 @@ async function upsertOne(tx: postgres.TransactionSql, tab: string, row: Record<s
            deleted_at = null
      where "id" = ${id}`;
 
-  return { action: existing ? "updated" : "appended", id };
+  const after: Record<string, unknown> = { ...(before ?? {}) };
+  for (const [k, v] of Object.entries(real)) if (!ENCRYPTED.has(k)) after[k] = str(v);
+  const touchedSensitive = Object.keys(real).filter((k) => ENCRYPTED.has(k));
+
+  return {
+    action: existing ? "updated" : "appended",
+    id,
+    _audit: { before, after, touchedSensitive },
+  };
 }
 
 // Append, idempotent on id — a retried append after a lost response must not
@@ -365,11 +386,20 @@ async function deleteOne(tx: postgres.TransactionSql, tab: string, id: unknown) 
   if (NO_ID.has(tab)) return { error: `No 'id' column in tab ${tab}` };
   const key = str(id);
   if (!key) return { action: "noop" };
+  const [prior] = await tx`
+    select api_row(to_jsonb(t)) as row from ${tx(table)} t
+     where t."id" = ${key} and t.deleted_at is null`;
   const rows = await tx`
     update ${tx(table)} set deleted_at = now()
      where "id" = ${key} and deleted_at is null
      returning "id"`;
-  return { action: rows.length ? "deleted" : "noop", id: key };
+  return {
+    action: rows.length ? "deleted" : "noop",
+    id: key,
+    // after is null: the row is gone. before is what it said, so a delete can
+    // be read back and undone.
+    _audit: rows.length ? { before: prior?.row ?? null, after: null } : undefined,
+  };
 }
 
 // Full-tab replace. The old writeTab (apps-script-Code.gs:842-844) cleared the
@@ -418,6 +448,9 @@ async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<st
           default: return { error: `Unknown op '${op.op}'` };
         }
       }) as Record<string, unknown>;
+      // _audit is internal: it carries row contents, and the client has no
+      // business receiving them back in a write response.
+      if (r && typeof r === "object" && "_audit" in r) delete (r as Record<string, unknown>)._audit;
       if (r && "error" in r) { failed++; results.push(r); }
       else { applied++; results.push(r); }
     } catch (e) {
@@ -467,10 +500,15 @@ async function redeemInvite(token: string) {
     if (inv.expires_at && new Date(inv.expires_at) <= new Date()) return { error: "Invite expired" };
     if (inv.used_count >= inv.max_uses) return { error: "Invite already used" };
 
+    // The invite carries who it was issued to; the token inherits it. Before
+    // this, `person` was set to the INVITE'S OWN TOKEN, so everyone who joined
+    // by invite appeared as a raw UUID in the access list and in every audit
+    // row they generated — attribution that could not name anybody.
     const authToken = crypto.randomUUID();
     await tx`
-      insert into auth_tokens (token, person, device_label)
-      values (${authToken}, ${inv.token}, 'redeemed')`;
+      insert into auth_tokens (token, person, d4, device_label)
+      values (${authToken}, ${inv.person ?? null}, ${inv.d4 ?? null},
+              ${inv.device_label ?? "device"})`;
     await tx`
       update invites
          set used_count = used_count + 1,
@@ -608,10 +646,23 @@ Deno.serve(async (req) => {
         return json({ error: "Invalid request" });
     }
 
+    // _audit never goes back to the client — it holds row contents, and a write
+    // response has no reason to carry them. Lift it out before responding.
+    const aud = (out._audit ?? null) as
+      { before?: unknown; after?: unknown; touchedSensitive?: string[] } | null;
+    delete out._audit;
+
     await sql`select log_audit(${auth.token}, ${action}, ${tab},
                                ${String(body.id ?? (body.row as Record<string, unknown>)?.id ?? "")},
                                ${!out.error && !out.conflict},
-                               ${sql.json({ reason: (out.error ?? null) as string | null })})`;
+                               ${sql.json({
+                                 reason: (out.error ?? null) as string | null,
+                                 ...(aud?.touchedSensitive?.length
+                                   ? { sensitiveWritten: aud.touchedSensitive }
+                                   : {}),
+                               })},
+                               ${aud?.before ? sql.json(aud.before as postgres.JSONValue) : null},
+                               ${aud?.after ? sql.json(aud.after as postgres.JSONValue) : null})`;
     return json(out);
   } catch (e) {
     return json({ error: String((e as Error)?.message ?? e) });
