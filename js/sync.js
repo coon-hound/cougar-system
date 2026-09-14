@@ -873,7 +873,17 @@ async function pushTab(tabName, data) {
 // Keeps every open tab fresh so a stale tab can't sit on hours-old data. The
 // poll is a tiny payload (per-tab revisions only); we full-fetch nothing unless
 // a tab's server revision is ahead of ours, then pull ONLY those tabs.
-const AUTO_REFRESH_MS = 20000;        // ~20s while visible (user-chosen cadence)
+// 10s while visible. Was 20s, with no recorded rationale ("user-chosen cadence").
+// Device-to-device propagation is dominated by THIS TIMER, not by backend latency:
+// it is write + a uniform [0, interval] wait + revCheck + pull, so the median wait
+// is interval/2 while every round trip is ~0.34s on Postgres. Halving the interval
+// halves propagation (~11s -> ~6s); halving latency would not.
+// Cost is ~nil: an order of magnitude inside the included Edge Function invocations.
+// Do NOT go below ~10s. A handset holds the cellular radio up for roughly 10s after
+// a request, so at 10s the radio already never idles - shorter intervals buy a few
+// seconds for double the DB load and no battery left to spend. Below this the real
+// fix is push (Supabase Realtime), not a tighter poll.
+const AUTO_REFRESH_MS = 10000;
 const AUTO_REFRESH_MIN_GAP_MS = 8000; // debounce: ignore checks closer than this
 let _autoRefreshTimer = null;
 let _autoRefreshing = false;
