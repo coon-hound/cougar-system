@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 130;
+const APP_VERSION = 131;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,19 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 131,
+    date: "14 Sep 2026",
+    title: "The app now runs on a real database",
+    intro: "Everything the app stores has moved off the spreadsheet onto a proper database. Nothing looks different and nothing you do changes, but it is faster, it can tell you apart from other people, and it can no longer lose a record by writing two of them into the same row.",
+    items: [
+      { t: "⚡ Faster, and it stops fighting itself", d: "Saves no longer queue behind each other the way they did when everyone wrote to one spreadsheet. Loading the whole company takes seconds rather than the better part of a minute." },
+      { t: "🔐 Your own access, on your own device", d: "Access is per person and per device now, instead of one shared key passed around. A lost phone can be cut off on its own, and every change is recorded against whoever made it." },
+      { t: "🔒 Personal details are encrypted", d: "Date of birth, blood type, allergies, other medical conditions, address and next-of-kin details are stored scrambled, so a copy of the database on its own does not reveal them." },
+      { t: "📅 Booked appointments no longer disappear", d: "An appointment saved as “not resolved” could be read back as resolved and drop off the dashboard and the parade state. It now stays until you tick it off yourself." },
+      { t: "📚 Every BMT record came across", d: "All 6,631 records from the BMT phase were moved and then checked one field at a time against a backup of the old spreadsheet. 2,250 of them had no usable ID or shared one with someone else’s record; each was given its own." },
+    ],
+  },
   {
     v: 130,
     date: "13 Sep 2026",

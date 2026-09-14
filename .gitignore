@@ -62,3 +62,16 @@ __preview.html
 
 # ── Agent run logs ─────────────────────────────────
 .gnhf/
+
+# ── Local reference data ───────────────────────────
+cougar_fitness_tracker.xlsx
+
+# Backend-connected demo entry pages (scripts/demo.sh, and the live-backend one)
+__demo.html
+__live.html
+
+# Supabase CLI scratch (project ref, pooler creds) — written by `npx supabase`.
+supabase/.temp/
+
+# Claude Code worktrees — each is its own checkout on its own pushed branch.
+.claude/worktrees/

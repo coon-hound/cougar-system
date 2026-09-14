@@ -5,6 +5,8 @@
 #   - always:            node test/run.js   (units + static load-time guards)
 #   - if apps-script:    node --check       (paste-safety for the Apps Script file)
 #   - if frontend:       playwright test    (REAL browser drives the feature)
+#   - if supabase:       test/live          (the REAL Edge Function over HTTP —
+#                                           skips itself when no backend is up)
 #
 # Exits non-zero if any check fails, so it doubles as a pre-push gate.
 #
@@ -17,11 +19,20 @@ slug="${1:-$(git rev-parse --abbrev-ref HEAD | sed 's#.*/##')}"
 base="${VERIFY_BASE:-master}"
 EV="EVIDENCE.md"
 
+# Same no-sudo toolchain dev-env.sh uses (DEV-ENV.md): node and deno live
+# under ~/.local, not on the system PATH. Prepend them when they are there
+# so this gate runs from any shell; a no-op everywhere else, CI included.
+for d in "$HOME/.local/node-v20/bin" "$HOME/.local/deno/bin"; do
+  [ -d "$d" ] && PATH="$d:$PATH"
+done
+export PATH
+
 # Everything different from the base branch (committed + working tree).
 changed="$(git diff --name-only "$base" 2>/dev/null || true)"
-is_fe=0; is_be=0
+is_fe=0; is_be=0; is_db=0
 echo "$changed" | grep -qE '^(js/|index\.html|styles\.css)' && is_fe=1
 echo "$changed" | grep -qE '^apps-script-Code\.gs' && is_be=1
+echo "$changed" | grep -qE '^(supabase/|test/live/)' && is_db=1
 
 pass=1
 
@@ -57,7 +68,26 @@ if [ "$is_be" = 1 ]; then
   echo '```' >> "$EV"
 fi
 
+if [ "$is_db" = 1 ]; then
+  # Talks to a REAL Postgres + the REAL Edge Function. Skips itself (exit 0,
+  # with a note in the evidence) when no backend is reachable, so this gate is
+  # safe in CI while still being the thing that has to pass before cutover.
+  {
+    echo
+    echo "## test/live — the real Edge Function over HTTP"
+    echo '```'
+  } >> "$EV"
+  if node test/live/api-contract.test.js >> "$EV" 2>&1; then :; else pass=0; fi
+  echo '```' >> "$EV"
+fi
+
 if [ "$is_fe" = 1 ]; then
+  # Chromium needs libnspr4 / libnss3 / libasound2, which are not installed
+  # system-wide on a machine without root. dev-env.sh's no-sudo toolchain keeps
+  # them unpacked under ~/.local/pw-libs (DEV-ENV.md); point the loader at them
+  # when they are there. A no-op everywhere else, CI included.
+  PW_LIBS="$HOME/.local/pw-libs/root/usr/lib/x86_64-linux-gnu"
+  [ -d "$PW_LIBS" ] && export LD_LIBRARY_PATH="$PW_LIBS:${LD_LIBRARY_PATH:-}"
   {
     echo
     echo "## Playwright — real-browser e2e (seeded demo data, no network)"
