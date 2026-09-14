@@ -7,9 +7,12 @@
     "test": "node test/run.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:all": "node test/run.js && playwright test"
+    "test:all": "node test/run.js && playwright test",
+    "test:live": "node test/live/api-contract.test.js",
+    "migrate": "node scripts/migrate-from-sheets.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.47.0"
+    "@playwright/test": "^1.47.0",
+    "postgres": "^3.4.4"
   }
 }

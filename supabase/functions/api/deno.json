@@ -1,0 +1,4 @@
+{
+  "//": "Stops Deno walking up to the repo's package.json. The function imports npm:postgres and nothing else; without this boundary Deno resolves the repo's devDependencies too, so a Playwright download failure takes the API down with it (and production Edge Functions never see package.json at all).",
+  "imports": {}
+}

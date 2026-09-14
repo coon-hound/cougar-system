@@ -2,10 +2,31 @@
 // the Google Sheet via API.pullAll() on launch, or from localStorage on
 // subsequent loads.
 
-// The Apps Script web app URL. This is no longer a secret — auth is enforced
-// server-side by per-device tokens issued via the invite flow (see Apps Script).
-// PASTE YOUR DEPLOYMENT URL HERE after redeploying the updated Apps Script:
+// The backend. Neither URL is a secret — authorization is enforced server-side
+// by per-device tokens issued through the invite flow (auth_tokens), which is
+// why this file being public code changes nothing.
+//
+// THE DEFAULT IS NOW POSTGRES. The Supabase Edge Function speaks the exact
+// protocol js/api.js and js/sync.js already spoke, so nothing else in the app
+// had to change for this line to move — which was the whole point of building
+// the migration that way.
+const SUPABASE_API_URL = "https://oyowmrclgpindpckyxgl.supabase.co/functions/v1/api";
+
+// The old Google Sheets backend. Kept as the documented way back: it is still
+// deployed and still holds the data as it stood at the cutover, so
+// `localStorage.setItem("cougar-api-url", COUGAR_SHEETS_URL)` in a console
+// returns a device to it. Anything written there after the cutover is stranded,
+// so this is a rollback lever, not a second home.
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzazMTu4y4XjjDXBGWN_aAE51fzP_z23zQUZnuKjWWPJ3fNNjUPbp3DbZW9T66OQysr/exec"
+
+// Per-device backend override. Three jobs:
+//   1. Rollback lever — point one device back at the Sheet, or forward at a
+//      replacement, without shipping a build.
+//   2. Lets a single device trial a new backend before everyone moves.
+//   3. Lets the e2e suite pin a sentinel URL, so specs script the backend by
+//      protocol rather than by hardcoding whoever is hosting it today.
+const API_URL_KEY = "cougar-api-url";
+const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 
 // Storage key is versioned so we can invalidate stale caches in users' browsers.
 const STORAGE_KEY = "cougar-data-v2";
@@ -209,7 +230,7 @@ function importFitnessSent(json) {
 
 const STATE = {
   nav: "dashboard",
-  apiUrl: APPS_SCRIPT_URL,
+  apiUrl: API_URL,
   authToken: localStorage.getItem(AUTH_KEY) || "",
   roster: [], medical: [], attendance: [], ippt: [], rm: [], soc: [], polar: [], conductDetail: [], appointments: [], leave: [], msk: [],
   // Canonical conduct registry: [{id: "c001", name: "Orientation Run"}, ...].
@@ -363,24 +384,25 @@ function normalizeLeave(records) {
   });
 }
 
-// Row ids are TEXT, always.
+// Row ids are TEXT, always. Sheets typed its id column as a NUMBER, so the app
+// could get away with `row.id === +editId`. Postgres types every column as text
+// (0001_init.sql), which makes that comparison false for the same row — and the
+// failure is silent and destructive: submitMedical falls through its editId
+// branch and APPENDS a duplicate instead of updating in place. Verified against
+// the real backend: editing one record took Medical from 12 rows to 13.
 //
-// Sheets types its id column as a NUMBER, so `row.id === +editId` happened to
-// work. Nothing guarantees that. A row whose id was typed as text (and every
-// id minted after this change is text — see nextId, js/helpers.js) compares
-// false against a `+`-coerced editId, and the failure is silent and
-// destructive: submitMedical falls through its editId branch and APPENDS a
-// duplicate instead of updating in place.
-//
-// Same class as the coercions normalizeMedical does for inCamp and
-// normalizeRoster for outOfCamp/campIn: pin the type at the read boundary so
-// the whole app is on one side of the line and `===` is correct everywhere.
+// This is the same class as normalizeAppointments (resolved/outOfCamp) and
+// normalizeMedical (inCamp) — Sheets handed back a real JS type and a
+// text-typed backend hands back a string. Coercing at the read boundary keeps
+// the whole app on one side of the line: ids are strings everywhere, so `===`
+// is correct everywhere. A no-op against the Sheets backend, which is why this
+// is safe to ship before the cutover rather than with it.
 const normId = v => (v === null || v === undefined) ? "" : String(v).trim();
 
-// Generic d4-padding + id-stringifying pass for layers without their own
-// normalizer. Applied at every read boundary (loadLocal, pullAll) so commander
-// 4Ds stay 4 digits regardless of how Sheets mangles them on round-trip, and
-// so an id is a string no matter how it was stored.
+// Generic d4-padding + id-stringifying pass for layers that don't have their
+// own normalizer. Applied at every read boundary (loadLocal, pullAll) so
+// commander 4Ds stay 4 digits regardless of how Sheets mangles them on
+// round-trip, and so ids never vary by backend.
 function padD4OnLayer(records) {
   return (records || []).map(r => {
     if (!r) return r;
@@ -389,6 +411,24 @@ function padD4OnLayer(records) {
     if ("id" in out) out.id = normId(out.id);
     return out;
   });
+}
+
+// Appointments carry two flags the app reads by plain truthiness: `resolved`
+// hides the appointment from the dashboard and the parade state
+// (js/render.js:907, js/forms.js:2235), and `outOfCamp` marks one the recruit
+// leaves camp for (js/forms.js:1512, 2256, 2294).
+//
+// Sheets round-tripped both as REAL booleans, because they were checkbox cells
+// — so `!a.resolved` worked and nothing here had to coerce. A text-typed
+// backend returns the STRING "false", which is truthy, and every unresolved
+// appointment would read as resolved and silently vanish from both screens.
+// Coerce at the read boundary, exactly as normalizeRoster does for
+// outOfCamp/campIn and normalizeMedical for inCamp. Real booleans are
+// unaffected, so this is a no-op against the Sheets backend.
+function normalizeAppointments(records) {
+  const bool = v => v === true || String(v).toUpperCase() === "TRUE";
+  return padD4OnLayer(records).map(r =>
+    r ? { ...r, resolved: bool(r.resolved), outOfCamp: bool(r.outOfCamp) } : r);
 }
 
 // Conduct records (Attendance, ConductDetail) gained a `program` field (PTP /
@@ -466,7 +506,7 @@ function loadLocal() {
     STATE.soc = padD4OnLayer(d.soc);
     STATE.polar = padD4OnLayer(d.polar);
     STATE.conductDetail = normalizeConductDetail(d.conductDetail);
-    STATE.appointments = padD4OnLayer(d.appointments);
+    STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
     STATE.msk = normalizeMSK(d.msk);
     STATE.conducts = padD4OnLayer(Array.isArray(d.conducts) ? d.conducts : []);

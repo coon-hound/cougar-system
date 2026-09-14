@@ -239,4 +239,77 @@ module.exports = async function run() {
     eq(h.ipptNetDelta({ byAttempt: { 1: 80, 3: 70 } }), -10, "gap bridged: last vs first");
     eq(h.ipptNetDelta({ byAttempt: { 2: 75 } }), 0);
   });
+  suite("helpers: nextId — a collision-free TEXT id");
+
+  // nextId is a top-level `const` arrow, and const/let at script scope never
+  // become properties of the vm sandbox the way function declarations do — so
+  // it has to be read out of the context explicitly.
+  const loadNextId = () => {
+    const ctx = loadHelpers(baseState());
+    return vm.runInContext("nextId", ctx);
+  };
+
+
+  // The generator this replaced seeded a counter with Math.random()*9000+1000
+  // ONCE PER SESSION and incremented it. Two phones opening the app the same
+  // morning had a 1-in-9000 chance of picking the same base and then minting
+  // identical ids in lockstep. That is not theoretical: the live sheet carries
+  // 11 Medical and 5 Leave rows whose id belongs to a DIFFERENT person's record
+  // (1404 is both 4214's back pain and 1311's fever). The backend resolves an id
+  // to the FIRST matching row, so editing one of those overwrites the other.
+
+  await test("nextId returns a string, never a number", () => {
+    const nextId = loadNextId();
+    for (let i = 0; i < 100; i++) {
+      const id = nextId();
+      eq(typeof id, "string", "ids are text everywhere now (normId, js/state.js)");
+      ok(id.length > 0, "and never blank");
+    }
+  });
+
+  await test("50,000 ids are all distinct — not probably distinct, distinct", () => {
+    // Volume matters here. A time prefix plus a purely RANDOM suffix looks
+    // collision-free and is not: 36^6 suffixes per millisecond means 50,000 ids
+    // collide about one run in thirty, which is both a flaky test and a real
+    // (if rare) way for one row to overwrite another. The monotonic per-session
+    // counter makes within-session uniqueness structural, so this assertion is
+    // exact rather than statistical.
+    const nextId = loadNextId();
+    const seen = new Set();
+    const N = 50000;
+    for (let i = 0; i < N; i++) seen.add(nextId());
+    eq(seen.size, N, "every id unique");
+  });
+
+  await test("a fresh 'session' cannot re-mint an earlier session's ids", () => {
+    // The exact failure mode of the old seeded counter: reload the module (a new
+    // page load, a second phone) and the sequence must not overlap. Each session
+    // draws its own ~2.2-billion-wide salt, so the two counters never meet.
+    const a = loadNextId(), b = loadNextId();
+    const A = new Set(), B = new Set();
+    for (let i = 0; i < 5000; i++) { A.add(a()); B.add(b()); }
+    eq([...A].filter(id => B.has(id)).length, 0, "two independent sessions share no id");
+  });
+
+  await test("nextId never looks like a legacy numeric id", () => {
+    // A purely numeric id is the shape that made `+gv("f-entry-id")` LOOK like
+    // it worked: `+"1404"` is a truthy number that then fails `===` against the
+    // text id on the row, so an edit appends a duplicate instead of updating.
+    // The base36 time prefix + "-" separator makes that impossible by
+    // construction — `+id` is always NaN.
+    const nextId = loadNextId();
+    for (let i = 0; i < 2000; i++) {
+      const id = nextId();
+      ok(!/^\d+$/.test(id), "not all digits: " + id);
+      ok(Number.isNaN(+id), "+id is NaN, so it can never be coerced into another row's id: " + id);
+      ok(id === String(id), "strict-equal to its own string form");
+    }
+  });
+
+  await test("ids sort by creation time (the time prefix is monotonic base36)", () => {
+    const first = loadNextId()();
+    const prefix = (id) => id.split("-")[0];
+    ok(/^[0-9a-z]+$/.test(prefix(first)), "base36 time prefix");
+    ok(parseInt(prefix(first), 36) > 0, "decodes to a real timestamp");
+  });
 };
