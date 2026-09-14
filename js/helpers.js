@@ -255,9 +255,40 @@ function commanderLeaveBalance(d4) {
   return { used, quota, remaining: quota - used };
 }
 
-// Short sequential IDs instead of timestamps
-let _idCounter = Math.floor(Math.random() * 9000) + 1000;
-const nextId = () => ++_idCounter;
+// Row ids, unique across devices.
+//
+// The previous generator seeded a counter with Math.random()*9000+1000 once per
+// SESSION and incremented it. Two phones opening the app the same morning had a
+// 1-in-9000 chance of picking the same base — and then minted the same ids in
+// lockstep from there. That is not theoretical: the live Sheet has 11 Medical
+// and 5 Leave rows whose id belongs to a DIFFERENT person's record (id 1404 is
+// both 4214's back pain and 1311's fever). Because the backend resolves an id
+// to the FIRST matching row (findRowByIdIndex_), editing one of those records
+// silently overwrites the other person's.
+//
+// Time prefix + per-session salt + monotonic counter, all base36:
+//
+//   WITHIN a session ids cannot collide at all — the counter is strictly
+//   increasing, so it does not matter how many rows a bulk action mints inside
+//   the same millisecond (leaveMany over a platoon, the conduct wizard writing
+//   a detail row per recruit). A purely random suffix made that only PROBABLY
+//   unique: 36^6 values per millisecond sounds like plenty, but 50,000 ids
+//   collide roughly one run in thirty (test/helpers.test.js pins this), and the
+//   failure mode is the catastrophic one above — one row silently overwriting
+//   another person's.
+//
+//   ACROSS sessions the salt is what separates two devices, and unlike the old
+//   4-digit seed it is ~2.2 billion wide, drawn once, and would additionally
+//   have to coincide with the same millisecond and the same counter value.
+//
+// Returns a STRING because ids are text everywhere now (see normId,
+// js/state.js) — and because a string cannot be silently coerced into a
+// different row's id. The "-" also guarantees the id is never all-digits, so
+// `+id` is NaN rather than a truthy number that fails === against the row.
+const _idSalt = Math.random().toString(36).slice(2, 8);
+let _idSeq = 0;
+const nextId = () =>
+  Date.now().toString(36) + "-" + _idSalt + "-" + (++_idSeq).toString(36);
 
 // Smart CSV column resolver — case-insensitive, handles aliases
 function col(row, ...names) {

@@ -50,6 +50,24 @@ const post = async (body) => {
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const d2 = (n) => String(n).padStart(2, "0");
 
+// Row ids are NUMERIC STRINGS on purpose, and that is not cosmetic.
+//
+// This seed used to mint readable ids like "md-01". They are non-numeric, so
+// `+"md-01"` is NaN - falsy - which walks a DIFFERENT branch from production,
+// where the old client minted 4-digit counter ids and Postgres hands them back
+// as "1404". There `+"1404"` is a truthy NUMBER that then fails `===` against
+// the TEXT id on the row, so an edit silently APPENDED a duplicate instead of
+// updating in place. Every fixture in the repo hid that bug for exactly this
+// reason. Seeding numeric strings keeps the dev backend on the production code
+// path (see test/e2e/text-id-edits.spec.js and normId, js/state.js).
+//
+// One counter per tab, so ids are stable for a given seed run and unique within
+// their tab - which is all the backend keys on.
+const idSeq = (base) => { let n = 0; return () => String(base + ++n); };
+const medId = idSeq(101000), leaveId = idSeq(102000), apptId = idSeq(103000);
+const attId = idSeq(104000), detailId = idSeq(105000), polarId = idSeq(106000);
+const ipptId = idSeq(107000), rmId = idSeq(108000), socId = idSeq(109000);
+
 const at = (offsetDays) => {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
@@ -155,7 +173,7 @@ const MEDICAL = [
 ];
 
 const medical = MEDICAL.map((m, i) => ({
-  id: `md-${d2(i + 1)}`,
+  id: medId(),
   d4: m.d4,
   date: day(m.from),
   reason: `${m.status} - ${m.reason}`,
@@ -191,7 +209,7 @@ const leave = [
   { d4: by(3),  type: "Annual Leave", from: -14, to: -12, reason: "Family" },
   { d4: by(17), type: "Off",          from: -9,  to: -9,  reason: "Off in lieu" },
 ].map((l, i) => ({
-  id: `lv-${d2(i + 1)}`, d4: l.d4, type: l.type,
+  id: leaveId(), d4: l.d4, type: l.type,
   startDate: day(l.from), endDate: day(l.to),
   days: String(l.to - l.from + 1), reason: l.reason,
 }));
@@ -215,7 +233,7 @@ const appointments = [
   { d4: by(6),  reason: "Eye test",        from: 4, time: "1100", loc: "Medical Centre", resolved: "FALSE", out: "FALSE" },
   { d4: by(29), reason: "Dental",          from: -7, time: "0930", loc: "Dental Centre", resolved: "TRUE",  out: "TRUE" },
 ].map((a, i) => ({
-  id: `ap-${d2(i + 1)}`, d4: a.d4, reason: a.reason, date: day(a.from),
+  id: apptId(), d4: a.d4, reason: a.reason, date: day(a.from),
   time: a.time, location: a.loc, resolved: a.resolved, outOfCamp: a.out,
 }));
 
@@ -238,7 +256,7 @@ conducts.forEach((c, i) => {
   // makes the Attendance numbers add up against the parade state.
   const px = i === conducts.length - 1 ? activeToday.size : (i % 4) + 1;
   attendance.push({
-    id: `at-${c.id}`, date: day(c.at), time: "0730", conductId: c.id,
+    id: attId(), date: day(c.at), time: "0730", conductId: c.id,
     program: pick(PROGRAMS, i),
     total: String(recruits.length),
     participating: String(recruits.length - px),
@@ -283,7 +301,7 @@ const DROPOUTS = [
 
 const conductDetail = DROPOUTS.flatMap(({ conduct, at, rows }) =>
   rows.map((r) => ({
-    id: `cd-${conduct}-${by(r.n)}`, date: day(at), time: "0730", d4: by(r.n),
+    id: detailId(), date: day(at), time: "0730", d4: by(r.n),
     type: r.type, reason: r.reason, conductId: conduct, program: "Combined",
   })));
 
@@ -292,7 +310,7 @@ const conductDetail = DROPOUTS.flatMap(({ conduct, at, rows }) =>
   recruits.forEach((r, i) => {
     if (activeToday.has(r.id)) return;         // excused - no watch data
     polar.push({
-      id: `pf-${conductId}-${r.id}`, d4: r.id, date: day(offset), conductId,
+      id: polarId(), d4: r.id, date: day(offset), conductId,
       avgHr: String(138 + ((i * 7) % 42)), maxHr: String(172 + ((i * 3) % 24)),
       minHr: String(68 + (i % 18)), calories: String(280 + ((i * 11) % 240)),
       trainingLoad: String(35 + ((i * 5) % 70)), duration: String(40 + (i % 20)),
@@ -317,7 +335,7 @@ recruits.forEach((r, i) => {
     // the per-station trend lines move with it instead of contradicting it.
     const runSec = 810 - (score - 48) * 7 - n * 10;
     ippt.push({
-      id: `ip-${r.id}-${n + 1}`, d4: r.id, attempt: String(n + 1),
+      id: ipptId(), d4: r.id, attempt: String(n + 1),
       date: day(offset),
       pushups: String(20 + Math.round((score - 48) * 0.55) + n),
       situps: String(24 + Math.round((score - 48) * 0.5) + n),
@@ -332,7 +350,7 @@ const rm = [];
   recruits.forEach((r, i) => {
     if (i % 11 === 0) return;                  // excused on the day
     rm.push({
-      id: `rm-${rmNum}-${r.id}`, d4: r.id, rmNum, date: day(offset),
+      id: rmId(), d4: r.id, rmNum, date: day(offset),
       time: `${km * 12 + (i % 14)}:${d2((i * 7) % 60)}`,
       avgHr: String(132 + (i % 30)), maxHr: String(168 + (i % 22)),
       pass: i % 13 === 0 ? "NO" : "YES",
@@ -341,7 +359,7 @@ const rm = [];
 });
 
 const soc = recruits.filter((_, i) => i % 2 === 0).map((r, i) => ({
-  id: `soc-1-${r.id}`, d4: r.id, socNum: "1", date: day(-26),
+  id: socId(), d4: r.id, socNum: "1", date: day(-26),
   time: `${8 + (i % 4)}:${d2((i * 11) % 60)}`,
   avgHr: String(150 + (i % 25)), pass: i % 9 === 0 ? "NO" : "YES",
 }));
@@ -398,8 +416,15 @@ try {
 
   for (const [tab, rows] of TABS) {
     if (!rows.length) continue;
-    // Chunked applyOps, mirroring how the client batches (BATCH_MAX = 50).
-    for (let i = 0; i < rows.length; i += 50) {
+    // The first chunk goes in as a full-tab `write`, which REPLACES the tab.
+    // applyOps alone only upserts by id, so a reseed would layer this run's
+    // rows on top of whatever an older seed left behind - and it did exactly
+    // that the day these ids stopped being "md-01" and became numeric strings.
+    // A seed has to be idempotent no matter what the previous one keyed on.
+    await post({ action: "write", tab, data: rows.slice(0, 50) });
+    // The rest via chunked applyOps, mirroring how the client batches
+    // (BATCH_MAX = 50) - so the seed exercises the same write path the app uses.
+    for (let i = 50; i < rows.length; i += 50) {
       const ops = rows.slice(i, i + 50).map((row) => ({ op: "upsert", row }));
       const res = await post({ action: "applyOps", tab, ops });
       if (res.failed) throw new Error(`${tab}: ${res.failed} ops failed`);

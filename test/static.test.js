@@ -120,4 +120,60 @@ module.exports = async function run() {
     });
     ok(offenders.length === 0, "mutating branches without withRevLock:\n   " + offenders.join("\n   "));
   });
+  suite("static: row ids are TEXT, and inline handlers quote them");
+
+  // Row ids used to be numbers on the Sheets backend and are strings on the
+  // Postgres one (normId, js/state.js). Two mechanical consequences, both of
+  // which reached prod as silent bugs and both of which a grep can hold:
+
+  // (d) `+gv("f-entry-id")` is how an edit turned into an APPENDED DUPLICATE:
+  // `+"1404"` is a truthy 1404 that then fails `===` against the row's text id,
+  // so submitMedical fell through its edit branch. Every editId read must take
+  // the field's value as the string it is.
+  await test("no submit handler coerces the edit id with +", () => {
+    const forms = fs.readFileSync(path.join(ROOT, "js/forms.js"), "utf8");
+    const offenders = forms.split("\n")
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      .filter(({ line }) => /[+]\s*gv\(\s*["']f-entry-id["']\s*\)/.test(line));
+    ok(offenders.length === 0,
+      'f-entry-id must be read as text (gv(...).trim()), never +gv(...): ' +
+      JSON.stringify(offenders));
+  });
+
+  // (e) An inline handler that interpolates a row id UNQUOTED — onclick=
+  // "openMedicalForm(${m.id})" — was fine while ids were numbers and is a
+  // ReferenceError the moment one is the string "1404" or "m9k2x1-...". 20 of
+  // these had to be quoted; this stops the 21st.
+  await test("every row id interpolated into an inline handler is quoted", () => {
+    // Staged Polar groups are the deliberate exception: their ids come from a
+    // local UI counter (++_polarGroupCounter), are never persisted, and stay
+    // numeric. Anything else with an id in an inline handler is a real row id.
+    const NUMERIC_BY_DESIGN = /^(removePolarPhotoFromGroup|removePolarGroup|updatePolarGroup|addPolarPhotosToGroup)$/;
+    const offenders = [];
+    for (const file of ["js/render.js", "js/forms.js", "js/helpers.js"]) {
+      const lines = fs.readFileSync(path.join(ROOT, file), "utf8").split("\n");
+      lines.forEach((line, i) => {
+        const handlerRe = /\bon[a-z]+="([^"]*)"/g;
+        let h;
+        while ((h = handlerRe.exec(line)) !== null) {
+          const body = h[1];
+          const callRe = /([A-Za-z_$][\w$]*)\(([^)]*)\)/g;
+          let c;
+          while ((c = callRe.exec(body)) !== null) {
+            const [, fn, args] = c;
+            if (NUMERIC_BY_DESIGN.test(fn)) continue;
+            const argRe = /(.?)(\$\{[^}]*\bid\b[^}]*\})(.?)/g;
+            let a;
+            while ((a = argRe.exec(args)) !== null) {
+              const quoted = a[1] === "'" && a[3] === "'";
+              if (!quoted) offenders.push(`${file}:${i + 1} ${fn}(${a[2]})`);
+            }
+          }
+        }
+      });
+    }
+    ok(offenders.length === 0,
+      "unquoted id interpolation in an inline handler — a string id throws " +
+      "ReferenceError there: " + JSON.stringify(offenders, null, 1));
+  });
 };

@@ -124,4 +124,79 @@ module.exports = async function run() {
     ]);
     eq(rows.map((r) => r.leaveQuota), ["", 14, ""]);
   });
+  suite("normalizers: row ids are TEXT on every layer");
+
+  // THE third migration bug, and the destructive one. Sheets typed the id column
+  // as a NUMBER, so the forms could get away with `+gv("f-entry-id")` and compare
+  // `row.id === editId`. Postgres types every column as text, so the same row
+  // comes back as "1404" — `"1404" === 1404` is false, submitMedical falls
+  // through its edit branch and APPENDS a duplicate instead of updating in place.
+  // Verified against the real backend: one edit took Medical from 12 rows to 13.
+  //
+  // The fix is a single rule, pinned here for EVERY layer that carries an id:
+  // ids are strings at the read boundary, so `===` is correct everywhere after.
+  // A layer added later without routing through normId/padD4OnLayer fails here.
+  const ID_LAYERS = [
+    ["medical",       (S) => S.normalizeMedical],
+    ["leave",         (S) => S.normalizeLeave],
+    ["attendance",    (S) => S.normalizeAttendance],
+    ["conductDetail", (S) => S.normalizeConductDetail],
+    ["appointments",  (S) => S.normalizeAppointments],
+    // ippt / rm / soc / polar / conducts have no normalizer of their own — they
+    // go through padD4OnLayer directly (js/api.js PULL_ASSIGN, js/state.js
+    // loadLocal), so that is what gets exercised for them.
+    ["ippt",          (S) => S.padD4OnLayer],
+    ["rm",            (S) => S.padD4OnLayer],
+    ["soc",           (S) => S.padD4OnLayer],
+    ["polar",         (S) => S.padD4OnLayer],
+    ["conducts",      (S) => S.padD4OnLayer],
+  ];
+
+  for (const [layer, pick] of ID_LAYERS) {
+    await test(`${layer}: a NUMBER id from the backend comes out a STRING`, () => {
+      const S = loadState();
+      const [row] = pick(S)([{ id: 1404, d4: "1101" }]);
+      eq(row.id, "1404", "stringified, not left numeric");
+      eq(typeof row.id, "string");
+      // The comparison the forms actually make. `+"1404"` is a truthy 1404, so
+      // a numeric id here would silently lose against the form's text value.
+      ok(row.id === "1404", "strict-equal to the text id the form field holds");
+      ok(row.id !== 1404, "and never strict-equal to the numeric form of it");
+    });
+
+    await test(`${layer}: a blank or null id becomes ""`, () => {
+      const S = loadState();
+      const rows = pick(S)([{ id: null, d4: "1101" }, { id: "", d4: "1102" }, { id: "  7001  ", d4: "1103" }]);
+      eq(rows.map((r) => r.id), ["", "", "7001"], "null/blank normalise to \"\", and stray whitespace is trimmed");
+    });
+  }
+
+  await test("a text id is passed through untouched (the post-cutover shape)", () => {
+    const { normalizeMedical, padD4OnLayer } = loadState();
+    eq(normalizeMedical([{ id: "1404" }])[0].id, "1404");
+    // The current nextId() shape — base36 time + random, never numeric.
+    eq(padD4OnLayer([{ id: "m9k2x1-4f7a2b" }])[0].id, "m9k2x1-4f7a2b");
+  });
+
+  suite("normalizers: roster ids stay padded 4D strings");
+
+  await test("normalizeRoster derives id via padD4, not normId", () => {
+    // Roster is the one layer whose id IS the 4D, so it keeps its own rule:
+    // strip a leading C, pad 1-3 digits to 4. Stringifying it like the other
+    // layers (String(1)) would give "1" and break every d4 join in the app.
+    const { normalizeRoster } = loadState();
+    const rows = normalizeRoster([
+      { id: 1 }, { id: "1" }, { id: "C1101" }, { id: "c7" }, { id: "0001" }, { id: "1101" },
+    ]);
+    eq(rows.map((r) => r.id), ["0001", "0001", "1101", "0007", "0001", "1101"]);
+    ok(rows.every((r) => typeof r.id === "string"), "always a string");
+  });
+
+  await test("a padded roster id auto-detects the commander role", () => {
+    // Consequence of the padding: 00xx means Commander (js/state.js:305). If a
+    // numeric 1 stayed "1" this would silently mis-role them.
+    const { normalizeRoster } = loadState();
+    eq(normalizeRoster([{ id: 1 }])[0].role, "Commander");
+    eq(normalizeRoster([{ id: 1101 }])[0].role, "Recruit");
+  });
 };

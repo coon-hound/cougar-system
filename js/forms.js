@@ -639,7 +639,7 @@ function medStatusSelChanged(v) {
 }
 
 function submitMedical() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   let status = gv("f-status");
   // Resolve a freshly-created custom status: use the typed name as the status,
   // and (optionally) persist it to the reusable list with its participates flag.
@@ -760,7 +760,7 @@ function openAttendanceForm(id) {
     </form>`);
 }
 function submitAttendance() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const total = +gv("f-total"), part = +gv("f-part"), lms = +gv("f-lms"), px = +gv("f-px"), fallout = +gv("f-fallout");
   const conductId = gv("f-conductId");
   if (!conductId) { alert("Pick a conduct (or create a new one from the dropdown)."); return; }
@@ -872,7 +872,7 @@ function recomputeIPPTScore() {
   `;
 }
 function submitIPPT() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const runMin = +gv("f-run-min"), runSec = +gv("f-run-sec");
   const runTime = `${String(runMin).padStart(2, "0")}:${String(runSec).padStart(2, "0")}`;
   const entry = {
@@ -917,7 +917,7 @@ function openRMForm(id) {
     </form>`);
 }
 function submitRM() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const avgHr = +gv("f-avghr"), maxHr = +gv("f-maxhr");
   if (maxHr < avgHr) { alert("Max HR cannot be lower than Avg HR."); return; }
   const entry = {
@@ -956,7 +956,7 @@ function openSOCForm(id) {
     </form>`);
 }
 function submitSOC() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const entry = {
     id: editId || nextId(), d4: gv("f-d4"), socNum: +gv("f-soc"),
     date: isoToDisplayDate(gv("f-date")),
@@ -1180,7 +1180,7 @@ function openConductDetailForm(id) {
     </form>`);
 }
 function submitConductDetail() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const conductId = gv("f-conductId");
   if (!conductId) { alert("Pick a conduct (or create a new one from the dropdown)."); return; }
   const entry = {
@@ -1234,7 +1234,7 @@ function openAppointmentForm(id, prefill) {
     </form>`);
 }
 function submitAppointment() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const entry = {
     id: editId || nextId(),
     d4: gv("f-d4"),
@@ -1991,7 +1991,7 @@ function recalcLeaveDays() {
 // Save a single edited (or, defensively, new) Leave row. Adding - single or
 // bulk - happens in submitBookOut now.
 function submitLeave() {
-  const editId = +gv("f-entry-id");
+  const editId = gv("f-entry-id").trim();
   const startIso = gv("f-start");
   const endIso = gv("f-end");
   if (endIso < startIso) { alert("End date must be on or after start date."); return; }

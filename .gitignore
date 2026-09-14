@@ -65,3 +65,4 @@ supabase/.temp/
 
 # Claude Code worktrees — each is its own checkout on its own pushed branch.
 .claude/worktrees/
+__live.html

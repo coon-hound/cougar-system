@@ -339,7 +339,7 @@ function normalizeMedical(records) {
     let status = r.status || "";
     if (/^Excused /.test(status)) status = status.replace(/^Excused /, "Excuse ");
     return {
-      id: r.id,
+      id: normId(r.id),
       d4: padD4(r.d4 || ""),
       date: r.date || "",
       reason: r.reason || "",
@@ -365,16 +365,39 @@ function normalizeLeave(records) {
   return (records || []).map(r => {
     if (!r) return r;
     const out = r.d4 != null ? { ...r, d4: padD4(r.d4) } : { ...r };
+    if ("id" in out) out.id = normId(out.id);
     if (out.type === "Leave") out.type = "Annual Leave";
     return out;
   });
 }
 
-// Generic d4-padding pass for layers that don't have their own normalizer.
-// Applied at every read boundary (loadLocal, pullAll) so commander 4Ds
-// stay 4 digits regardless of how Sheets mangles them on round-trip.
+// Row ids are TEXT, always. Sheets typed its id column as a NUMBER, so the app
+// could get away with `row.id === +editId`. Postgres types every column as text
+// (0001_init.sql), which makes that comparison false for the same row — and the
+// failure is silent and destructive: submitMedical falls through its editId
+// branch and APPENDS a duplicate instead of updating in place. Verified against
+// the real backend: editing one record took Medical from 12 rows to 13.
+//
+// This is the same class as normalizeAppointments (resolved/outOfCamp) and
+// normalizeMedical (inCamp) — Sheets handed back a real JS type and a
+// text-typed backend hands back a string. Coercing at the read boundary keeps
+// the whole app on one side of the line: ids are strings everywhere, so `===`
+// is correct everywhere. A no-op against the Sheets backend, which is why this
+// is safe to ship before the cutover rather than with it.
+const normId = v => (v === null || v === undefined) ? "" : String(v).trim();
+
+// Generic d4-padding + id-stringifying pass for layers that don't have their
+// own normalizer. Applied at every read boundary (loadLocal, pullAll) so
+// commander 4Ds stay 4 digits regardless of how Sheets mangles them on
+// round-trip, and so ids never vary by backend.
 function padD4OnLayer(records) {
-  return (records || []).map(r => r && r.d4 != null ? { ...r, d4: padD4(r.d4) } : r);
+  return (records || []).map(r => {
+    if (!r) return r;
+    const out = { ...r };
+    if (out.d4 != null) out.d4 = padD4(out.d4);
+    if ("id" in out) out.id = normId(out.id);
+    return out;
+  });
 }
 
 // Appointments carry two flags the app reads by plain truthiness: `resolved`
@@ -400,7 +423,7 @@ function normalizeAppointments(records) {
 // values to "Combined" — so writeTab (which derives headers from the first
 // row's keys) never strips the column on a full "Re-push all".
 function normalizeAttendance(records) {
-  return (records || []).map(r => r ? { ...r, program: r.program || "Combined" } : r);
+  return padD4OnLayer(records).map(r => r ? { ...r, program: r.program || "Combined" } : r);
 }
 function normalizeConductDetail(records) {
   return padD4OnLayer(records).map(r => r ? { ...r, program: r.program || "Combined" } : r);
@@ -473,7 +496,7 @@ function loadLocal() {
     STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
     STATE.msk = normalizeMSK(d.msk);
-    STATE.conducts = Array.isArray(d.conducts) ? d.conducts : [];
+    STATE.conducts = padD4OnLayer(Array.isArray(d.conducts) ? d.conducts : []);
     STATE.rev = (d.rev && typeof d.rev === "object") ? d.rev : {};
   } catch { /* fall through to empty state */ }
 }
