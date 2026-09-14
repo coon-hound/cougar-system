@@ -3,6 +3,10 @@
 *.txt
 *.md.bak
 *.csv
+# ...except the nominal-roll template, which is entirely invented names and is
+# the thing a new operator is pointed at. The blanket *.csv rule above exists to
+# keep REAL personnel rolls out of the repo, and it still does.
+!docs/nominal-roll-template.csv
 
 # ── Secrets & local config ─────────────────────────
 # Anything that could carry a real API key or per-machine config.
