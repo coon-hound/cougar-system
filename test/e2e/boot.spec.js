@@ -3,7 +3,7 @@
 // and renders. It asserts nothing feature-specific, so it stays green on plain
 // master; feature specs (e.g. training-programs.spec.js) build on top of it.
 const { test, expect } = require("@playwright/test");
-const { seedAndGoto, SEED } = require("./support");
+const { seedAndGoto, SEED, DATA_KEY } = require("./support");
 
 test("app boots from seeded cache with no backend and renders", async ({ page }) => {
   const pageErrors = [];
@@ -13,7 +13,7 @@ test("app boots from seeded cache with no backend and renders", async ({ page })
 
   // The seeded roster is loaded into STATE (7 people: 6 recruits + 1 commander).
   const rosterCount = await page.evaluate(() => STATE.roster.length);
-  expect(rosterCount).toBe(SEED["cougar-data-v2"].roster.length);
+  expect(rosterCount).toBe(SEED[DATA_KEY].roster.length);
 
   // No unhandled exceptions during boot/render.
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
