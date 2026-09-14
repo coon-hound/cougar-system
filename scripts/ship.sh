@@ -4,8 +4,9 @@
 #   scripts/ship.sh "<commit/PR title>"
 #
 # Refuses to push if the verification gate fails, so a red branch never becomes a
-# PR. The PR body is EVIDENCE.md (captured test output + manual-test steps), which
-# is also committed to the branch as the durable "one-look" artifact.
+# PR. The PR body is EVIDENCE.md (captured test output + manual-test steps). It is
+# git-ignored, so the PR is where it lives durably -- no generated file rewriting
+# itself on every branch and conflicting at merge.
 set -euo pipefail
 
 title="${1:?usage: ship.sh \"<title>\"}"

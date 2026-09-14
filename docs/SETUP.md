@@ -34,7 +34,7 @@ If any one of these is wrong, the frontend and backend can't talk. That's it.
 1. Create a new Google Sheet (name it e.g. `Tiger Company Data`).
 2. Create one tab per module, with **the exact tab names below** and the header
    row in **Row 1**. Copy the headers verbatim from the big comment block at the
-   top of [apps-script-Code.gs](apps-script-Code.gs) (lines ~37–135) — they're the
+   top of [apps-script-Code.gs](../apps-script-Code.gs) (lines ~37–135) — they're the
    source of truth. The required tabs:
 
    | Tab name | Purpose |
@@ -68,7 +68,7 @@ If any one of these is wrong, the frontend and backend can't talk. That's it.
 1. In **your Google Sheet**, go to **Extensions → Apps Script**. (This creates a
    bound script — the right way.)
 2. Delete any boilerplate code in `Code.gs`.
-3. Paste the **entire contents** of [apps-script-Code.gs](apps-script-Code.gs).
+3. Paste the **entire contents** of [apps-script-Code.gs](../apps-script-Code.gs).
 4. Near the top, set:
    ```js
    var FRONTEND_BASE_URL = "https://<your-github-username>.github.io/cougar-system/";
@@ -101,7 +101,7 @@ If any one of these is wrong, the frontend and backend can't talk. That's it.
 ## Step 4 — Configure & host the frontend
 
 1. Fork/clone this repo to your own GitHub account.
-2. Open [js/state.js](js/state.js) and replace the URL (~line 9):
+2. Open [js/state.js](../js/state.js) and replace the URL (~line 9):
    ```js
    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/XXXXX/exec"; // ← YOUR /exec URL from Step 3
    ```
@@ -145,7 +145,7 @@ with everything wired up, the app shows **Unauthorized** until you redeem an inv
    https://<your-username>.github.io/cougar-system/?token=abcd-1234-...
    ```
 3. Open that link **on the device that needs access**. The frontend redeems the
-   token automatically ([main.js:166](js/main.js#L166)) and stores an auth token in
+   token automatically ([main.js:166](../js/main.js#L166)) and stores an auth token in
    that browser's localStorage. You're in.
 
 **To onboard your team** (e.g. all PCs): run **`generateBulkInvite(30, 7)`** from the
@@ -212,9 +212,9 @@ Work through these **in order**. One of these five is always the cause.
 
 | Thing | Where |
 |---|---|
-| Backend code | [apps-script-Code.gs](apps-script-Code.gs) |
-| Frontend config (the URL to change) | [js/state.js](js/state.js) line ~9 |
-| Required tabs + exact headers | comment block atop [apps-script-Code.gs](apps-script-Code.gs) (~L37–135) |
+| Backend code | [apps-script-Code.gs](../apps-script-Code.gs) |
+| Frontend config (the URL to change) | [js/state.js](../js/state.js) line ~9 |
+| Required tabs + exact headers | comment block atop [apps-script-Code.gs](../apps-script-Code.gs) (~L37–135) |
 | Make an invite | run `generateInvite()` / `generateBulkInvite(n, days)` in the editor |
 | Revoke access | `revokeAuthToken(token)` / `revokeInvite(token)` / `revokeAllAuthTokens()` |
 | Health check | `<APPS_SCRIPT_URL>?action=ping` |
