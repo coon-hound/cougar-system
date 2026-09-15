@@ -32,10 +32,17 @@ const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 // Bumped at a change of intake: every phone in the field still holds the
 // PREVIOUS cohort, and until it drops that cache it keeps showing a company
 // that has gone home. See docs/INTAKE-MIGRATION.md.
+//
+// Also bumped whenever 4Ds are REDEALT within a cohort, which is the subtler
+// case: the men are the same, so nothing looks stale, but a phone holding the
+// old seating will happily write a row against a 4D that now belongs to
+// someone else. The rev bumps stop it overwriting; only dropping the cache
+// stops it acting on the wrong man. See scripts/reseat.mjs.
 //   v1 "cougar-data"     - contained a hardcoded personnel fallback
 //   v2 "cougar-data-v2"  - the BMT cohort, archived at intake 16
-const STORAGE_KEY = "cougar-data-v3";
-const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2"];
+//   v3 "cougar-data-v3"  - intake 16 before platoon 9 was re-sectioned
+const STORAGE_KEY = "cougar-data-v4";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";

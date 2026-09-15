@@ -4,37 +4,44 @@
       {
         "id": "C1401",
         "name": "ALPHA ONE",
-        "role": "Recruit"
+        "role": "Recruit",
+        "rank": "REC"
       },
       {
         "id": "C1402",
         "name": "ALPHA TWO",
-        "role": "Recruit"
+        "role": "Recruit",
+        "rank": "REC"
       },
       {
         "id": "C1403",
         "name": "ALPHA THREE",
-        "role": "Recruit"
+        "role": "Recruit",
+        "rank": "REC"
       },
       {
         "id": "C2401",
         "name": "BRAVO ONE",
-        "role": "Recruit"
+        "role": "Recruit",
+        "rank": "REC"
       },
       {
         "id": "C2402",
         "name": "BRAVO TWO",
-        "role": "Recruit"
+        "role": "Recruit",
+        "rank": "REC"
       },
       {
         "id": "C2403",
         "name": "BRAVO THREE",
-        "role": "Recruit"
+        "role": "Recruit",
+        "rank": "REC"
       },
       {
         "id": "0001",
         "name": "COMD TAN",
-        "role": "Commander"
+        "role": "Commander",
+        "rank": "3SG"
       }
     ],
     "medical": [],

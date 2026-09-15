@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 132;
+const APP_VERSION = 137;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 137,
+    date: "15 Sep 2026",
+    title: "Platoon 9 has new 4Ds, and everyone is a PTE",
+    intro: "Platoon 9 has been re-sectioned into its Hunter crews, so fourteen men are holding a new 4D today. Their records — medical, IPPT, route march — moved with them, and the app has already thrown away the old numbers. The platoon is also PTE now rather than REC, and the parade state says so.",
+    items: [
+      { t: "🔢 Fourteen new 4Ds in platoon 9", d: "Sections 1, 3 and 4 were re-dealt; section 2 kept the numbers it had. Search still works on either the 4D or the name, and nothing of anyone’s history was left behind on the old number." },
+      { t: "🎖️ PTE, not REC", d: "The parade state, the MSK report and the fitness report all read the rank off the roster now instead of printing REC for every enlistee. Platoons 7 and 8 are unchanged until their posting comes through." },
+      { t: "📱 Your phone reloaded its data once", d: "Opening the app today cleared the cached copy and pulled a fresh one, so a phone could not act on the old seating by mistake. Nothing you had saved is lost — this only affects the local copy." },
+    ],
+  },
   {
     v: 132,
     date: "14 Sep 2026",

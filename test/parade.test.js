@@ -147,4 +147,42 @@ module.exports = async function run() {
     const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
     ok(/CURRENT STRENGTH: 2/.test(out), "still 2 present, chaining is display-only");
   });
+
+  suite("parade: an enlistee's rank comes from the Roster, not a constant");
+
+  // The failure this pins: "REC" was written literally into the R/N formatter,
+  // so a cohort promoted to PTE on posting into unit training still paraded as
+  // recruits — against a battalion nominal roll that said otherwise. Rank
+  // MOVES; the generator has to read it.
+  await test("a PTE on the roster parades as PTE", () => {
+    const st = state();
+    for (const r of st.roster) r.rank = "PTE";
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/PTE .* C1201/.test(txt2), "expected a PTE line: " + section(txt2, "ATTC"));
+    ok(!/\bREC\b/.test(txt2), "no line may still say REC: " + txt2);
+  });
+
+  await test("a blank rank still falls back to REC", () => {
+    // Every row looked like this before the column carried anything, so the
+    // fallback is what stops this change blanking the rank for whole platoons.
+    const txt2 = loadParade(state()).generateParadeStateText("FP", DATE, "0730");
+    ok(/REC .* C1201/.test(txt2), "blank rank must render REC: " + section(txt2, "ATTC"));
+  });
+
+  await test("rank is read per man, not once for the parade", () => {
+    const st = state();
+    st.roster[1].rank = "PTE";           // 1201, the away MC in ATTC
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/PTE .* C1201/.test(txt2), "the promoted man is PTE: " + txt2);
+    ok(/REC .* C1405/.test(txt2), "his platoon-mate is untouched: " + txt2);
+  });
+
+  await test("a commander is still rank + name with no 4D", () => {
+    const st = state();
+    st.roster.push({ id: "0012", role: "Commander", name: "Section Comd", rank: "3SG" });
+    st.medical.push({ d4: "0012", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "01 Jul 2026", inCamp: false, location: "" });
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/3SG SECTION COMD/i.test(txt2), "commander keeps rank+name: " + txt2);
+    ok(!/C0012/.test(txt2), "and never shows a 00xx id: " + txt2);
+  });
 };
