@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Cougar invite links</title>
+<style>
+  :root {
+    --paper:#f6f5f2; --surface:#fffefc; --ink:#1a2028; --ink-soft:#454e59;
+    --ink-faint:#767f8a; --rule:#ddd9d2; --rule-soft:#eae7e1; --accent:#1f5266;
+    --warn:#9e3328; --good:#3f6b46; --inset:#f0eee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#14181d; --surface:#1a1f26; --ink:#e6e3dd; --ink-soft:#aeb6bf;
+      --ink-faint:#7d8690; --rule:#2d343d; --rule-soft:#232930; --accent:#6fb3ce;
+      --warn:#e08578; --good:#86b98e; --inset:#1e242b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font:16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:62rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.9rem; line-height:1.15; margin:0 0 .3rem; letter-spacing:-.02em; }
+  .sub { color:var(--ink-soft); margin:0 0 1.5rem; }
+  .meta { font-size:.8rem; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
+
+  .warn {
+    background:var(--inset); border-left:3px solid var(--warn);
+    border-radius:0 3px 3px 0; padding:.9rem 1.1rem; margin:1.5rem 0;
+  }
+  .warn b { display:block; color:var(--warn); font-size:.7rem; letter-spacing:.1em;
+            text-transform:uppercase; margin-bottom:.35rem; }
+  .warn p { margin:.3rem 0; color:var(--ink-soft); font-size:.95rem; }
+
+  .bar { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin:1.25rem 0 .75rem; }
+  .bar input[type=search] {
+    flex:1 1 14rem; padding:.5rem .7rem; border:1px solid var(--rule);
+    border-radius:4px; background:var(--surface); color:var(--ink); font:inherit; font-size:.92rem;
+  }
+  .count { font-size:.85rem; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
+
+  table { width:100%; border-collapse:collapse; font-size:.93rem; }
+  th {
+    text-align:left; font-size:.66rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-faint); font-weight:600; padding:.5rem .55rem;
+    border-bottom:1px solid var(--rule); position:sticky; top:0; background:var(--paper);
+  }
+  td { padding:.45rem .55rem; border-bottom:1px solid var(--rule-soft); vertical-align:middle; }
+  tr.done { opacity:.42; }
+  .n  { color:var(--ink-faint); font-variant-numeric:tabular-nums; width:2.2rem; font-size:.82rem; }
+  .nm { font-weight:600; }
+  .d4 { font-family:ui-monospace,"SF Mono",Menlo,monospace; color:var(--accent);
+        font-variant-numeric:tabular-nums; width:3.6rem; }
+  .lk { width:46%; }
+  .lk input {
+    width:calc(100% - 4.4rem); padding:.35rem .5rem; border:1px solid var(--rule);
+    border-radius:3px; background:var(--surface); color:var(--ink-soft);
+    font-family:ui-monospace,Menlo,monospace; font-size:.74rem;
+  }
+  .lk button, .copyall {
+    margin-left:.35rem; padding:.36rem .7rem; border:1px solid var(--accent);
+    border-radius:3px; background:transparent; color:var(--accent);
+    font:inherit; font-size:.8rem; cursor:pointer;
+  }
+  .lk button:hover, .copyall:hover { background:var(--accent); color:var(--paper); }
+  .lk button.ok { border-color:var(--good); color:var(--good); }
+  .st { white-space:nowrap; font-size:.85rem; color:var(--ink-faint); }
+  .st input { margin-right:.25rem; }
+
+  footer { margin-top:2.5rem; padding-top:1rem; border-top:1px solid var(--rule);
+           font-size:.86rem; color:var(--ink-faint); }
+  footer code { background:var(--inset); padding:.1em .35em; border-radius:2px;
+                font-family:ui-monospace,Menlo,monospace; font-size:.9em; }
+  footer p { margin:.4rem 0; max-width:42rem; }
+  footer h2 { font-size:1.15rem; color:var(--ink); margin:.2rem 0 .9rem; letter-spacing:-.01em; }
+  footer h3 { font-size:.95rem; color:var(--ink); margin:1.4rem 0 .25rem; }
+  footer pre {
+    background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+    padding:.6rem .8rem; overflow-x:auto; margin:.4rem 0;
+    font-family:ui-monospace,Menlo,monospace; font-size:.78rem; line-height:1.5;
+    color:var(--ink);
+  }
+  footer .note { margin-top:1.6rem; font-size:.84rem; }
+  .gone {
+    font-size:.64rem; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--warn); border:1px solid var(--warn); border-radius:2px;
+    padding:.05em .3em; margin-left:.35rem; vertical-align:middle;
+  }
+  @media (max-width:40rem) {
+    .lk { width:auto; } .lk input { width:calc(100% - 4.4rem); }
+    .d4 { width:auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Invite links</h1>
+  <p class="sub">{{COUNT}} commanders, one link each. None have been used yet.</p>
+  <p class="meta">Generated {{GENERATED}} &middot; links expire <strong>{{EXPIRY}}</strong> ({{DAYS}} days left)</p>
+
+  <div class="warn">
+    <b>Each link is a password</b>
+    <p>There is nothing behind it. Whoever opens a link becomes that person in the app <em>and</em> in the change history, permanently.</p>
+    <p><strong>Send each link to its own person, one at a time. Never into a group chat.</strong> A link that reaches the wrong phone gives a stranger that commander's access under that commander's name.</p>
+  </div>
+
+  <div class="bar">
+    <input type="search" id="q" placeholder="Filter by name or 4D…" autocomplete="off">
+    <button type="button" class="copyall" id="hide">Hide sent</button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th></th><th>Name</th><th>4D</th><th>Invite link</th><th>Status</th></tr>
+    </thead>
+    <tbody id="tb">
+{{ROWS}}
+    </tbody>
+  </table>
+
+  <footer>
+    <h2>Doing this yourself</h2>
+
+    <p class="pre">Every command needs the database connection first. Run this once per terminal:</p>
+    <pre>cd ~/dev/js/cougar-system
+set -a; . ~/.cougar-migrate.env; set +a</pre>
+
+    <h3>Rebuild this page</h3>
+    <p>Always current, because it reads the database. You never need to keep the file.</p>
+    <pre>node scripts/invite-doc.mjs</pre>
+
+    <h3>See who has access, and who has not used their link</h3>
+    <pre>node scripts/issue-invites.mjs --list</pre>
+
+    <h3>Add one person</h3>
+    <pre>node scripts/issue-invites.mjs --person "JAMSON TAN" --d4 0028 --commit</pre>
+
+    <h3>Add everyone missing</h3>
+    <p>Skips anyone already set up, so running it twice is safe.</p>
+    <pre>node scripts/issue-invites.mjs --from-roster --role Commander --commit</pre>
+
+    <h3>Take access away</h3>
+    <p>Someone posts out, or loses a phone. Two different things:</p>
+    <pre>node scripts/issue-invites.mjs --revoke-invite &lt;token&gt; --commit   # link not yet used
+node scripts/issue-invites.mjs --revoke-token  &lt;token&gt; --commit   # device already signed in</pre>
+    <p>Revoking a link does <strong>not</strong> sign out a phone that already used it. If they were already in, you need <code>--revoke-token</code> as well. <code>--list</code> shows both.</p>
+
+    <h3>Drop <code>--commit</code> to see what would happen</h3>
+    <p>Every command that changes something is a preview without <code>--commit</code>. Nothing is written and you can run it as often as you like.</p>
+
+    <p class="note">The &ldquo;sent&rdquo; ticks live in this browser only. They are a checklist for you, not a record of anything.</p>
+  </footer>
+
+</div>
+
+<script>
+  const tb = document.getElementById("tb");
+  const rows = [...tb.querySelectorAll("tr")];
+  const q = document.getElementById("q");
+  const countEl = document.getElementById("count");
+  const hideBtn = document.getElementById("hide");
+  let hiding = false;
+
+  // Remember the checklist per browser. Wrapped: storage can throw outright
+  // when a browser is set to block site data, and a thrown error here would
+  // leave the page with no interactivity at all.
+  const store = {
+    get(k) { try { return localStorage.getItem(k) === "1"; } catch { return false; } },
+    set(k, v) { try { localStorage.setItem(k, v ? "1" : "0"); } catch { /* fine */ } }
+  };
+
+  for (const cb of tb.querySelectorAll('input[type=checkbox]')) {
+    const key = "cougar-invite-" + cb.dataset.k;
+    cb.checked = store.get(key);
+    cb.closest("tr").classList.toggle("done", cb.checked);
+    cb.addEventListener("change", () => {
+      store.set(key, cb.checked);
+      cb.closest("tr").classList.toggle("done", cb.checked);
+      apply();
+    });
+  }
+
+  for (const btn of tb.querySelectorAll("button[data-url]")) {
+    btn.addEventListener("click", async () => {
+      const url = btn.dataset.url;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        // Clipboard access is refused on a file:// page in some browsers.
+        // Selecting the text is a working fallback, not a dead end.
+        const input = btn.previousElementSibling;
+        input.focus(); input.select();
+        try { document.execCommand("copy"); } catch { /* user copies manually */ }
+      }
+      const was = btn.textContent;
+      btn.textContent = "Copied"; btn.classList.add("ok");
+      setTimeout(() => { btn.textContent = was; btn.classList.remove("ok"); }, 1200);
+    });
+  }
+
+  function apply() {
+    const term = q.value.trim().toLowerCase();
+    let shown = 0, done = 0;
+    for (const tr of rows) {
+      const isDone = tr.classList.contains("done");
+      if (isDone) done++;
+      const text = tr.querySelector(".nm").textContent.toLowerCase() + " " +
+                   tr.querySelector(".d4").textContent.toLowerCase();
+      const match = !term || text.includes(term);
+      tr.style.display = (match && !(hiding && isDone)) ? "" : "none";
+      if (tr.style.display === "") shown++;
+    }
+    countEl.textContent = `${done} of ${rows.length} sent` + (shown < rows.length ? ` · ${shown} shown` : "");
+  }
+
+  q.addEventListener("input", apply);
+  hideBtn.addEventListener("click", () => {
+    hiding = !hiding;
+    hideBtn.textContent = hiding ? "Show all" : "Hide sent";
+    apply();
+  });
+  apply();
+</script>
+</body>
+</html>

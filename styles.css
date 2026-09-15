@@ -122,7 +122,11 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 #sidebar .logo{padding:16px 14px 14px;border-bottom:1px solid var(--border)}
 /* Wordmark eyebrow carries the identity gradient. -webkit-text-fill-color is
    the transparent-text mechanism; `color` stays set as the no-clip fallback. */
-#sidebar .logo small{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.6px;color:var(--accent);background:var(--brandline);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+/* Solid accent, not the gradient. At 10px with 1.6px tracking a two-stop
+   gradient just makes the letterforms muddy, and the wordmark is the one place
+   that has to stay crisp. --brandline still signs the active nav rail, where
+   there is enough area for it to read as a gradient rather than as noise. */
+#sidebar .logo small{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.6px;color:var(--accent)}
 #sidebar .logo h2{font-size:15px;font-weight:600;letter-spacing:-.015em;margin-top:3px;color:var(--text)}
 /* Nav rail: a rounded 3px bar in the identity gradient, scaled in on activate.
    Replaces the old flat border-left — a rail with a radius reads considered,
@@ -131,14 +135,20 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 .nav-btn::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:0 var(--rp) var(--rp) 0;background:var(--brandline);transform:scaleY(0);transform-origin:center;transition:transform var(--d2) var(--spring)}
 .nav-btn.active{background:var(--surface2);color:var(--text);font-weight:600}
 .nav-btn.active::before{transform:scaleY(1)}
-.nav-btn>span:first-child{font-size:14px;line-height:1;filter:saturate(1.1)}
+/* Nav icons are monochrome glyphs, not emoji, and that is the point: a glyph
+   inherits currentColor, so the icon goes accent exactly when its label does.
+   An emoji is always its own colour no matter what the row is doing, which is
+   what made the sidebar read as a pile of stickers rather than one control. */
+.nav-btn>span:first-child,.nav-ico{font-size:13px;line-height:1;width:15px;flex-shrink:0;text-align:center;color:var(--dim);transition:color var(--d2) var(--ez)}
+.nav-btn.active>.nav-ico{color:var(--accent)}
+@media (hover:hover) and (pointer:fine){.nav-btn:hover>.nav-ico{color:var(--muted)}}
 .nav-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
 #sidebar-footer{margin-top:auto;padding:14px;border-top:1px solid var(--border);font-size:10px;line-height:1.6;color:var(--dim);font-variant-numeric:tabular-nums}
 
 /* ── Main / topbar ─────────────────────────────────────────*/
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 #topbar{padding:10px 20px;border-bottom:1px solid var(--border);background:rgba(28,25,23,.8);-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);display:flex;gap:10px;align-items:center;position:sticky;top:0;z-index:50;flex-shrink:0}
-#topbar .topbar-search-icon{font-size:12px;opacity:.55;line-height:1}
+#topbar .topbar-search-icon{font-size:15px;color:var(--dim);line-height:1}
 #topbar input{flex:1;max-width:350px;min-height:34px;padding:8px 13px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;transition:border-color var(--d2) var(--ez)}
 #topbar input::placeholder{color:var(--dim)}
 #topbar input:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}

@@ -57,8 +57,9 @@ function render() {
 // still answers "is there anything here for me today?", which is the only
 // question a commander asks while walking. Open, it is the full table.
 //
-// Defaults are computed per render (a section with nothing in it opens
-// closed), and only an explicit tap is remembered — so a quiet Tuesday can
+// Every section now defaults OPEN: the dashboard's job is to show the day
+// without being clicked, and collapsing is the exception rather than the
+// resting state. Only an explicit tap is remembered, so a quiet Tuesday can
 // never permanently collapse a section that matters on Wednesday.
 const DASH_OPEN_KEY = "cougar-dash-open";
 let _dashOpen = (() => {
@@ -109,7 +110,7 @@ function dashSection(o) {
     <div class="dash-sec-head${open ? " open" : ""}">
       <button class="btn btn-ghost dash-sec-toggle" type="button" aria-expanded="${open}" aria-controls="dash-${o.key}-body" onclick="toggleDashSection('${o.key}')">
         <span aria-hidden="true" style="flex:0 0 9px;color:var(--dim);font-size:9px">${open ? "▼" : "▶"}</span>
-        <span style="font-size:13px;font-weight:600;color:var(--text)">${o.icon} ${o.title}</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text)"><span style="color:var(--dim);margin-right:6px" aria-hidden="true">${o.icon}</span>${o.title}</span>
         ${pill}
         ${o.note ? `<span class="dash-sec-note">${o.note}</span>` : ""}
       </button>
@@ -221,9 +222,9 @@ function renderDashboard(el) {
     dashSecMedical(liveRows, recoveringRows, allByD4, today),
     dashSecAppointments(visible, today),
     dashSecLeaveOut(visible, today),
-    dashSecMSK(visible),
     dashSecTrends(avgPart),
     dashSecProfile(scoped),
+    dashSecMSK(visible),
   ].filter(Boolean).map(dashSection).join("");
 
   el.innerHTML = `
@@ -238,14 +239,14 @@ function renderDashboard(el) {
           <div style="font-size:11px;color:var(--dim);margin-top:2px">${dateLabel}${isFilterActive() ? ` · <span style="color:var(--accent);font-weight:600">${filterLabel()}</span>` : ""}</div>
         </div>
         <div class="dropdown-wrapper" style="flex:0 0 auto">
-          <button class="btn btn-primary" onclick="toggleReportMenu(event)">📋 Generate Report ▾</button>
+          <button class="btn btn-primary" onclick="toggleReportMenu(event)">Generate Report ▾</button>
           <div id="report-menu" class="dropdown-menu hidden">
-            <button type="button" onclick="openReportModal('FP'); closeReportMenu()">📋 First Parade State</button>
-            <button type="button" onclick="openReportModal('LP'); closeReportMenu()">📋 Last Parade State</button>
-            <button type="button" onclick="openReportModal('MED'); closeReportMenu()">🏥 Medical Status List</button>
-            <button type="button" onclick="openReportModal('MSK'); closeReportMenu()">🦵 MSK Report</button>
-            <button type="button" onclick="openReportModal('CONDUCT'); closeReportMenu()">📊 Per-Conduct Chat Format</button>
-            <button type="button" onclick="openCompareModal(); closeReportMenu()">🔀 Compare Parade States</button>
+            <button type="button" onclick="openReportModal('FP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◱</span>First Parade State</button>
+            <button type="button" onclick="openReportModal('LP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◳</span>Last Parade State</button>
+            <button type="button" onclick="openReportModal('MED'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">✚</span>Medical Status List</button>
+            <button type="button" onclick="openReportModal('MSK'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⊕</span>MSK Report</button>
+            <button type="button" onclick="openReportModal('CONDUCT'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">▤</span>Per-Conduct Chat Format</button>
+            <button type="button" onclick="openCompareModal(); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⇄</span>Compare Parade States</button>
           </div>
         </div>
       </div>
@@ -390,9 +391,9 @@ function dashSecMedical(liveRows, recoveringRows, allByD4, today) {
   };
 
   return {
-    key: "medical", icon: "🏥", title: "Non-Active",
+    key: "medical", icon: "✚", title: "Non-Active",
     count: liveRows.length, token: "--red", note,
-    defaultOpen: !!(liveRows.length || recoveringRows.length),
+    defaultOpen: true,
     flush: true, body,
   };
 }
@@ -415,11 +416,11 @@ function dashSecTrends(avgPart) {
       <div class="chart-box tall"><canvas id="chart-participation"></canvas></div>
     </div>
   </div>`;
-  return { key: "trends", icon: "📈", title: "Trends", note, defaultOpen: true, body };
+  return { key: "trends", icon: "◲", title: "Trends", note, defaultOpen: true, body };
 }
 
 // Ration + allergy profile. Reference data rather than a daily answer, so it
-// is the one section that opens closed — the header still carries the counts.
+// sits low on the page — but it opens with everything else.
 function dashSecProfile(scoped) {
   // Ration: count distinct values. Unknowns get grouped under "Unspecified"
   // so they show up but don't disappear silently.
@@ -463,9 +464,9 @@ function dashSecProfile(scoped) {
   </div>`;
 
   return {
-    key: "profile", icon: "🍽️", title: "Ration & allergies",
+    key: "profile", icon: "◍", title: "Ration & allergies",
     note: `${muslim} Muslim ration · ${allergic.length} with allergies`,
-    defaultOpen: false, body,
+    defaultOpen: true, body,
   };
 }
 
@@ -558,10 +559,10 @@ function dashSecMSK(visible) {
     : "";
 
   return {
-    key: "msk", icon: "🦵", title: "MSK cases",
+    key: "msk", icon: "⊕", title: "MSK cases",
     count: active.length, token: "--pink",
     note: cleared.length ? `${cleared.length} cleared` : (active.length ? "" : "nothing open"),
-    defaultOpen: !!active.length,
+    defaultOpen: true,
     body: () => activeCards + clearedSection,
   };
 }
@@ -983,10 +984,10 @@ function dashSecLeaveOut(visible, todayIso) {
   const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Annual Leave" ? "teal" : t === "Compassionate" ? "red" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
   const section = body => ({
-    key: "leaveout", icon: "🪖", title: "Out today / this week",
+    key: "leaveout", icon: "⊘", title: "Out today / this week",
     count: onToday.length, token: "--purple",
     note: upcoming.length ? `${upcoming.length} upcoming` : (onToday.length ? "" : "nobody this week"),
-    defaultOpen: !!(onToday.length || upcoming.length),
+    defaultOpen: true,
     action: dashAction("+ Log", "openBookOutForm()", "Log leave or a book-out"),
     flush: true, body,
   });
@@ -1189,10 +1190,10 @@ function dashSecOutOfCamp(scoped, outMap) {
   const kinds = {};
   rows.forEach(r => { const k = outMap.get(r.id).kind; kinds[k] = (kinds[k] || 0) + 1; });
   const section = body => ({
-    key: "outofcamp", icon: "🚪", title: "Out of camp",
+    key: "outofcamp", icon: "↗", title: "Out of camp",
     count: rows.length, token: "--orange",
     note: rows.length ? Object.entries(kinds).map(([k, n]) => `${n} ${(label[k] || k).toLowerCase()}`).join(" · ") : "everyone is in camp",
-    defaultOpen: !!rows.length,
+    defaultOpen: true,
     action: dashAction("+ Book Out", "openBookOutForm()", "Book someone out of camp"),
     flush: true, body,
   });
@@ -1238,9 +1239,9 @@ function dashSecAppointments(visible, todayIso) {
     : todayCount ? `${todayCount} today · next ${upcoming[0].date || ""}`
     : `next ${upcoming[0].date || ""}`;
   const section = body => ({
-    key: "appointments", icon: "📅", title: "Appointments",
+    key: "appointments", icon: "◷", title: "Appointments",
     count: upcoming.length, token: "--accent", note,
-    defaultOpen: !!upcoming.length,
+    defaultOpen: true,
     action: dashAction("+ Book", "openAppointmentForm()", "Book an appointment"),
     flush: true, body,
   });
