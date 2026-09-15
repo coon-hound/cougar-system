@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>COS Handover Guide - Cougar System</title>
+<style>
+  :root {
+    --ink: #14181f;
+    --muted: #5a6270;
+    --line: #d7dbe2;
+    --panel: #f4f6f9;
+    --accent: #1f4e8c;
+    --red: #b3261e;
+    --green: #1f7a3d;
+    --amber: #9a6700;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.5;
+  }
+  .page { padding: 0 4mm; }
+
+  h1 { font-size: 24pt; margin: 0 0 2mm; letter-spacing: 0.5px; }
+  h2 {
+    font-size: 14pt; margin: 10mm 0 3mm; padding-bottom: 1.5mm;
+    border-bottom: 2px solid var(--ink);
+    break-after: avoid;
+  }
+  h2 .num {
+    display: inline-block; background: var(--ink); color: #fff;
+    min-width: 8mm; text-align: center; padding: 0 2mm; margin-right: 3mm;
+    font-size: 12pt;
+  }
+  h3 { font-size: 11.5pt; margin: 6mm 0 2mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1.2mm; }
+  strong { font-weight: 700; }
+  a { color: var(--accent); }
+
+  .cover {
+    border: 2px solid var(--ink); padding: 8mm 8mm 6mm; margin-bottom: 8mm;
+  }
+  .cover .unit { font-size: 11pt; letter-spacing: 3px; color: var(--muted); margin-bottom: 2mm; }
+  .cover .sub { font-size: 12pt; color: var(--muted); margin-top: 1mm; }
+  .cover .meta { margin-top: 5mm; font-size: 9pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 3mm; }
+
+  .directive {
+    background: var(--ink); color: #fff; padding: 5mm 6mm; margin: 5mm 0;
+    break-inside: avoid;
+  }
+  .directive .t { font-weight: 700; font-size: 12pt; letter-spacing: 1px; margin-bottom: 2mm; }
+  .directive p { color: #e8eaee; }
+  .directive p:last-child { margin-bottom: 0; }
+
+  .callout {
+    border: 1.5px solid var(--ink); border-left: 5px solid var(--ink);
+    background: var(--panel); padding: 3mm 4mm; margin: 3.5mm 0;
+    break-inside: avoid;
+  }
+  .callout.warn { border-color: var(--red); background: #fdf3f2; }
+  .callout.tip { border-color: var(--green); background: #f2faf4; }
+  .callout .t { font-weight: 700; margin-bottom: 1mm; }
+  .callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+
+  /* ---------- UI mockups ---------- */
+  .ui-btn {
+    display: inline-block; border: 1.5px solid var(--ink); border-radius: 2mm;
+    padding: 0.8mm 3mm; font-weight: 700; font-size: 9.5pt; background: #fff;
+    box-shadow: 0.6mm 0.6mm 0 var(--line); white-space: nowrap;
+  }
+  .ui-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .ui-btn.danger  { background: var(--red); border-color: var(--red); color: #fff; }
+  .ui-btn.small { font-size: 8.5pt; padding: 0.4mm 2mm; }
+
+  .ui-tab {
+    display: inline-block; border: 1.5px solid var(--ink); border-radius: 1.5mm;
+    padding: 0.8mm 3mm; font-weight: 700; font-size: 9.5pt; background: var(--panel);
+    white-space: nowrap;
+  }
+
+  .flow { margin: 3.5mm 0; break-inside: avoid; }
+  .flow .lane { display: flex; align-items: center; flex-wrap: wrap; gap: 2mm; }
+  .flow .arr { font-size: 12pt; font-weight: 700; color: var(--muted); }
+
+  .ui-modal {
+    border: 2px solid var(--ink); border-radius: 2mm; max-width: 118mm;
+    margin: 3.5mm 0; background: #fff; break-inside: avoid;
+    box-shadow: 1.2mm 1.2mm 0 var(--line);
+  }
+  .ui-modal .bar {
+    background: var(--ink); color: #fff; font-weight: 700; font-size: 10pt;
+    padding: 1.6mm 3.5mm; border-radius: 1.2mm 1.2mm 0 0;
+    display: flex; justify-content: space-between;
+  }
+  .ui-modal .bar .x { font-weight: 400; opacity: .7; }
+  .ui-modal .body { padding: 3mm 3.5mm; }
+  .ui-field { margin-bottom: 2.2mm; }
+  .ui-field .lab { font-size: 8pt; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .ui-field .val {
+    border: 1px solid var(--line); border-radius: 1mm; background: var(--panel);
+    padding: 1mm 2.5mm; font-size: 9.5pt; margin-top: .5mm;
+  }
+  .ui-field .val.select::after { content: " ▾"; color: var(--muted); float: right; }
+  .ui-field .hint { font-size: 8pt; color: var(--muted); margin-top: .5mm; }
+  .ui-check { font-size: 9.5pt; margin: 1.5mm 0; }
+  .ui-check .box { display: inline-block; width: 3.2mm; height: 3.2mm; border: 1.5px solid var(--ink); border-radius: .6mm; vertical-align: -0.4mm; margin-right: 1.5mm; text-align: center; line-height: 3mm; font-size: 8pt; font-weight: 700; }
+  .ui-check .box.on { background: var(--ink); color: #fff; }
+  .ui-pills { display: flex; gap: 0; border: 1.5px solid var(--ink); border-radius: 1.5mm; overflow: hidden; width: fit-content; margin: 1mm 0 2mm; }
+  .ui-pills .pill { padding: 1mm 4mm; font-size: 9.5pt; font-weight: 700; background: #fff; }
+  .ui-pills .pill.on { background: var(--ink); color: #fff; }
+  .ui-footerbtns { display: flex; gap: 2.5mm; margin-top: 2.5mm; }
+  .press { outline: 2.5px solid var(--red); outline-offset: 1mm; position: relative; }
+  .press-note { color: var(--red); font-weight: 700; font-size: 8.5pt; }
+
+  .steps { counter-reset: step; margin: 3mm 0; padding: 0; list-style: none; }
+  .steps > li {
+    counter-increment: step; position: relative; padding-left: 10mm; margin-bottom: 3mm;
+  }
+  .steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0;
+    width: 6.5mm; height: 6.5mm; background: var(--ink); color: #fff;
+    border-radius: 50%; text-align: center; line-height: 6.5mm; font-weight: 700; font-size: 10pt;
+  }
+  .steps > li.phys::before { background: #fff; color: var(--ink); border: 1.8px solid var(--ink); line-height: 5.8mm; }
+  .steps .why { color: var(--muted); font-size: 9pt; }
+  .tag-phys {
+    display: inline-block; border: 1.2px solid var(--ink); font-size: 7.5pt; font-weight: 700;
+    padding: 0 1.5mm; border-radius: 1mm; vertical-align: 1px; letter-spacing: .5px;
+  }
+
+  pre.mono {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 8.8pt;
+    background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ink);
+    padding: 3mm 4mm; white-space: pre-wrap; margin: 2.5mm 0; line-height: 1.45;
+    orphans: 4; widows: 4;
+  }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace; font-size: 9pt;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 1mm; padding: 0 1.2mm;
+  }
+
+  table.ref { width: 100%; border-collapse: collapse; margin: 3mm 0; font-size: 9.3pt; }
+  table.ref th {
+    background: var(--ink); color: #fff; text-align: left; padding: 1.6mm 2.5mm; font-size: 8.8pt;
+    letter-spacing: .4px;
+  }
+  table.ref td { border: 1px solid var(--line); padding: 1.6mm 2.5mm; vertical-align: top; }
+  table.ref tr { break-inside: avoid; }
+  table.ref tr:nth-child(even) td { background: var(--panel); }
+
+  .scenario {
+    border: 1.5px solid var(--line); border-radius: 2mm; padding: 3.5mm 4mm; margin: 4mm 0;
+    break-inside: avoid;
+  }
+  .scenario .t {
+    font-weight: 700; font-size: 10.5pt; margin-bottom: 1.5mm;
+  }
+  .scenario .t::before { content: "SCENARIO "; color: var(--accent); letter-spacing: 1px; font-size: 8.5pt; display: block; }
+
+  .pagebreak { break-before: page; }
+  .avoid { break-inside: avoid; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="unit">C COMPANY &middot; 40 SAR &middot; COUGAR</div>
+  <h1>COS Handover Guide</h1>
+  <div class="sub">Duty procedures and the Cougar System: report sick, book out / book in, conducts, and the parade state.</div>
+  <div class="meta">For the incoming Company Orderly Sergeant. Read the whole guide once before your first duty. After that, use Section 9 (Quick Reference) day to day. If the data cannot be represented in the website, contact <strong>Youqi</strong>.</div>
+</div>
+
+<div class="directive">
+  <div class="t">THE ONE RULE</div>
+  <p>The parade state from the app must be <strong>100% accurate at all times</strong>. Not just at first parade. At all times. Log every move in or out of camp <strong>the moment it happens</strong>. Log every new status the moment you learn of it. Do not save entries up for later.</p>
+  <p>If the data cannot be represented in the website, or you are not sure how to log it, <strong>contact Youqi at once</strong>. Do not guess. Do not hand-edit the report to hide a gap. Do not leave it wrong.</p>
+</div>
+
+<p>Everything in this guide serves that rule. The app builds strength, ATTC, and the out-of-camp list from what you log. Log well and the parade state is always right. Log late and every report you send is a guess.</p>
+
+<!-- ================= 1 NAV ================= -->
+<h2><span class="num">1</span>Finding your way around</h2>
+<p>The app is one page with a sidebar on the left. On your phone, tap <span class="ui-btn small">☰</span> to open it. You will live in five places:</p>
+<table class="ref">
+  <tr><th>Tab</th><th>What you do there</th></tr>
+  <tr><td><strong>📊 Dashboard</strong></td><td>Generate the First / Last Parade State and the Medical Status List. See who is out of camp right now. Book and track medical appointments.</td></tr>
+  <tr><td><strong>👥 Roster</strong></td><td>Per-person book out / book in buttons. Manage <strong>⦿ Groups</strong>.</td></tr>
+  <tr><td><strong>🏥 Medical</strong></td><td>The Report Sick Log. Log every report sick here. Edit the status when the MO outcome comes back.</td></tr>
+  <tr><td><strong>📅 Out / Leave</strong></td><td>Every book-out and leave record. Edit book-in dates here.</td></tr>
+  <tr><td><strong>📋 Attendance</strong></td><td>Log conduct attendance with the Log Conduct wizard.</td></tr>
+</table>
+<p>The top bar has a search box (<em>Search 4D or Name...</em>) and filters for platoon, program, and group. The <span class="ui-btn small">⟳</span> button at the top right shows sync status. See Section 8.</p>
+
+<!-- ================= 2 REPORT SICK ================= -->
+<h2><span class="num">2</span>Report sick: the full loop</h2>
+<p>This is your most common and most important task. It has app steps and physical steps. Steps marked <span class="tag-phys">PHYSICAL</span> happen outside the app. They are just as mandatory.</p>
+
+<h3>2.1 When a recruit reports sick</h3>
+<ol class="steps">
+  <li>
+    <strong>Log him in the Medical tab, status Pending.</strong>
+    <div class="flow"><div class="lane">
+      <span class="ui-tab">🏥 Medical</span><span class="arr">→</span>
+      <span class="ui-btn primary press">+ Log Report Sick</span>
+    </div></div>
+    Fill the form as shown below. Status is <strong>Pending</strong> because the MO outcome is not known yet. Leave Start and End blank. Blank dates are allowed only for Pending and NIL.
+  </li>
+  <li class="phys"><span class="tag-phys">PHYSICAL</span> <strong>Have him sign the report sick book</strong> (sign in).</li>
+  <li class="phys"><span class="tag-phys">PHYSICAL</span> <strong>Have him fill in the 40SAR report sick form</strong> at the Linktree: <a href="https://linktr.ee/40SARInternal">https://linktr.ee/40SARInternal</a>.</li>
+  <li class="phys"><span class="tag-phys">PHYSICAL</span> <strong>Compile the report sick list and send it to Dr. Nigel</strong> in the exact format in Section 2.2. Get the format right the first time.</li>
+</ol>
+
+<div class="ui-modal">
+  <div class="bar"><span>Log Report Sick</span><span class="x">✕</span></div>
+  <div class="body">
+    <div class="ui-field"><div class="lab">Recruit</div><div class="val select">REC James Tan &middot; C1108</div></div>
+    <div class="ui-field"><div class="lab">Date Reported Sick</div><div class="val">15/05/2026</div></div>
+    <div class="ui-field"><div class="lab">Reason</div><div class="val">Fever 38.3, sore throat</div><div class="hint">Write it the way you will send it to Dr. Nigel: temperature first if taken, then symptoms.</div></div>
+    <div class="ui-field"><div class="lab">Location (only if reported sick outside)</div><div class="val" style="color:var(--muted)">e.g. Lim Clinic and Surgery</div></div>
+    <div class="ui-field"><div class="lab">Status</div><div class="val select press">Pending</div><span class="press-note">← select Pending (under "Awaiting MO")</span></div>
+    <div class="ui-field"><div class="lab">Start (inclusive) / End (inclusive)</div><div class="val" style="color:var(--muted)">leave both blank while Pending</div></div>
+    <div class="ui-footerbtns"><span class="ui-btn primary">Submit</span></div>
+  </div>
+</div>
+
+<div class="callout tip">
+  <div class="t">Why Pending matters</div>
+  <p>Pending entries show in the <code>REPORT SICK</code> section of the parade state on the day you log them. That is how the company knows who is at the MO. When the outcome comes back, you upgrade the same entry (Section 2.3). Never log a second one.</p>
+</div>
+
+<h3>2.2 The report sick list to Dr. Nigel</h3>
+<p>Send the list in this format and no other. The header line is <code>DDMMYY C COY 40SAR HHMMH</code>. Split cases into <strong>URTI</strong> and <strong>NON-URTI</strong>. URTI means upper respiratory symptoms: sore throat, cough, runny nose, with or without fever. Everything else is NON-URTI, including fever alone. Zero-pad counts and serial numbers to two digits. Serial numbers restart at 01 in each section. Each entry has <code>S/N</code>, <code>R/N</code> (rank, name, 4D), and <code>REASON</code>, with temperature first if taken.</p>
+
+<pre class="mono">150526 C COY 40SAR 0830H
+
+URTI: 03
+S/N: 01
+R/N: REC James Tan C1108
+REASON: Fever 38.3, sore throat
+
+S/N: 02
+R/N: REC Alfie C4104
+REASON: 37.7, sore throat, headache
+
+S/N: 03
+R/N: REC Jiao rong yu C4107
+REASON: 38.1, cough
+
+NON-URTI: 07
+S/N: 01
+R/N: REC Dalson C1203
+REASON: Sprained Ankle
+
+S/N: 02
+R/N: REC Shaun C1205
+REASON: 37.6, lightheaded
+
+S/N: 03
+R/N: REC Amos C1309
+REASON: Skin irritation
+
+S/N: 04
+R/N: REC Qi Jun C1310
+REASON: Eczema
+
+S/N: 05
+R/N: REC Lim jun yi gavin C4204
+REASON: Chest pain
+
+S/N: 06
+R/N: REC Sim kai rui C4314
+REASON: High temperature
+
+S/N: 07
+R/N: REC Adyl C4408
+REASON: Fever</pre>
+
+<p>Check this list against the Medical tab before sending. Every name on the list needs a Pending entry in the app. Every Pending entry from this morning must be on the list. If they disagree, one of them is wrong. Fix it before you send.</p>
+
+<h3>2.3 When he comes back from the MO</h3>
+<ol class="steps">
+  <li class="phys"><span class="tag-phys">PHYSICAL</span> <strong>Ask him to send you (the COS) a photo of his MC / status chit.</strong> Check what he tells you against the document. The document wins.</li>
+  <li>
+    <strong>Press the ✎ edit button on his row in the Medical tab</strong> and change Pending to the actual outcome.
+    <div class="flow"><div class="lane">
+      <span class="ui-tab">🏥 Medical</span><span class="arr">→</span>
+      <span class="ui-btn small">his row</span><span class="arr">→</span>
+      <span class="ui-btn press">✎</span><span class="arr">→</span>
+      <span class="ui-btn small">Status: Pending → actual</span>
+    </div></div>
+    Change the <strong>Status</strong> dropdown from Pending to the real status. Fill in <strong>Start</strong> and <strong>End</strong>, both inclusive, straight off the chit. The main statuses:
+    <ul>
+      <li><strong>MC</strong> / <strong>Warded</strong>: away from camp. Not counted in strength. Listed under <code>ATTC</code>.</li>
+      <li><strong>LD</strong>: in camp, restricted. Listed under <code>MEDICAL STATUS</code>.</li>
+      <li><strong>Excuse ...</strong> (Heavy Load, Kneeling, Squatting, Uniform, RMJ, Swimming, Prolonged Standing, Upper Limb, Lower Limb): in camp. Listed under <code>MEDICAL STATUS</code>.</li>
+      <li><strong>NIL</strong>: MO cleared him with nothing. Leave the dates blank. The entry closes on its own.</li>
+    </ul>
+    If he got more than one status (for example 2D LD + 4D Excuse RMJ), press <span class="ui-btn small">＋ Add another status</span> in the same form. One recruit, one entry, many statuses.
+    <br><span class="why">If he got an MC but stays in camp to consume it, tick <strong>Consume in camp</strong>. He then counts in strength and shows under <code>MEDICAL STATUS</code> instead of <code>ATTC</code>.</span>
+  </li>
+  <li class="phys"><span class="tag-phys">PHYSICAL</span> <strong>Have him sign out of the report sick book.</strong></li>
+  <li class="phys"><span class="tag-phys">PHYSICAL</span> <strong>If his status needs a yellow band, draw one and sign it out in the status band book.</strong> When the status ends, collect the band and sign it back in. The app does not track bands. The band book is the only record. Keep it as tight as the app.</li>
+</ol>
+
+<div class="ui-modal">
+  <div class="bar"><span>Edit Report Sick Entry</span><span class="x">✕</span></div>
+  <div class="body">
+    <div class="ui-field"><div class="lab">Recruit</div><div class="val">REC Dalson &middot; C1203</div></div>
+    <div class="ui-field"><div class="lab">Reason</div><div class="val">Sprained Ankle</div></div>
+    <div class="ui-field"><div class="lab">Status</div><div class="val select press">LD</div><span class="press-note">← was Pending</span></div>
+    <div class="ui-field"><div class="lab">Start (inclusive)</div><div class="val">15/05/2026</div></div>
+    <div class="ui-field"><div class="lab">End (inclusive)</div><div class="val">16/05/2026</div></div>
+    <div class="ui-check"><span class="box on">＋</span>Additional status: <strong>Excuse Lower Limb</strong> &middot; 15/05 to 21/05</div>
+    <div class="ui-footerbtns"><span class="ui-btn primary">Save</span></div>
+  </div>
+</div>
+
+<div class="callout">
+  <div class="t">Statuses expire on their own. You do not close them.</div>
+  <p>A status is active from Start to End, both inclusive. After an MC or LD ends, the app shows a recovery tag (<code>MC+1</code>, <code>MC+2</code>, <code>LD+1</code>) for a day or two. The recruit is back at training but watched. Leave the entry alone unless the MO extends or changes it. In that case, ✎ edit the dates.</p>
+</div>
+
+<div class="scenario">
+  <div class="t">Recruit reports sick outside camp during his weekend</div>
+  <p>REC Amos messages you on Saturday night. He saw a GP and got 2 days MC. Log it now, not on Monday. <span class="ui-tab">🏥 Medical</span> → <span class="ui-btn small primary">+ Log Report Sick</span>. Put the clinic name in <strong>Location</strong>. That is what the field is for. Set status <strong>MC</strong> with the dates from his MC photo. Sunday's and Monday's parade states are now correct, and he shows under <code>ATTC</code> on his own. When he books in, do the report sick book and band book steps.</p>
+</div>
+
+<!-- ================= 3 BOOK OUT ================= -->
+<h2><span class="num">3</span>Book out and book in</h2>
+<p>Anyone who leaves camp for any reason other than an active MC or Warded status must be booked out. The record must also end at the right time. One form handles it all: <strong>Book Out of Camp</strong>.</p>
+
+<h3>3.1 The one form</h3>
+<div class="flow"><div class="lane">
+  <span class="ui-tab">👥 Roster</span><span class="arr">→</span>
+  <span class="ui-btn small">person's row, Camp column</span><span class="arr">→</span>
+  <span class="ui-btn press">🚪 Book out</span>
+  <span class="arr" style="margin-left:4mm">or</span>
+  <span class="ui-tab">📅 Out / Leave</span><span class="arr">→</span>
+  <span class="ui-btn primary">+ Log</span>
+</div></div>
+
+<div class="ui-modal">
+  <div class="bar"><span>Book Out of Camp</span><span class="x">✕</span></div>
+  <div class="body">
+    <div class="ui-field"><div class="lab">Apply to</div><div class="val select">One person…</div>
+      <div class="hint">Other options: Whole company (n) &middot; Platoon 1..4 (n) &middot; each program (n) &middot; ⦿ groups (n) &middot; ▣ combined groups (n)</div></div>
+    <div class="ui-field"><div class="lab">Out of camp for</div>
+      <div class="ui-pills"><span class="pill on">Today only</span><span class="pill">Date range (leave)</span></div>
+      <div class="hint">Today only: counted out for the rest of today, automatically booked back in tomorrow.<br>Date range: logs a dated Leave / Out record with a Type, Start, End, and Days.</div></div>
+    <div class="ui-field"><div class="lab">Reason / notes</div><div class="val" style="color:var(--muted)">MO / Appointment / NDP rehearsal…</div></div>
+    <div class="ui-footerbtns"><span class="ui-btn danger">🚪 Book out for today</span><span class="ui-btn">Cancel</span></div>
+  </div>
+</div>
+
+<p><strong>Today only</strong> is for same-day moves: sent to a hospital, an appointment, an errand. It clears at midnight. If the person is still away the next morning, he needs a new record, or should have had a date range from the start.</p>
+<p><strong>Date range (leave)</strong> is for anything longer. Pick a Type: <em>Off-in-Lieu, Annual Leave, Compassionate Leave, Weekend, Night's Out, Course, Guard Duty, NDP, Other</em>. Start and End are inclusive. The person counts as out for every day in the range. He counts back in from the day after End.</p>
+
+<h3>3.2 The four levers on a person's row</h3>
+<table class="ref">
+  <tr><th>Button</th><th>When you press it</th></tr>
+  <tr><td><span class="ui-btn small">🚪 Book out</span></td><td>He is stepping out of camp. Opens the form above.</td></tr>
+  <tr><td><span class="ui-btn small">↩ Book in</span></td><td>He came back from a same-day book-out before midnight. Reverses today's book-out. He counts present again now.</td></tr>
+  <tr><td><span class="ui-btn small">✓ Book in anyway</span></td><td>The app says he is out on MC or leave, but he is in camp today. Counts him present for today only. Shows <em>In camp &middot; manual</em>.</td></tr>
+  <tr><td><span class="ui-btn small">✕ Undo book-in</span></td><td>You pressed a book-in button by mistake.</td></tr>
+</table>
+<p>To change the dates of a leave record (early or late book-in), go to <span class="ui-tab">📅 Out / Leave</span> and press <span class="ui-btn small">✎</span> on the record. This opens <strong>Edit Leave/Out Entry</strong>. Adjust End and Days so the app books him back in on the right day.</p>
+
+<div class="scenario">
+  <div class="t">MO sends a recruit out to CGH, with an escort commander</div>
+  <ol class="steps">
+    <li><strong>Book out the recruit, Today only.</strong> Roster → his row → <span class="ui-btn small">🚪 Book out</span> → <strong>Today only</strong> → Reason: <em>Sent out to CGH from MO</em>. Strength is now correct while he is at the hospital.</li>
+    <li><strong>Book out the escort commander the same way.</strong> Reason: <em>CGH escort for C1203</em>. Commanders count in strength too. Miss the escort and the <code>COMMANDERS</code> line is wrong.</li>
+    <li><strong>When the outcome comes back, update the recruit's medical entry.</strong> Medical tab → <span class="ui-btn small">✎</span> his Pending row → set <strong>Warded</strong> or <strong>MC</strong> with the real dates. From tomorrow, the medical status covers his absence in <code>ATTC</code>. The today-only book-out expires at midnight. No gap, no double count.</li>
+    <li><strong>Update the commander's book-in timing.</strong> If he returns tonight, press <span class="ui-btn small">↩ Book in</span> on his row as soon as he is back. Any report after that shows him in camp. If he stays overnight with the recruit, book him out again in the morning, or log a Date range that covers the stay.</li>
+  </ol>
+</div>
+
+<h3>3.3 Medical appointments</h3>
+<p>Appointments follow a fixed chain. The section commander receives the appointment request. He informs the COS. The COS logs it in the app at once. The parade state then carries it under <code>MEDICAL APPT</code> until the day itself. No appointment lives only in someone's head.</p>
+
+<div class="flow"><div class="lane">
+  <span class="ui-tab">Section comd gets appointment request</span><span class="arr">→</span>
+  <span class="ui-tab">informs COS</span><span class="arr">→</span>
+  <span class="ui-tab">📊 Dashboard</span><span class="arr">→</span>
+  <span class="ui-btn small">📅 Upcoming Appointments</span><span class="arr">→</span>
+  <span class="ui-btn primary press">+ Book</span>
+</div></div>
+
+<div class="ui-modal">
+  <div class="bar"><span>Book Appointment</span><span class="x">✕</span></div>
+  <div class="body">
+    <div class="ui-field"><div class="lab">Recruit</div><div class="val select">REC Dalson &middot; C1203</div></div>
+    <div class="ui-field"><div class="lab">Reason</div><div class="val">Knee specialist review</div><div class="hint">e.g. Knee specialist review / IPPT retake / Board…</div></div>
+    <div class="ui-field"><div class="lab">Date / Time</div><div class="val">22/05/2026 &middot; 0930</div></div>
+    <div class="ui-field"><div class="lab">Location</div><div class="val">CGH</div><div class="hint">e.g. MO Office / SAFTI MC / Camp HQ…</div></div>
+    <div class="ui-check press"><span class="box on">✓</span>Out of camp (recruit leaves camp for this appointment)</div>
+    <div><span class="press-note">← tick this if he will leave camp for it</span></div>
+    <div class="ui-check"><span class="box"></span>Mark as resolved (hides from dashboard + parade state)</div>
+    <div class="ui-footerbtns"><span class="ui-btn primary">Book</span></div>
+  </div>
+</div>
+
+<p>After you press <strong>Book</strong>:</p>
+<ul>
+  <li>The appointment shows on the Dashboard under <strong>📅 Upcoming Appointments</strong>, and in every parade state under <code>MEDICAL APPT</code>, until you resolve it.</li>
+  <li>On the day, the row gets a <strong>TODAY</strong> badge and a one-tap <span class="ui-btn small">🚪 Out</span> button. Press it when he leaves camp. It books him out with reason <code>Appt: &lt;reason&gt;</code>. In the parade state he moves to <code>OTHERS</code> as <code>&lt;reason&gt; (MA)</code>, with Location, Date, and Time.</li>
+  <li>When he returns, press <span class="ui-btn small">↩ Book in</span> on the same row.</li>
+  <li>After the appointment is over, press <span class="ui-btn small">✓</span> on the row. That marks it resolved and removes it from the dashboard and the parade state.</li>
+  <li>If the appointment gave him a new status, log it in the Medical tab (Section 2.3).</li>
+</ul>
+<p>The FP / LP modal also shows a checklist: <em>📅 Outside appointments today — tick = booked OUT of camp</em>. Use it to confirm who is really out at parade time.</p>
+
+<div class="scenario">
+  <div class="t">Knee specialist appointment, start to finish</div>
+  <p>On 16/05, Dalson's section commander receives an appointment slip: knee specialist review at CGH, 22/05 at 0930H. He informs the COS the same day. The COS logs it at once: Dashboard → <span class="ui-btn small primary">+ Book</span>, with <strong>Out of camp</strong> ticked. From 16/05 to 22/05, every parade state lists the appointment under <code>MEDICAL APPT</code>. No one is surprised on the day. On 22/05 at 0830H, Dalson leaves camp. The COS presses <span class="ui-btn small">🚪 Out</span> on the appointment row. The morning parade state shows him under <code>OTHERS</code> as <em>Knee specialist review (MA)</em>. He returns at 1400H. The COS presses <span class="ui-btn small">↩ Book in</span>. The specialist gave him 2 weeks of Excuse Lower Limb, so the COS logs it in the Medical tab (Section 2.3). Last, the COS presses <span class="ui-btn small">✓</span> on the appointment row to resolve it.</p>
+</div>
+
+<div class="scenario">
+  <div class="t">Weekend: BMT stays in, PTP books out</div>
+  <ol class="steps">
+    <li><strong>Book out PTP as a block.</strong> <span class="ui-tab">📅 Out / Leave</span> → <span class="ui-btn small primary">+ Log</span> → <strong>Apply to:</strong> the PTP program → <strong>Date range (leave)</strong> → Type <strong>Weekend</strong> → Start Saturday, End Sunday. The app shows the head-count and skips anyone already out (on MC, on leave). Read that message. Make sure the number matches reality before you press <span class="ui-btn small">📅 Log leave / out</span>.</li>
+    <li><strong>Do nothing for BMT.</strong> Never log people who stay in camp. Log movement only.</li>
+    <li><strong>Book-in timing.</strong> With End = Sunday, everyone counts back in from Monday 0000H. Monday's First Parade State is then correct on its own. At Sunday-night book-in, check faces against the <span class="ui-tab">📅 Out / Leave</span> list. If someone did not book in, extend his record (✎ → push End out) and chase him. The app must never say he is in camp when he is not.</li>
+    <li><strong>Exceptions in the block.</strong> A PTP recruit staying in for the weekend: press <span class="ui-btn small">✓ Book in anyway</span> on him each day he is in, or ✎ his own leave record. A recruit back early on Sunday morning: ✎ his record, End = Saturday.</li>
+  </ol>
+</div>
+
+<div class="scenario">
+  <div class="t">Night's out</div>
+  <p>The company gets an evening out and is back by 2200H the same day. Use <strong>Date range (leave)</strong> with Type <strong>Night's Out</strong>. That type means same day, evening off camp. Scope: <strong>Whole company</strong> or the platoons going. Check everyone at book-in. The records close on their own after the day ends.</p>
+</div>
+
+<div class="callout warn">
+  <div class="t">Booking out people who are already out</div>
+  <p>Bulk book-outs skip people who are already out on MC or leave, and tell you how many they skipped. If you book out one person who is already out, the app blocks you and says so. Never add a second record "to be safe". One person, one reason for being out. Double records break the strength count.</p>
+</div>
+
+<!-- ================= 4 CONDUCTS ================= -->
+<h2><span class="num">4</span>Logging conduct attendance</h2>
+<p>Log every conduct through the wizard, right after the conduct or during it.</p>
+<div class="flow"><div class="lane">
+  <span class="ui-tab">📋 Attendance</span><span class="arr">→</span>
+  <span class="ui-btn primary press">+ Log Conduct</span>
+</div></div>
+
+<div class="ui-modal" style="max-width:135mm">
+  <div class="bar"><span>Log Conduct</span><span class="x">✕</span></div>
+  <div class="body">
+    <div class="ui-field"><div class="lab">Date / Time (HHMM) / Conduct</div><div class="val">16/05/2026 &middot; 0730 &middot; 8km Route March</div></div>
+    <div class="ui-field"><div class="lab">Program / Scope</div>
+      <div class="ui-pills"><span class="pill on">PTP</span><span class="pill">BMT</span><span class="pill">Combined</span></div>
+      <div class="hint">Narrower scope… (platoon / group / combined) dropdown below the pills. The scope drives the status list and Total Str.</div></div>
+    <div class="ui-field"><div class="lab">⚕️ Status Personnel</div>
+      <div class="val"><span class="box on" style="display:inline-block;width:3mm;height:3mm;background:var(--ink);border-radius:.5mm;margin-right:1.5mm"></span>C1203 Dalson &middot; LD + Excuse Lower Limb &middot; <em>not participating</em></div>
+      <div class="hint">Everyone in scope with an active status, auto-ticked (= not participating) if the status is restrictive. Tap a row to flip it if he actually takes part.</div></div>
+    <div class="ui-field"><div class="lab">📋 Report Sick</div><div class="hint">Dropped out mid-conduct AND went to the MO afterward. Auto-creates a Pending Medical row.</div></div>
+    <div class="ui-field"><div class="lab">💤 Fallout</div><div class="hint">Dropped out mid-conduct, did NOT go to the MO.</div></div>
+    <div class="ui-field"><div class="lab">Totals</div><div class="val">Total Str 45 &middot; Status 3 &middot; Rpt Sick 1 &middot; Fallout 1 &middot; Participating (auto) 40</div></div>
+    <div class="ui-footerbtns"><span class="ui-btn primary">💾 Save + Copy chat</span><span class="ui-btn">Cancel</span></div>
+  </div>
+</div>
+
+<ol class="steps">
+  <li><strong>Header:</strong> date, time in HHMM, and the conduct.</li>
+  <li><strong>Scope:</strong> tap the program pill, or Combined. Narrow to a platoon, ⦿ group, or ▣ combined group if the conduct is smaller. Scope sets the Total Str and the status list, so get it right first.</li>
+  <li><strong>Status Personnel:</strong> the wizard lists everyone in scope with an active medical status. It auto-marks the restrictive ones (MC, LD, Excuses) as not participating. Check the list. Tap a row to flip it. Add a short reason where useful.</li>
+  <li><strong>Report Sick vs Fallout:</strong> <em>Report Sick</em> means he dropped out and went to the MO. The app then creates a Pending Medical row for him. Handle it like any report sick (Section 2): book, Linktree, then ✎ upgrade when the outcome is back. <em>Fallout</em> means he dropped out and did not see the MO. Use <span class="ui-btn small">+ Add</span> per person, or <span class="ui-btn small">+ Add group</span> for a whole group.</li>
+  <li><strong>Check the totals card. Press</strong> <span class="ui-btn small primary">💾 Save + Copy chat</span>. The WhatsApp message is copied for you. Paste it into the conduct chat. To copy it again later, press <span class="ui-btn small">📋</span> on the conduct's row.</li>
+</ol>
+
+<div class="scenario">
+  <div class="t">Route march, one man down mid-march</div>
+  <p>PTP does an 8km route march. REC Shaun falls out at 6km and is walked to the MO. In the wizard: scope pill <strong>PTP</strong>. The status list already shows Dalson (Excuse Lower Limb) marked out. Add Shaun under <strong>📋 Report Sick</strong>. On save, the app tells you it created a Pending Medical row. That row is now a live report sick: book, Linktree form, and ✎ upgrade on the Medical tab when the MO gives him 2D LD. Forget this and tomorrow's parade state is wrong.</p>
+</div>
+
+<div class="scenario">
+  <div class="t">Excused recruit insists he can participate</div>
+  <p>REC Qi Jun has Excuse Heavy Load. Today's conduct is a classroom lesson. The wizard auto-marks him as not participating. But he is sitting in the lesson. Tap his row to flip him to participating. The auto-mark is a default, not the truth. You confirm reality.</p>
+</div>
+
+<!-- ================= 5 GROUPS ================= -->
+<h2><span class="num">5</span>Groups</h2>
+<p>Groups are ad-hoc squads that cut across platoons: guard duty, details, rehearsal parties. Use them so bulk actions hit exactly the right people.</p>
+<div class="flow"><div class="lane">
+  <span class="ui-tab">👥 Roster</span><span class="arr">→</span>
+  <span class="ui-btn press">⦿ Groups</span><span class="arr">→</span>
+  <span class="ui-btn small">New group: "Guard Duty"</span><span class="arr">→</span>
+  <span class="ui-btn small primary">Create + pick members</span>
+</div></div>
+<ul>
+  <li><strong>⦿ Groups</strong>: name it, pick members, done. <span class="ui-btn small">✎ Members</span> edits the list later. Deleting a group does not touch the members.</li>
+  <li><strong>▣ Combined groups</strong> mix platoons, programs, and groups with + and −. Tap a chip once to include (+). Tap again to exclude (−). Example: tap <em>P4</em>, then tap <em>⦿ Guard Duty</em> twice. You get <strong>P4 − Guard Duty</strong>: all of Platoon 4 except guard duty.</li>
+  <li>Groups show up as scopes in the <strong>Book Out</strong> form and the <strong>conduct wizard</strong>, and as a filter in the top bar.</li>
+</ul>
+<div class="scenario">
+  <div class="t">Guard duty draw</div>
+  <p>Eight recruits from three platoons go on guard duty at another camp, out Friday to Saturday. Create group <strong>Guard Duty</strong> with those eight. Book Out form → Apply to <strong>⦿ Guard Duty (8)</strong> → Date range → Type <strong>Guard Duty</strong> → Fri to Sat. For Saturday's PT, log the conduct with a scope like <strong>▣ P4 − Guard Duty</strong> where needed. Total Str is then right without hand-counting.</p>
+</div>
+
+<!-- ================= 6 PARADE STATE ================= -->
+<h2><span class="num">6</span>Generating the parade state</h2>
+<div class="flow"><div class="lane">
+  <span class="ui-tab">📊 Dashboard</span><span class="arr">→</span>
+  <span class="ui-btn press">📋 Generate Report ▾</span><span class="arr">→</span>
+  <span class="ui-btn small">📋 First Parade State</span> <span style="color:var(--muted)">/</span> <span class="ui-btn small">📋 Last Parade State</span>
+</div></div>
+<ol class="steps">
+  <li><strong>Set Date and Time (HHMM).</strong></li>
+  <li><strong>Work the checklists.</strong> The modal shows <em>⚠ Borderline returnees: MC/Warded ended yesterday</em>. These people should be back in camp. Tick anyone who has <strong>not</strong> booked in yet. They stay in <code>ATTC</code>. The modal also shows today's appointments. This is the app asking you to confirm reality. Answer honestly.</li>
+  <li><strong>Press ↻ Regenerate</strong> if you changed anything. Read the output top to bottom. Then <span class="ui-btn small primary">📋 Copy to Clipboard</span> and paste into WhatsApp.</li>
+</ol>
+
+<pre class="mono">COUGAR COMPANY
+FIRST PARADE STATE
+DATE: 16/05/26 @ 0700
+
+TOTAL STRENGTH: 120
+CURRENT STRENGTH: 111
+PLATOON 1: 27/28
+PLATOON 2: 28/30
+...
+COMMANDERS: 14/15
+
+ATTC: ...            ← MC / Warded, physically away
+REPORT SICK: ...     ← Pending (at the MO, outcome unknown)
+MEDICAL STATUS: ...  ← LD, Excuses, consume-in-camp MC
+MEDICAL APPT: ...    ← upcoming appointments
+OTHERS: ...          ← leave + book-outs (weekend, CGH, escort, appt)</pre>
+
+<p><strong>Before you send any parade state, run this check:</strong></p>
+<ul>
+  <li>Does <code>CURRENT STRENGTH</code> match your physical count? If not, a movement was not logged. Find it and log it. Do not bend the number.</li>
+  <li>Is everyone in <code>ATTC</code> really away? Is everyone in <code>REPORT SICK</code> really at the MO?</li>
+  <li>Is <code>OTHERS</code> exactly the set of people who booked out?</li>
+</ul>
+<p>The text box is editable, but do not use it to patch the data. If the report is wrong, fix the record that made it wrong, then press ↻ Regenerate. If the data cannot be represented in the website, contact <strong>Youqi</strong>.</p>
+<p>The same menu gives you the <strong>🏥 Medical Status List</strong> and <strong>🦵 MSK Report</strong> when asked.</p>
+
+<!-- ================= 7 STRENGTH ================= -->
+<h2><span class="num">7</span>How the app counts strength (know this cold)</h2>
+<p>A person is out of camp today only if one of these three is true:</p>
+<ol>
+  <li>An active <strong>MC or Warded</strong> status covers today, and Consume in camp is not ticked. → shown in <code>ATTC</code>.</li>
+  <li>An active <strong>leave / out record</strong> covers today (Start ≤ today ≤ End). → shown in <code>OTHERS</code>.</li>
+  <li>A <strong>same-day book-out</strong> was pressed today. → shown in <code>OTHERS</code>. Clears at midnight.</li>
+</ol>
+<p><code>CURRENT STRENGTH</code> = <code>TOTAL STRENGTH</code> minus everyone above. So every wrong parade state is one missing or stale record in one of those three places. When a number looks off, check Medical, then Out / Leave, then today's book-outs, in that order.</p>
+
+<!-- ================= 8 SYNC ================= -->
+<h2><span class="num">8</span>Sync discipline</h2>
+<ul>
+  <li>Edits save locally first. Watch the <span class="ui-btn small">⟳</span> sync status at the top right. Where a tab offers <strong>Push to Sheet</strong> after edits, use it.</li>
+  <li>Do not generate a parade state while another device still holds unsynced edits. One device: log, sync, then generate.</li>
+  <li>If sync looks stuck, or two devices disagree, stop editing and contact <strong>Youqi</strong>. Do not fix a sync conflict by typing entries again. That creates duplicates.</li>
+</ul>
+
+<!-- ================= 9 QUICK REF ================= -->
+<h2 class="pagebreak"><span class="num">9</span>Quick reference</h2>
+<table class="ref">
+  <tr><th>When this happens</th><th>You press / do</th></tr>
+  <tr><td>Recruit reports sick</td><td>Medical → <strong>+ Log Report Sick</strong> → status <strong>Pending</strong>, dates blank. Sign report sick book. Linktree form. Send list to Dr. Nigel in format.</td></tr>
+  <tr><td>He returns with MC / status</td><td>Get chit photo, cross-check. Medical → <strong>✎</strong> → real status + Start/End (use <strong>＋ Add another status</strong> for multiples). Sign out of book. Band book if applicable.</td></tr>
+  <tr><td>MO clears him with nothing</td><td>Medical → <strong>✎</strong> → status <strong>NIL</strong>. Sign out of book.</td></tr>
+  <tr><td>MC consumed in camp</td><td>Status MC + tick <strong>Consume in camp</strong> (counts in strength, listed under MEDICAL STATUS).</td></tr>
+  <tr><td>Sent out to hospital (CGH) from MO</td><td>Book out recruit <strong>Today only</strong> + book out escort commander. Later: ✎ medical entry to MC/Warded; <strong>↩ Book in</strong> the commander when back.</td></tr>
+  <tr><td>Appointment request received (via section comd)</td><td>Dashboard → <strong>📅 Upcoming Appointments</strong> → <strong>+ Book</strong>. Tick <strong>Out of camp</strong> if he leaves camp for it. Shows under MEDICAL APPT.</td></tr>
+  <tr><td>Appointment day</td><td>Press <strong>🚪 Out</strong> on the appointment row when he leaves. <strong>↩ Book in</strong> on return. <strong>✓</strong> to resolve after. Log any new status.</td></tr>
+  <tr><td>Weekend book-out (partial company)</td><td>Out / Leave → <strong>+ Log</strong> → scope = the program/platoon/group going out → Date range → Type <strong>Weekend</strong>. Stayers: log nothing. Verify at book-in; ✎ records for stragglers.</td></tr>
+  <tr><td>Person on leave/MC is physically in camp</td><td><strong>✓ Book in anyway</strong> (today only, shows In camp &middot; manual).</td></tr>
+  <tr><td>Leave dates change (early/late book-in)</td><td>Out / Leave → <strong>✎</strong> → adjust End (and Days).</td></tr>
+  <tr><td>Conduct happens</td><td>Attendance → <strong>+ Log Conduct</strong> → scope → review Status Personnel → Report Sick / Fallout → <strong>💾 Save + Copy chat</strong>.</td></tr>
+  <tr><td>Fell out mid-conduct, went to MO</td><td>Wizard <strong>📋 Report Sick</strong> section (auto-creates Pending) → then full report sick loop.</td></tr>
+  <tr><td>Fell out mid-conduct, no MO</td><td>Wizard <strong>💤 Fallout</strong> section.</td></tr>
+  <tr><td>Ad-hoc squad (guard duty, detail)</td><td>Roster → <strong>⦿ Groups</strong> → create, pick members. Use as scope everywhere.</td></tr>
+  <tr><td>FP / LP due</td><td>Dashboard → <strong>📋 Generate Report ▾</strong> → answer Borderline returnees honestly → verify strength vs physical count → Copy.</td></tr>
+  <tr><td>Data cannot be represented in the website</td><td>Contact <strong>Youqi</strong>. Do not guess.</td></tr>
+</table>
+
+<div class="directive">
+  <div class="t">HANDOVER STANDARD</div>
+  <p>You hand over duty with the app matching reality exactly. The report sick book and band book match the Medical tab. No unlogged movements. The next COS should be able to generate a parade state in their first minute of duty and send it without checking anything. That is the standard, because that is what you received.</p>
+</div>
+
+</div>
+</body>
+</html>
