@@ -1,17 +1,17 @@
-// Feature spec for the Roster personal/NOK columns + per-recruit training program
-// in the recruit popup. Seeds two synthetic people into STATE at runtime and
-// drives openPerson() in the real browser, asserting the new cards/badge render
-// for a detailed recruit and stay hidden for a commander.
+// Feature spec for the Roster personal/NOK columns in the recruit popup. Seeds
+// two synthetic people into STATE at runtime and drives openPerson() in the real
+// browser, asserting the cards render for a detailed recruit and stay hidden for
+// a commander.
 const { test, expect } = require("@playwright/test");
 const { seedAndGoto } = require("./support");
 
-test.describe("Roster fields + program in the recruit popup", () => {
-  test("detailed recruit shows program badge + Personal + Next of Kin", async ({ page }) => {
+test.describe("Roster fields in the recruit popup", () => {
+  test("detailed recruit shows Personal + Next of Kin", async ({ page }) => {
     await seedAndGoto(page);
 
     await page.evaluate(() => {
       STATE.roster.push({
-        id: "9901", name: "TEST BMT REC", role: "Recruit", age: "20", program: "BMT",
+        id: "9901", name: "TEST REC", role: "Recruit", age: "20",
         dob: "31/07/2005", bloodType: "O+", fieldOfStudy: "Cybersecurity", gpa: "GPA 3.08",
         smoker: "No", otherMedical: "Asthma", nokName: "Jane Tan", nokRelation: "Mother",
         nokPhone: "91234567", nokOccupation: "Teacher", address: "Blk 1 Test St #01-01"
@@ -21,8 +21,7 @@ test.describe("Roster fields + program in the recruit popup", () => {
 
     const body = page.locator("#modal-body");
     await expect(body).toBeVisible();
-    // Program badge in the header + Personal card fields.
-    await expect(body).toContainText("BMT");
+    // Personal card fields.
     await expect(body).toContainText("Personal");
     await expect(body).toContainText("31/07/2005");
     await expect(body).toContainText("O+");
@@ -38,7 +37,7 @@ test.describe("Roster fields + program in the recruit popup", () => {
     await page.screenshot({ path: "test-results/roster-fields-popup.png", fullPage: true });
   });
 
-  test("commander popup hides the personal/NOK cards and program badge", async ({ page }) => {
+  test("commander popup hides the personal/NOK cards", async ({ page }) => {
     await seedAndGoto(page);
 
     await page.evaluate(() => {

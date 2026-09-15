@@ -2,9 +2,9 @@
 
 A single source of truth for 40 SAR Cougar Company training, medical and fitness data.
 
-Phone-first web app on top of a Google Sheets backend.
-Vanilla JavaScript, no server, no build step, no framework.
-Commanders open it on their phones to manage roster, attendance, medical status, leave, IPPT / route-march / SOC results, and Polar heart-rate analytics.
+Phone-first web app on top of a Postgres backend (Supabase), reached through one Edge Function.
+Vanilla JavaScript, no server of its own, no build step, no framework.
+Commanders open it on their phones to manage roster, attendance, medical status, leave, IPPT results and the movement board.
 
 ## Quick start
 

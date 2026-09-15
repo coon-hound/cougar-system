@@ -30,7 +30,7 @@ Break one of these and `node test/run.js` fails.
 - **The `normalize*` functions must keep emitting the full schema** on every record, blank `startDate` / `endDate` included. The Postgres backend no longer derives columns from row 0's keys the way `writeTab` did, but the frontend still assumes a uniform shape everywhere.
 - **Prefer `upsertRow` / `deleteRowById` over a full-table `pushTab` write.** ID-based surgical writes are cross-device safe; a full-table rewrite clobbers a concurrent edit from another phone.
 - **`apps-script-Code.gs` is a mirror, not the running code**, and it now serves only Gmail, vision and the Telegram bot. The executing copy lives in the Apps Script editor and is updated by pasting this file; edits do not propagate either direction.
-- **Polar is the source of truth for watch participation.** Attendance LMS counts are recomputed from Polar after every pull, so hand-edited LMS values do not stick.
+- **A conduct is logged against a SCOPE**, stored on the record in a field still named `program`: the whole company, a platoon (`plt:N`), a named group (`grp:NAME`) or a saved combined group (`comb:NAME`). The field keeps that name because it also holds archived bare program keys, and the sheet column and the dedup tuple are built on it. Never write `prog:KEY` - it would alias a bare key and split the tuple. The PTP / BMT / Combined program dimension it replaced is gone; archived rows still carrying `PTP`/`BMT` resolve company-wide and keep their original label.
 - **Derived state is derived.** Out-of-camp status and the movement board are computed from their source records, never stored separately. Do not introduce a second copy.
 
 ## The Postgres backend
