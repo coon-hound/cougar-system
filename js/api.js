@@ -54,9 +54,6 @@ const PULL_ASSIGN = {
   medical:       d => STATE.medical = normalizeMedical(d),
   attendance:    d => STATE.attendance = normalizeAttendance(d),
   ippt:          d => STATE.ippt = padD4OnLayer(d),
-  rm:            d => STATE.rm = padD4OnLayer(d),
-  soc:           d => STATE.soc = padD4OnLayer(d),
-  polar:         d => STATE.polar = padD4OnLayer(d),
   conductDetail: d => STATE.conductDetail = normalizeConductDetail(d),
   appointments:  d => STATE.appointments = normalizeAppointments(d),
   leave:         d => STATE.leave = normalizeLeave(d),
@@ -95,13 +92,6 @@ const API = {
       if (data[key]?.length) PULL_ASSIGN[key](data[key]);
     }
     if (data.revs) STATE.rev = data.revs;   // baseline per-tab revisions (sheet-keyed)
-    // Re-sync LMS counts from polar after every pull. Polar entries are the
-    // source of truth for "who wore the watch" = LMS participation; this
-    // keeps the attendance LMS column auto-correct without manual button
-    // clicks. Safe to call when conducts/polar are empty — no-ops in that case.
-    if (typeof recomputeAttendanceLmsFromPolar === "function") {
-      recomputeAttendanceLmsFromPolar();
-    }
     saveLocal();
     return data;
   },
@@ -123,12 +113,6 @@ const API = {
       const key = TAB_TO_STATE[sheet];
       if (key && PULL_ASSIGN[key] && Array.isArray(rows)) { PULL_ASSIGN[key](rows); changed = true; }
       if (rev != null) STATE.rev[sheet] = rev;
-    }
-    // LMS counts derive from polar; only recompute if polar or attendance was
-    // among the refreshed tabs (otherwise current LMS already reflects polar).
-    if (changed && (sheetNames.includes("PolarFlow") || sheetNames.includes("Attendance"))
-        && typeof recomputeAttendanceLmsFromPolar === "function") {
-      recomputeAttendanceLmsFromPolar();
     }
     if (changed) saveLocal();
     return { changed, tabs: sheetNames };
