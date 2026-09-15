@@ -239,4 +239,46 @@ module.exports = async function run() {
     const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
     ok(/^COMPANY: 2\/3$/m.test(out), "still 2 present, chaining is display-only");
   });
+
+  suite("parade: an enlistee's rank comes from the Roster, not a constant");
+
+  // The failure this pins: "REC" was written literally into the R/N formatter,
+  // so a cohort promoted to PTE on posting into unit training still paraded as
+  // recruits — against a battalion nominal roll that said otherwise. Rank
+  // MOVES; the generator has to read it. In the 40 SAR line the rank sits
+  // between the 4D and the name: "2201 PTE AWAY GUY".
+  await test("a PTE on the roster parades as PTE", () => {
+    const st = state();
+    for (const r of st.roster) r.rank = "PTE";
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/^\d+\. 2201 PTE AWAY GUY - /m.test(txt2), "expected a PTE line: " + section(txt2, "ATT C"));
+    ok(!/\bREC\b/.test(txt2), "no line may still say REC: " + txt2);
+  });
+
+  await test("a blank rank still falls back to REC", () => {
+    // Every row looked like this before the column carried anything, so the
+    // fallback is what stops this change blanking the rank for whole platoons.
+    const txt2 = loadParade(state()).generateParadeStateText("FP", DATE, "0730");
+    ok(/^\d+\. 2201 REC AWAY GUY - /m.test(txt2), "blank rank must render REC: " + section(txt2, "ATT C"));
+  });
+
+  await test("rank is read per man, not once for the parade", () => {
+    const st = state();
+    st.roster.find(r => r.id === "2201").rank = "PTE";   // the away MC in ATT C
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/^\d+\. 2201 PTE /m.test(txt2), "the promoted man is PTE: " + txt2);
+    ok(/^\d+\. 3405 REC /m.test(txt2), "his platoon-mate is untouched: " + txt2);
+  });
+
+  await test("a commander is still rank + name with no 4D", () => {
+    // A commander's rank is read raw, never through rosterRank: its "REC"
+    // fallback is the enlistee default and would file a specialist as a
+    // recruit. The 00xx id stays administrative while the rank is there.
+    const st = state();
+    st.roster.push({ id: "0012", role: "Commander", name: "Section Comd", rank: "3SG" });
+    st.medical.push({ d4: "0012", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "01 Jul 2026", inCamp: false, location: "" });
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/^\d+\. 3SG SECTION COMD - /m.test(txt2), "commander keeps rank+name: " + txt2);
+    ok(!/0012/.test(txt2), "and never shows a 00xx id: " + txt2);
+  });
 };

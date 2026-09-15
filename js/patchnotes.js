@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 137;
+const APP_VERSION = 138;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 137,
+    v: 138,
     date: "15 Sep 2026",
     title: "The parade state is now the battalion's format",
     intro: "40 SAR asked all five companies to file one common format so HQ can collate the battalion's strength without re-typing it. First and Last Parade State now generate exactly that. Everything you already record still appears - it is just grouped by platoon and written one line per record instead of a five-line block, which is about 65% less text.",
@@ -31,6 +31,17 @@ const PATCH_NOTES = [
       { t: "\ud83c\udf96\ufe0f Pick the command team", d: "The FP/LP screen now asks for CDO, CDS, COS and a PDS per platoon. It rotates daily, so your picks are saved against that parade\u2019s date and the next day starts from the last team you filed." },
       { t: "\ud83d\udd24 The section names changed", d: "MEDICAL STATUS is now STATUS, MEDICAL APPT is now MA, RSI sits under REPORT SICK, and leave has its own OFF/LEAVE section. Warded, guard duty, courses and book-outs all file under OTHERS." },
       { t: "\ud83d\udd0e Compare still works across the change", d: "Comparing today\u2019s state against one you copied before this release still reports the same person-level changes - the old format is still understood." },
+    ],
+  },
+  {
+    v: 137,
+    date: "15 Sep 2026",
+    title: "Platoon 9 has new 4Ds, and everyone is a PTE",
+    intro: "Platoon 9 has been re-sectioned into its Hunter crews, so fourteen men are holding a new 4D today. Their records — medical, IPPT, route march — moved with them, and the app has already thrown away the old numbers. The platoon is also PTE now rather than REC, and the parade state says so.",
+    items: [
+      { t: "🔢 Fourteen new 4Ds in platoon 9", d: "Sections 1, 3 and 4 were re-dealt; section 2 kept the numbers it had. Search still works on either the 4D or the name, and nothing of anyone’s history was left behind on the old number." },
+      { t: "🎖️ PTE, not REC", d: "The parade state, the MSK report and the fitness report all read the rank off the roster now instead of printing REC for every enlistee. Platoons 7 and 8 are unchanged until their posting comes through." },
+      { t: "📱 Your phone reloaded its data once", d: "Opening the app today cleared the cached copy and pulled a fresh one, so a phone could not act on the old seating by mistake. Nothing you had saved is lost — this only affects the local copy." },
     ],
   },
   {
