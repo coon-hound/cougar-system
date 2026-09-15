@@ -17,17 +17,16 @@
     <small>40 SAR COUGAR</small>
     <h2>Data System</h2>
   </div>
-  <button class="nav-btn active" data-nav="dashboard"><span>📊</span><span>Dashboard</span></button>
-  <button class="nav-btn" data-nav="roster"><span>👥</span><span>Roster</span></button>
-  <button class="nav-btn" data-nav="attendance"><span>📋</span><span>Attendance</span></button>
-  <button class="nav-btn" data-nav="detail"><span>🔎</span><span>Detail</span></button>
-  <button class="nav-btn" data-nav="medical"><span>🏥</span><span>Medical</span></button>
-  <button class="nav-btn" data-nav="ippt"><span>🏃</span><span>IPPT</span></button>
-  <button class="nav-btn" data-nav="leave"><span>📅</span><span>Out / Leave</span></button>
-  <button class="nav-btn" data-nav="mskAnalytics"><span>📊</span><span>MSK Analytics</span></button>
-  <button class="nav-btn" data-nav="conducts"><span>🏷️</span><span>Conducts</span></button>
-  <button class="nav-btn" data-nav="usage"><span>📈</span><span>Usage</span></button>
-  <button class="nav-btn" data-nav="sync"><span>🔄</span><span>Sync & I/O</span></button>
+  <button class="nav-btn active" data-nav="dashboard"><span class="nav-ico" aria-hidden="true">▤</span><span>Dashboard</span></button>
+  <button class="nav-btn" data-nav="roster"><span class="nav-ico" aria-hidden="true">☰</span><span>Roster</span></button>
+  <button class="nav-btn" data-nav="attendance"><span class="nav-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
+  <button class="nav-btn" data-nav="detail"><span class="nav-ico" aria-hidden="true">⌕</span><span>Detail</span></button>
+  <button class="nav-btn" data-nav="medical"><span class="nav-ico" aria-hidden="true">✚</span><span>Medical</span></button>
+  <button class="nav-btn" data-nav="ippt"><span class="nav-ico" aria-hidden="true">▲</span><span>IPPT</span></button>
+  <button class="nav-btn" data-nav="leave"><span class="nav-ico" aria-hidden="true">↗</span><span>Out / Leave</span></button>
+  <button class="nav-btn" data-nav="mskAnalytics"><span class="nav-ico" aria-hidden="true">◆</span><span>MSK Analytics</span></button>
+  <button class="nav-btn" data-nav="conducts"><span class="nav-ico" aria-hidden="true">⊞</span><span>Conducts</span></button>
+  <button class="nav-btn" data-nav="sync"><span class="nav-ico" aria-hidden="true">↻</span><span>Sync & I/O</span></button>
   <div id="sidebar-footer">
     <div id="sync-indicator">● Not synced</div>
     <div id="str-counter"></div>
@@ -41,7 +40,7 @@
 <div id="main">
   <div id="topbar">
     <button id="mobile-nav-toggle" aria-label="Open menu">☰</button>
-    <span class="topbar-search-icon">🔍</span>
+    <span class="topbar-search-icon" aria-hidden="true">⌕</span>
     <input id="search-input" placeholder="Search 4D or Name...">
     <div id="search-results" style="display:flex;gap:4px;flex-wrap:wrap"></div>
     <button id="mobile-filter-toggle" aria-label="Open scope filter">All</button>
