@@ -612,7 +612,7 @@ function openMedicalForm(id) {
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-custom-save" checked style="width:15px;height:15px"> Save for reuse <span style="color:var(--dim)">(adds it to this dropdown)</span></label>
           <div style="font-size:10px;color:var(--muted)">Custom statuses are in-camp/restricted and don't get +1/+2 recovery tags.</div>
         </div>
-        <label id="f-incamp-wrap" style="display:${(selectedStatus === "MC" || selectedStatus === "Warded") ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, listed under MEDICAL STATUS not ATTC)</span></label>
+        <label id="f-incamp-wrap" style="display:${(selectedStatus === "MC" || selectedStatus === "Warded") ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, and the parade ATT C line is marked IN)</span></label>
         <div class="form-row">
           ${formField("f-start", "Start (inclusive)", "date", "", `value="${startVal}" min="2020-01-01" max="2099-12-31"`)}
           ${formField("f-end", "End (inclusive)", "date", "", `value="${endVal}" min="2020-01-01" max="2099-12-31"`)}
@@ -2029,9 +2029,9 @@ function leaveMany(d4s, t) {
 // previously retyped these by hand from chats; now the dashboard generates
 // an editable preview that round-trips to clipboard in one tap.
 
-// Statuses that have their own dedicated parade-state section (ATTC = MC/Warded,
-// REPORT SICK = Pending) or are cleared (NIL). MEDICAL STATUS is the catch-all
-// for every OTHER active restriction — LD, all Excuses, and any custom/one-off
+// Statuses that have their own dedicated section (ATT C = MC, OTHERS = Warded,
+// REPORT SICK = Pending) or are cleared (NIL). STATUS is the catch-all for
+// every OTHER active restriction — LD, all Excuses, and any custom/one-off
 // status (e.g. "Excuse Jumping") that isn't in the canonical MED_STATUSES list.
 // Using an exclusion predicate instead of a hardcoded allowlist means a new or
 // custom status can never silently fall through the cracks of the report.
@@ -2039,14 +2039,14 @@ const PARADE_SECTIONED_STATUSES = ["MC", "Warded", "Pending", "NIL"];
 const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(s);
 // A medical record counts as "kept in camp" for the parade when the recruit is
 // consuming it in camp (the record's inCamp flag) OR a commander manually booked
-// them IN today (the day-scoped force-in override). Either way they're present in
-// camp, so an MC/Warded belongs under MEDICAL STATUS, never ATTC.
+// them IN today (the day-scoped force-in override). Either way the body is
+// counted present, which is what the parade line's IN marker says.
 const medKeptInCamp = (m, dateIso) =>
   m.inCamp === true || isForcedIn(STATE.roster.find(r => r.id === m.d4), dateIso || todayISO());
-// A record belongs in MEDICAL STATUS if its status is a catch-all restriction
-// (LD/Excuse/custom) OR it's a kept-in-camp MC/Warded (pulled out of ATTC but
-// still needing to show its status). Shared by the parade state and the
-// standalone Medical Status List so the two never diverge.
+// A record belongs in the standalone Medical Status List if its status is a
+// catch-all restriction (LD/Excuse/custom) OR it's a kept-in-camp MC/Warded —
+// that list is a roll of who is restricted, so an MC being consumed in camp
+// belongs on it even though the parade state files it under ATT C.
 const isMedicalStatusRecord = (m, dateIso) =>
   isMedicalStatusCatchAll(m.status) || (medKeptInCamp(m, dateIso) && (m.status === "MC" || m.status === "Warded"));
 
@@ -2114,8 +2114,9 @@ function paradeStatusLabel(record, dateIso, run) {
 // When an MC ends on day N, on day N+1 the system says the recruit is back
 // (medStatusActive returns false), but they might not have booked back in
 // before parade time. The PDS opts each one in/out via checkboxes in the
-// FP/LP report modal. Map of d4 → true means "still ATTC despite the
-// medical record having ended". Cleared on modal open and on date change.
+// FP/LP report modal. Map of d4 → true means "still out despite the medical
+// record having ended" — they file under OTHERS as RETURNING FROM MC and count
+// away in the strength. Cleared on modal open and on date change.
 let _paradeOverrides = {};
 
 function findBorderlineReturnees(dateIso) {
@@ -2142,10 +2143,11 @@ function toggleBorderline(d4, checked, type) {
   regenerateReport(type);
 }
 
-// recordFilter is either an allowlist array (status ∈ list) or a predicate
-// receiving the whole record (m => boolean) — the record form lets a section
-// key off flags like inCamp, not just the status string (MEDICAL STATUS folds
-// in consume-in-camp MCs, ATTC excludes them).
+// Builds the S/N-block section used by the standalone Medical Status List (the
+// parade state composes its own one-line entries). recordFilter is either an
+// allowlist array (status ∈ list) or a predicate receiving the whole record
+// (m => boolean), so a section can key off flags like inCamp, not just the
+// status string.
 function buildMedicalSection(label, dateIso, recordFilter) {
   const matchRecord = typeof recordFilter === "function"
     ? recordFilter
@@ -2163,7 +2165,7 @@ function buildMedicalSection(label, dateIso, recordFilter) {
   Object.keys(byD4).forEach(d4 => { byD4[d4] = dedupeActiveRecordsByFamily(byD4[d4]); });
   // Order recruits by their most-severe status (MC/Warded > LD > Excuse > …) so
   // MEDICAL STATUS lists a consume-in-camp MC above LD/Excuse entries. Stable for
-  // ties; harmless for ATTC/REPORT SICK where every entry shares one severity.
+  // ties; harmless for a single-severity section.
   const groupRank = d4 => Math.max(...byD4[d4].map(m => medSeverityRank(m.status)));
   const peopleIds = Object.keys(byD4).sort((a, b) => groupRank(b) - groupRank(a));
 
@@ -2842,7 +2844,7 @@ function renderBorderlineSection(dateIso, type) {
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:#D2992211;border:1px solid #D2992244;border-radius:6px;padding:8px 10px">
     <div style="color:var(--orange);font-weight:600;margin-bottom:4px">⚠ Borderline returnees (${candidates.length}) — MC/Warded ended yesterday</div>
-    <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be added to ATTC.</div>
+    <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be listed under OTHERS as returning from MC, and counted away.</div>
     ${rows}
   </div>`;
 }
