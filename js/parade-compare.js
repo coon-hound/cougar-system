@@ -132,7 +132,7 @@ function pcSectionOf(label) {
 }
 
 // ─── One-line record parsing (40 SAR format) ────────────
-// "1209 REC IRFAN ... - 4D MC (Conjunctivitis) (010926-040926) OUT @ TTSH"
+// "1101 REC TAN WEI MING - 4D MC (Conjunctivitis) (010926-040926) OUT @ TTSH"
 // splits into the person (left of the first " - ") and the record. The record
 // is peeled from the RIGHT, because only the tail is positional: location
 // after "@", then the OUT/IN marker, then the bracketed dates, leaving the
