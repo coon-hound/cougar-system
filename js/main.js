@@ -281,3 +281,20 @@ function maybeRestoreDirty() {
   }
   if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();
 }
+
+// ── Usage insights: a development tool, not a user-facing view ──────────
+// The usage record exists to tell whoever is building this app what people
+// actually reach for and what it costs them in taps. That is a question for
+// development, not something a section commander needs in their sidebar, so
+// the view has no nav button. Collection still runs for everyone - that is
+// the whole point of measuring real use rather than guessing.
+//
+// Reach it with #usage in the URL, or call showUsage() from the console.
+function showUsage() {
+  STATE.nav = "usage";
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  render();
+  closeMobileSidebar();
+}
+if (location.hash === "#usage") showUsage();
+window.addEventListener("hashchange", () => { if (location.hash === "#usage") showUsage(); });
