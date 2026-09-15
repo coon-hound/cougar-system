@@ -36,15 +36,17 @@ export const ORDER = "alphabetical";
  * out of a chat message, em dashes, emoji, stray commas and all.
  *
  *   SECTION 1 — 9
- *   HU CHEN — 🔵 Hunter Driver
- *   HO SAM HIN, JAYDEN — 🟢 AI
- *   AHMAD BAHAGGI BIN JURAIMI [9101] — 🟢 AI
+ *   LI WEI — 🔵 Hunter Driver
+ *   NG SOON KIT, DARREN — 🟢 AI
+ *   ZAKIR MAHFUZ BIN OMAR [5101] — 🟢 AI
+ *
+ * (Invented names. This repository is public; real ones never go in it.)
  *
  * A trailing `[4D]` PINS that line to a specific roster row. It is how the
  * operator settles a name the matcher will not guess at — see planReseat.
  *
  * The em dash is the field separator and a plain hyphen is NOT, because names
- * contain hyphens ("NUR-AQIF BIN AMRAN") and splitting on those would truncate
+ * contain hyphens ("NUR-HAKIM BIN SALLEH") and splitting on those would truncate
  * them. A line with no dash at all is taken as a bare name.
  */
 export function parseSections(text) {
@@ -80,7 +82,7 @@ export function parseSections(text) {
       name = name.slice(0, pinned.index).trim();
     }
 
-    // A comma is punctuation in "HO SAM HIN, JAYDEN", never a field separator.
+    // A comma is punctuation in "NG SOON KIT, DARREN", never a field separator.
     name = name.replace(/,/g, " ").replace(/\s+/g, " ").trim();
     if (!name) {
       issues.push({ level: "error", line: i + 1, message: `line ${i + 1} has no name` });
@@ -97,7 +99,7 @@ export function parseSections(text) {
 //
 // It is here because token-set similarity, which is what the intake matcher
 // uses, is blind to the failure mode this tool actually meets: a single
-// mistyped character INSIDE a token. "BAHAGGI" against "BAIHAQQI" shares no
+// mistyped character INSIDE a token. "MAHFUZ" against "MAHFOOZ" shares no
 // token at all and scores 0, while a human reads them as obviously the same
 // man. Bigrams see the overlap. That is a good reason to rank with it and a
 // terrible reason to trust it, so it ranks and the human decides.

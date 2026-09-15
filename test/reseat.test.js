@@ -11,12 +11,34 @@
 // So the cases below are weighted towards the matcher and the closed-set check,
 // which is the property that makes the rest safe. Names here are invented —
 // this repository is public.
+const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { suite, test, ok, eq } = require("./_tap");
 
 const ROOT = path.resolve(__dirname, "..");
 const PLAN = pathToFileURL(path.join(ROOT, "scripts/reseat-plan.mjs")).href;
+
+// Every name that may legitimately appear in a SECTION example anywhere in this
+// repository. Adding one is a deliberate act — which is the entire point.
+//
+// This list exists because a real platoon's section list DID land in this
+// public repository once: the operator's pasted list is the natural thing to
+// copy into a doc comment or a test, it arrives full of real names, and one of
+// them was written next to its real 4D. `*.csv` is gitignored for the same
+// reason (see CLAUDE.md); this covers the vector gitignore cannot.
+const INVENTED_NAMES = new Set([
+  "ALPHA TAN", "BRAVO LIM", "CHARLIE NG", "DELTA WONG", "ECHO SIM",
+  "FOXTROT KOH", "ZULU COMMANDER", "ALFA TAN",
+  "LI WEI", "NG SOON KIT DARREN", "GORDON YEO",
+  "NUR-HAKIM BIN SALLEH", "ZAKIR MAHFUZ BIN OMAR", "ZAKIR MAHFOOZ BIN OMAR",
+]);
+
+// Files that can carry a SECTION example at all. Everything else must not.
+const SCANNED = [
+  "docs/RESEAT.md", "scripts/reseat-plan.mjs", "scripts/reseat.mjs",
+  "test/reseat.test.js",
+];
 
 let P;
 const load = async () => (P ??= await import(PLAN));
@@ -52,19 +74,19 @@ async function main() {
   });
 
   await test("a hyphen inside a name is not a field separator", async () => {
-    // Splitting on "-" instead of the em dash truncates "NUR-AQIF" to "NUR".
-    const { sections } = P.parseSections("SECTION 1 — 1\nNUR-AQIF BIN AMRAN — 🟢 AI\n");
-    eq(sections[0].members[0].name, "NUR-AQIF BIN AMRAN");
+    // Splitting on "-" instead of the em dash truncates "NUR-HAKIM" to "NUR".
+    const { sections } = P.parseSections("SECTION 1 — 1\nNUR-HAKIM BIN SALLEH — 🟢 AI\n");
+    eq(sections[0].members[0].name, "NUR-HAKIM BIN SALLEH");
   });
 
   await test("a comma is punctuation, not a separator", async () => {
-    const { sections } = P.parseSections("SECTION 1 — 1\nHO SAM HIN, JAYDEN — 🟢 AI\n");
-    eq(sections[0].members[0].name, "HO SAM HIN JAYDEN");
+    const { sections } = P.parseSections("SECTION 1 — 1\nNG SOON KIT, DARREN — 🟢 AI\n");
+    eq(sections[0].members[0].name, "NG SOON KIT DARREN");
   });
 
   await test("tolerates a missing space before the dash and trailing spaces", async () => {
-    const { sections } = P.parseSections("SECTION 1 — 2\nLESTER LIM— 🟢 AI\nALPHA TAN  — 🔴 Gunner\n");
-    eq(sections[0].members.map((m) => m.name), ["LESTER LIM", "ALPHA TAN"]);
+    const { sections } = P.parseSections("SECTION 1 — 2\nGORDON YEO— 🟢 AI\nALPHA TAN  — 🔴 Gunner\n");
+    eq(sections[0].members.map((m) => m.name), ["GORDON YEO", "ALPHA TAN"]);
   });
 
   await test("a trailing [4D] pins the line and is stripped from the name", async () => {
@@ -201,13 +223,99 @@ async function main() {
   suite("reseat — ranking a near miss");
 
   await test("bigrams see a typo inside a token that token-sets are blind to", async () => {
-    // The real failure mode: "BAHAGGI" and "BAIHAQQI" share no whole token, so
+    // The real failure mode: "MAHFUZ" and "MAHFOOZ" share no whole token, so
     // token-set similarity scores them 0 through the surname alone, while a
     // human reads them as obviously the same man.
-    const near = P.rankScore("AHMAD BAHAGGI BIN JURAIMI", "AHMAD BAIHAQQI BIN JURAIMI");
-    const far = P.rankScore("AHMAD BAHAGGI BIN JURAIMI", "ECHO SIM");
+    const near = P.rankScore("ZAKIR MAHFUZ BIN OMAR", "ZAKIR MAHFOOZ BIN OMAR");
+    const far = P.rankScore("ZAKIR MAHFUZ BIN OMAR", "ECHO SIM");
     ok(near > 0.7, `near=${near}`);
     ok(near > far * 3, `near=${near} far=${far}`);
+  });
+
+  suite("reseat — no real name may reach this public repository");
+
+  // Walk the tree, not just the files above: a SECTION block appearing anywhere
+  // ELSE is itself the failure, because that is how a pasted list gets in.
+  const walk = (dir, out = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (/^(node_modules|\.git|test-results|\.claude|\.worktrees)$/.test(e.name)) continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p, out);
+      else if (/\.(md|mjs|js|json|txt|html|gs|ts|sql)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+
+  // Pull SECTION blocks out of a file, tolerating the comment markers they sit
+  // behind (" * " in a JSDoc, "// " in a line comment, "\n" escapes in a test
+  // string literal), then let the REAL parser decide what counts as a name.
+  const namesIn = (text) => {
+    const lines = text
+      .replace(/\\n/g, "\n")
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^\s*(?:\*|\/\/|#)\s?/, "").trim());
+
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^SECTION\s+\d/i.test(lines[i])) continue;
+      // A member line is "<ALL-CAPS NAME> — <role>". The first line that is not
+      // one ends the block — without this bound the scan swallows the rest of
+      // the file and every sentence of prose reads as a name.
+      const block = [lines[i]];
+      for (let j = i + 1; j < lines.length; j++) {
+        const l = lines[j];
+        if (!l || !l.includes("—")) break;
+        const namePart = l.split("—")[0].replace(/\[[^\]]*\]/g, "").trim();
+        if (!namePart || /[a-z]/.test(namePart)) break;
+        block.push(l);
+      }
+      if (block.length > 1) {
+        out.push(
+          ...P.parseSections(block.join("\n")).sections.flatMap((s) =>
+            s.members.map((m) => m.name),
+          ),
+        );
+      }
+    }
+    return out;
+  };
+
+  await test("every name in a SECTION example is one we invented", async () => {
+    const offenders = [];
+    for (const file of walk(ROOT)) {
+      const rel = path.relative(ROOT, file);
+      for (const name of namesIn(fs.readFileSync(file, "utf8"))) {
+        if (!INVENTED_NAMES.has(name)) offenders.push(`${rel}: ${name}`);
+      }
+    }
+    eq(offenders, [], "unrecognised name in a SECTION example — if it is invented, add it to INVENTED_NAMES");
+  });
+
+  await test("SECTION examples live only where we expect them", async () => {
+    const found = walk(ROOT)
+      .filter((f) => namesIn(fs.readFileSync(f, "utf8")).length)
+      .map((f) => path.relative(ROOT, f))
+      .sort();
+    const unexpected = found.filter((f) => !SCANNED.includes(f));
+    eq(unexpected, [], "a pasted section list reached a file that should not carry one");
+  });
+
+  await test("no name sits next to a 4D outside the pin syntax", async () => {
+    // The worst single line that leaked was a name and its real 4D on the same
+    // line of a report example. The pin form (name, then the 4D in brackets) is
+    // legitimate; the candidate-ranking column — 4D, percentage, then the name —
+    // is the shape that gave the pairing away, and a pairing is exactly what
+    // eight encrypted Roster columns exist to prevent.
+    const bad = [];
+    for (const file of walk(ROOT)) {
+      const rel = path.relative(ROOT, file);
+      if (!SCANNED.includes(rel)) continue;
+      fs.readFileSync(file, "utf8").split(/\r?\n/).forEach((line, i) => {
+        const m = line.match(/\b\d{4}\b\s+\d{1,3}%\s+([A-Z][A-Z' -]{3,})/);
+        if (m && !INVENTED_NAMES.has(m[1].trim())) bad.push(`${rel}:${i + 1}: ${m[1].trim()}`);
+      });
+    }
+    eq(bad, [], "a 4D is printed beside a name that is not an invented one");
   });
 
   await test("the report never prints names unless asked", async () => {
