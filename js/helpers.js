@@ -69,60 +69,30 @@ function getSect(r) {
   return m ? m[1] : "";
 }
 
-// ── Training programs (PTP / BMT / Combined) ─────────────
-// The company can split into parallel training programs, each owning a set of
-// platoons (e.g. PTP = Plt 1+4, BMT = Plt 2+3). A conduct is logged per program
-// so the two never collide; "Combined" means both programs together (everyone).
-// The plt→program mapping lives in STATE.programs (editable), but the resolved
-// label is STORED on each conduct record so it's authoritative and never drifts.
-const PROGRAM_COMBINED = "Combined";
+// ── Conduct scope ────────────────────────────────────────────────
+// A conduct is logged against a SCOPE: the whole company, one platoon, a named
+// group, or a saved combined group. The resolved value is STORED on each
+// conduct record (the `program` field, kept under that name so the sheet
+// column, the dedup tuple and every archived row stay byte-identical).
+//
+// This replaced a PTP / BMT / Combined program dimension, which split the
+// company into parallel training programs owning fixed platoons. Intake 16
+// does not split that way, and the platoon map it depended on (1+4 / 2+3) died
+// with the platoons themselves. Archived records still carry their old bare
+// program key; those read as company-wide and keep their original label.
+const SCOPE_COMPANY = "company";
 
-// Single choke point for legacy rows: any conduct record written before programs
-// existed (no `program` field) reads as "Combined" so history keeps working.
-const progKey = x => (x && x.program) ? String(x.program) : PROGRAM_COMBINED;
-
-// Program key owning a given platoon string, or "" if unmapped.
-function programOfPlt(plt) {
-  if (plt === "" || plt == null) return "";
-  const p = String(plt);
-  const hit = (STATE.programs || []).find(pr => (pr.platoons || []).map(String).includes(p));
-  return hit ? hit.key : "";
-}
-// A recruit's training program. The explicit per-recruit `program` column is
-// authoritative (BMT membership isn't a clean platoon partition — some Plt1/Plt4
-// recruits do BMT); fall back to the platoon→program map only when the column is
-// blank, so recruits added later without a value still resolve sensibly.
-const programOf = r => (r && r.program && String(r.program).trim()) || programOfPlt(getPlt(r));
-
-// Roster (recruits only — commanders aren't tracked in conduct attendance) for a
-// program. Combined / "" / unknown key → all recruits (both programs together).
-function recruitsInProgram(key) {
-  const recruits = STATE.roster.filter(r => r.role !== "Commander");
-  if (!key || key === PROGRAM_COMBINED) return recruits;
-  return recruits.filter(r => programOf(r) === key);
-}
-
-const programLabel = key => {
-  const k = key || PROGRAM_COMBINED;
-  if (k === PROGRAM_COMBINED) return PROGRAM_COMBINED;
-  const hit = (STATE.programs || []).find(pr => pr.key === k);
-  return hit ? (hit.name || hit.key) : k;
-};
-// Distinct CSS-var colour per program for the table badges / pills.
-function programColor(key) {
-  const k = key || PROGRAM_COMBINED;
-  if (k === PROGRAM_COMBINED) return "var(--muted)";
-  const idx = (STATE.programs || []).findIndex(pr => pr.key === k);
-  const palette = ["var(--accent)", "var(--green)", "var(--purple)", "var(--orange)", "var(--yellow)"];
-  return idx >= 0 ? palette[idx % palette.length] : "var(--accent)";
-}
+// Single choke point for legacy rows: a conduct record written before scopes
+// existed (no `program` field) reads as the whole company, as does one written
+// against a program that no longer exists.
+const scopeKey = x => (x && x.program) ? String(x.program) : SCOPE_COMPANY;
 
 // ── Recruit groups (ad-hoc named subsets, e.g. "Guard Duty") ─────
 // A group cuts ACROSS platoons and behaves like the platoon filter/scope.
 // Membership is stored on the Roster row as a comma-delimited `groups` string
 // (synced like `location`), so the whole company shares it; the set of group
 // NAMES is DERIVED from the roster - a group exists exactly while it has ≥1
-// member - so there's one source of truth, same as platoons/programs. Commas
+// member - so there's one source of truth, same as platoons. Commas
 // are the delimiter, so group names must not contain commas (enforced on input).
 function getGroups(r) {
   return String((r && r.groups) || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -134,29 +104,27 @@ function allGroupNames() {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 // Recruit members of a group (commanders excluded, matching strength/conduct/
-// book-out convention). Named distinctly from recruitsInProgram.
+// book-out convention).
 function groupMembers(name) {
   return (STATE.roster || []).filter(r => r.role !== "Commander" && recruitInGroup(r, name));
 }
 
 // ── Combined groups (saved set-formulas) ─────────────────────────
 // A scope token → the recruit d4s it selects (commanders always excluded).
-// Tokens: "company" | "plt:N" | "prog:KEY" | "grp:NAME". THE resolver shared by
+// Tokens: "company" | "plt:N" | "grp:NAME". THE resolver shared by
 // combined-group membership, the filter and the book-out scope, so a combined
 // group means the same everywhere.
 function scopeTokenMembers(token) {
   const recruits = (STATE.roster || []).filter(r => r.role !== "Commander");
   if (token === "company") return recruits.map(r => r.id);
   if (token.indexOf("plt:") === 0) { const p = token.slice(4); return recruits.filter(r => getPlt(r) === p).map(r => r.id); }
-  if (token.indexOf("prog:") === 0) { const k = token.slice(5); return recruits.filter(r => programOf(r) === k).map(r => r.id); }
   if (token.indexOf("grp:") === 0) { const g = token.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
   return [];
 }
-// Human label for a token, e.g. "P4", "PTP", "⦿ Guard Duty", "▣ Night Ex".
+// Human label for a token, e.g. "P4", "⦿ Guard Duty", "▣ Night Ex".
 function scopeTokenLabel(token) {
   if (token === "company") return "Company";
   if (token.indexOf("plt:") === 0) return "P" + token.slice(4);
-  if (token.indexOf("prog:") === 0) return programLabel(token.slice(5));
   if (token.indexOf("grp:") === 0) return "⦿ " + token.slice(4);
   if (token.indexOf("comb:") === 0) return "▣ " + token.slice(5);
   return token;
@@ -182,7 +150,7 @@ function combinedFormula(def) {
 
 // Resolve a scope value to the recruit d4s it selects (commanders excluded).
 // Accepts the same values the book-out picker uses: "company" | "plt:N" |
-// "prog:KEY" | "grp:NAME" | "comb:NAME". Unlike bookOutTargets this is NOT
+// "grp:NAME" | "comb:NAME". Unlike bookOutTargets this is NOT
 // camp-filtered — callers like bulk leave/out want everyone in the scope
 // regardless of their current in/out-of-camp state. "person"/"" → [].
 function scopeRecruits(scope) {
@@ -190,30 +158,38 @@ function scopeRecruits(scope) {
   if (!scope || scope === "person") return [];
   if (scope === "company") return recruits.map(r => r.id);
   if (scope.indexOf("plt:") === 0) { const p = scope.slice(4); return recruits.filter(r => getPlt(r) === p).map(r => r.id); }
-  if (scope.indexOf("prog:") === 0) { const k = scope.slice(5); return recruits.filter(r => programOf(r) === k).map(r => r.id); }
   if (scope.indexOf("grp:") === 0) { const g = scope.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
   if (scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return recruits.filter(r => set.has(r.id)).map(r => r.id); }
   return [];
 }
 
-// ── Conduct scope (program key OR scope token) ───────────────────
-// Conduct records historically store a bare program key ("PTP"/"BMT"/
-// "Combined") in their `program` field. Group-scoped conducts widen that
-// value domain to scope tokens ("plt:N"/"grp:NAME"/"comb:NAME") — the field
-// name, sheet column and dedup tuple stay unchanged, old rows stay byte-
-// identical. "prog:KEY" is never written (it would alias the bare key and
-// break dedup against existing rows).
+// ── Resolving a stored conduct scope ─────────────────────────────
+// A conduct's stored scope is either a token ("plt:N"/"grp:NAME"/"comb:NAME")
+// or the bare company scope. "prog:KEY" is never written here: the field also
+// holds bare values, so a prefixed program key would alias one and split the
+// dedup tuple against existing rows.
 const isConductScopeToken = v => typeof v === "string" && /^(plt|grp|comb):/.test(v);
-// Roster objects (commanders excluded) in a conduct's scope value.
+// Roster objects (commanders excluded) in a conduct's scope value. Anything
+// that is not a token - the company scope, a blank, or an archived program key
+// like "PTP" - resolves to every recruit.
 function conductScopeRoster(v) {
-  if (!isConductScopeToken(v)) return recruitsInProgram(v);
+  if (!isConductScopeToken(v)) return (STATE.roster || []).filter(r => r.role !== "Commander");
   const ids = new Set(scopeRecruits(v));
   return STATE.roster.filter(r => ids.has(r.id));
 }
-const conductScopeLabel = v => isConductScopeToken(v) ? scopeTokenLabel(v) : programLabel(v);
-const conductScopeColor = v => isConductScopeToken(v) ? "var(--purple)" : programColor(v);
+// Legacy program keys are shown verbatim rather than rewritten to "Company":
+// the record really was logged against PTP or BMT, and an archive that relabels
+// itself is worse than one that names something no longer in use.
+const conductScopeLabel = v =>
+  isConductScopeToken(v) ? scopeTokenLabel(v)
+    : (!v || v === SCOPE_COMPANY) ? "Company"
+    : String(v);
+const conductScopeColor = v =>
+  isConductScopeToken(v) ? "var(--purple)"
+    : (!v || v === SCOPE_COMPANY) ? "var(--muted)"
+    : "var(--dim)";
 
-const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram || STATE.filterGroup);
+const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterGroup);
 
 function filteredRoster() {
   if (!isFilterActive()) return STATE.roster;
@@ -221,7 +197,6 @@ function filteredRoster() {
     if (STATE.filterRole && r.role !== STATE.filterRole) return false;
     if (STATE.filterPlt && getPlt(r) !== String(STATE.filterPlt)) return false;
     if (STATE.filterSect && getSect(r) !== String(STATE.filterSect)) return false;
-    if (STATE.filterProgram && programOf(r) !== STATE.filterProgram) return false;
     if (STATE.filterGroup && !filterGroupHas(STATE.filterGroup, r)) return false;
     return true;
   });
@@ -254,7 +229,6 @@ function filterLabel() {
   else if (STATE.filterRole === "Recruit") parts.push("Recs");
   if (STATE.filterPlt) parts.push("P" + STATE.filterPlt);
   if (STATE.filterSect) parts.push("S" + STATE.filterSect);
-  if (STATE.filterProgram) parts.push(programLabel(STATE.filterProgram));
   if (STATE.filterGroup) parts.push(filterGroupLabel(STATE.filterGroup));
   return parts.join(" ");
 }
@@ -421,34 +395,28 @@ function nextConductId() {
 }
 
 // Best-guess time for a conduct based on existing data. Returns the most
-// frequently-logged time (across conductDetail + polar) for matches of
-// the given conductId. Empty string if no match — caller can fall back
-// to a default like "0730".
+// frequently-logged time in conductDetail for matches of the given conductId.
+// Empty string if no match — caller can fall back to a default like "0730".
 function inferTimeForConduct(conductId) {
   if (!conductId) return "";
   const counts = {};
   const tally = (t) => { const k = pad4Time(t); if (k) counts[k] = (counts[k] || 0) + 1; };
   STATE.conductDetail.forEach(c => { if (c.conductId === conductId && c.time) tally(c.time); });
-  STATE.polar.forEach(p => { if (p.conductId === conductId && p.time) tally(p.time); });
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   return sorted.length ? sorted[0][0] : "";
 }
 
 // Best-guess ISO date for a conduct. Looks at attendance first (the canonical
-// "when did this conduct happen" log), falling back to conductDetail. Prefers
-// the most recent date that DOESN'T already have polar data — that's the
-// session the user is most likely about to import photos for. If every
-// attendance date for the conduct already has polar coverage, returns the
-// single most-recent date so the user can still overwrite manually. Empty
-// string when nothing's known (caller can fall back to today).
+// "when did this conduct happen" log), falling back to conductDetail, and
+// returns the most recent. Empty string when nothing's known (caller can fall
+// back to today).
+//
+// This used to prefer the most recent date with NO polar coverage, on the
+// assumption the user was about to import photos for the session that did not
+// have any yet. With Polar gone there is nothing to prefer, so it is simply the
+// latest known date.
 function inferDateForConduct(conductId) {
   if (!conductId) return "";
-  const polarDates = new Set(
-    STATE.polar.filter(p => p.conductId === conductId).map(p => {
-      const iso = displayDateToISO(p.date);
-      return iso || p.date || "";
-    }).filter(Boolean)
-  );
   const candidateDates = [];
   STATE.attendance.forEach(a => {
     if (a.conductId !== conductId) return;
@@ -462,10 +430,7 @@ function inferDateForConduct(conductId) {
   });
   if (!candidateDates.length) return "";
   candidateDates.sort();  // ascending ISO sort
-  // Prefer most-recent date that doesn't yet have polar coverage.
-  const uncovered = candidateDates.filter(d => !polarDates.has(d));
-  const pick = uncovered.length ? uncovered[uncovered.length - 1] : candidateDates[candidateDates.length - 1];
-  return pick;
+  return candidateDates[candidateDates.length - 1];
 }
 
 // Generic delete: removes a row from STATE[arrayName] by id with a confirm
@@ -473,7 +438,7 @@ function inferDateForConduct(conductId) {
 // no need for the user to navigate to the tab and click Re-push all.
 const STATE_TO_TAB = {
   roster: "Roster", medical: "Medical", attendance: "Attendance",
-  ippt: "IPPT", rm: "RouteMarch", soc: "SOC", polar: "PolarFlow",
+  ippt: "IPPT",
   conductDetail: "ConductDetail", appointments: "Appointments",
   leave: "Leave", msk: "MSK", conducts: "Conducts"
 };
@@ -932,13 +897,8 @@ function medDurationLabel(record, run) {
   return `${startLabel} – ${endLabel}${note ? ` (${note})` : ""}`;
 }
 const badge = (text, cls) => `<span class="badge badge-${cls}">${text}</span>`;
-// Program pill — inline-styled (colour is dynamic per program, so it can't use
-// the static badge-<name> classes). Used in the conduct tables.
-const programBadge = key => {
-  const col = programColor(key);
-  return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${programLabel(key)}</span>`;
-};
-// Same pill for a conduct's scope value: program key OR scope token.
+// Conduct scope pill — inline-styled (the colour varies by scope kind, so it
+// can't use the static badge-<name> classes). Used in the conduct tables.
 const conductScopeBadge = v => {
   const col = conductScopeColor(v);
   return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${conductScopeLabel(v)}</span>`;

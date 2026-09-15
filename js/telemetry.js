@@ -59,8 +59,6 @@ const TELEMETRY = (function () {
     attendance:      { start: "openAttendanceForm",     done: "submitAttendance",     label: "Attendance" },
     conduct_detail:  { start: "openConductDetailForm",  done: "submitConductDetail",  label: "Conduct Detail" },
     ippt_entry:      { start: "openIPPTForm",           done: "submitIPPT",           label: "IPPT Entry" },
-    rm_entry:        { start: "openRMForm",             done: "submitRM",             label: "Route March Entry" },
-    soc_entry:       { start: "openSOCForm",            done: "submitSOC",            label: "SOC Entry" },
     report:          { start: "openReportModal",        done: "copyReportToClipboard", label: "Generate Report" },
     parade_compare:  { start: "openCompareModal",       done: "copyCompareSummary",   label: "Compare Parade States" },
     person_lookup:   { start: null,                     done: "openPerson",           label: "Person Lookup" },
@@ -75,7 +73,7 @@ const TELEMETRY = (function () {
   const VIEW_LABELS = {
     dashboard: "Dashboard", roster: "Roster", attendance: "Attendance",
     detail: "Conduct Detail", medical: "Medical", ippt: "IPPT",
-    rm: "Route March", soc: "SOC", polar: "Polar Flow", leave: "Out / Leave",
+    leave: "Out / Leave",
     mskAnalytics: "MSK Analytics", conducts: "Conducts", sync: "Sync & I/O",
     usage: "Usage Insights"
   };
