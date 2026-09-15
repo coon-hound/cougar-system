@@ -2288,6 +2288,21 @@ const PARADE_SECTION_IMPLIES_OUT = { "ATT C": true, "OFF/LEAVE": true, "OTHERS":
 // section table — an exclusion list, so a new leave type can never vanish.
 const PARADE_OFF_LEAVE_TYPES = ["Off-in-Lieu", "Annual Leave", "Compassionate", "Weekend", "Night's Out", "Hospitalisation Leave"];
 
+// Free text — reasons, locations, leave types, names — comes off a phone
+// keyboard and can carry anything. The line format gives " - ", "(", ")" and
+// "@" structural meaning, and a single newline would split one record into two
+// lines that no longer parse (and no longer count), so every piece of free text
+// is flattened and those characters neutralised before it reaches a line.
+function paradeSafeText(v) {
+  return String(v == null ? "" : v)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[()]/g, "")
+    .replace(/@/g, "at")
+    .replace(/\s+-\s+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const paradeMarker = (section, isAway) =>
   (!!PARADE_SECTION_IMPLIES_OUT[section] === !!isAway) ? "" : (isAway ? "OUT" : "IN");
 
@@ -2296,11 +2311,20 @@ const paradeMarker = (section, isAway) =>
 // print as rank + name, which the template explicitly allows.
 function paradeLineName(d4) {
   const r = STATE.roster.find(x => x.id === d4);
-  if (!r) return String(d4);
-  const name = (r.name || "").toUpperCase();
-  if (r.role === "Commander") return [r.rank, name].filter(Boolean).join(" ");
-  const bareId = String(r.id).replace(/^C/i, "");
-  return [bareId, (r.rank || "REC").toUpperCase(), name].filter(Boolean).join(" ");
+  if (!r) return paradeSafeText(d4);
+  const name = paradeSafeText(r.name).toUpperCase();
+  const rank = paradeSafeText(r.rank).toUpperCase();
+  const bareId = paradeSafeText(r.id).replace(/^C/i, "");
+  // A commander prints as rank + name — their 00xx id is administrative, and
+  // the template lets a commander omit the 4D. That only holds while the RANK
+  // is there: "<RANK> <NAME>" is what marks the line as naming a person, and a
+  // row missing either half (a rank with no name, a name with no rank) falls
+  // back to leading with the 4D so the record stays identifiable to a reader
+  // and to the compare parser.
+  if (r.role === "Commander") {
+    return (rank && name) ? `${rank} ${name}` : [bareId, rank, name].filter(Boolean).join(" ");
+  }
+  return [bareId, rank || "REC", name].filter(Boolean).join(" ");
 }
 
 // Dates are ALWAYS DDMMYY in brackets: a range, a single day, or "SINCE …"
@@ -2323,8 +2347,12 @@ function paradeSpanOf(record, run) {
 
 // "4D MC (Fever)" — day count, the status in caps, the reason in brackets.
 function paradeDesc(days, label, reason) {
-  const head = (days && days > 0 ? `${days}D ` : "") + label;
-  const r = String(reason || "").trim();
+  // A custom status / leave type / book-out reason is free text too, and can
+  // sanitise away to nothing. A record whose description is empty stops being
+  // a record — the line would read "1. 1401 REC ALPHA ONE - " — so it always
+  // keeps a word.
+  const head = (days && days > 0 ? `${days}D ` : "") + (paradeSafeText(label) || "UNSPECIFIED");
+  const r = paradeSafeText(reason);
   return r ? `${head} (${r})` : head;
 }
 
@@ -2334,7 +2362,8 @@ function paradeLine(n, e) {
   const parts = [`${n}. ${paradeLineName(e.d4)} - ${e.desc}`];
   if (e.dates) parts.push(`(${e.dates})`);
   if (e.marker) parts.push(e.marker);
-  if (e.location) parts.push(`@ ${String(e.location).trim()}`);
+  const loc = paradeSafeText(e.location);
+  if (loc) parts.push(`@ ${loc}`);
   return parts.join(" ");
 }
 
@@ -2467,10 +2496,10 @@ function paradeLeaveEntries(dateIso, away) {
     const key = [l.d4, l.type || "", span.startIso, span.endIso].join("|");
     if (seen.has(key)) return;
     seen.add(key);
-    const section = PARADE_OFF_LEAVE_TYPES.indexOf(l.type) >= 0 ? "OFF/LEAVE" : "OTHERS";
+    const section = (!l.type || PARADE_OFF_LEAVE_TYPES.indexOf(l.type) >= 0) ? "OFF/LEAVE" : "OTHERS";
     out.push({
       d4: l.d4, section,
-      desc: paradeDesc(null, String(l.type || "LEAVE").toUpperCase(), l.reason),
+      desc: paradeDesc(null, (paradeSafeText(l.type) || "LEAVE").toUpperCase(), l.reason),
       dates: span.text,
       marker: paradeMarker(section, away.has(l.d4)),
       location: ""
@@ -2503,7 +2532,7 @@ function paradeOthersEntries(dateIso, away) {
     if (appt) continue;
     out.push({
       d4, section: "OTHERS",
-      desc: String(info.reason || "OUT OF CAMP").toUpperCase(),
+      desc: paradeDesc(null, (paradeSafeText(info.reason) || "OUT OF CAMP").toUpperCase(), ""),
       dates: toDDMMYY(dateIso),
       marker: paradeMarker("OTHERS", away.has(d4)),
       location: ""

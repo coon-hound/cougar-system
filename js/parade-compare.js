@@ -156,10 +156,19 @@ function pcSplitRecord(rest) {
   return { desc: s.trim(), reason, dates, marker, location };
 }
 
-// An appointment's dates carry a time: "(290926 1420)".
+// An appointment's dates carry a time: "(290926 1420)". Anything after the date
+// is kept verbatim as the time so a range ("0930-1200") or an overnight duty
+// ("180626 1630-190626 0800") still identifies the appointment for the differ
+// instead of degrading into an undated status.
 function pcSplitApptDates(dates) {
-  const m = /^(\d{6})(?:\s+(\d{3,4}))?$/.exec(String(dates || "").trim());
-  return m ? { dateIso: ddmmyyToISO(m[1]), dateRaw: m[1], time: m[2] ? m[2].padStart(4, "0") : "" } : null;
+  const m = /^(\d{6})(?:\s+(.+))?$/.exec(String(dates || "").trim());
+  if (!m) return null;
+  const time = (m[2] || "").trim();
+  return {
+    dateIso: ddmmyyToISO(m[1]),
+    dateRaw: m[1],
+    time: /^\d{3,4}$/.test(time) ? time.padStart(4, "0") : time
+  };
 }
 
 // ─── parseParadeState(text) ─────────────────────────────
@@ -384,8 +393,13 @@ function parseParadeState(text) {
     // 40 SAR one-line record: "<n>. <4D> <RANK> <NAME> - <DESC> (<DATES>) …".
     // Everything about the record lives on this single line, so it is parsed
     // and closed immediately rather than accumulating field lines.
+    // Inside a recognised section the numbered "<person> - <record>" shape IS a
+    // record, so identity is accepted from a 4D, a rank token, or simply a
+    // name — another company's spelling (or one of ours with a rank missing)
+    // must not make a line silently stop counting.
     if (section && (m = /^(\d{1,3})[.)]\s+(.+?)\s+[-–—]\s+(.+)$/.exec(t)) &&
-        (pcFind4d(m[2]) || PC_RANK_RE.test(m[2]))) {
+        (pcFind4d(m[2]) || PC_RANK_RE.test(m[2]) ||
+         (section !== "UNKNOWN" && /[A-Za-z]/.test(m[2])))) {
       out.personishLines++;
       startEntry(m[2], line);
       entry.sn = m[1];
@@ -410,7 +424,11 @@ function parseParadeState(text) {
         if (rec.marker) st.inCamp = rec.marker === "IN";
         entry.statuses.push(st);
       }
-      finishEntry();
+      // A record line that names nobody cannot become a person entry, and
+      // dropping it silently would hide a line from the section-count check.
+      // Surface it instead, so the mismatch is reported rather than absorbed.
+      if (!entry.d4 && !entry.name) { out.unparsed.push(t); entry = null; multiStatus = false; }
+      else finishEntry();
       continue;
     }
 
