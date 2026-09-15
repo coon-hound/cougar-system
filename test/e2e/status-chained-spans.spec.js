@@ -31,9 +31,18 @@ async function seedChain(page) {
   });
 }
 
-// Slice one "LABEL: nn ... " section out of the generated parade text.
+// Every record line filed under one section header, across all blocks — a
+// section runs from its "<LABEL>: <n>" header to the next header.
 function section(text, label) {
-  return text.split(/\n-{10,}\n/).map(s => s.trim()).find(p => p.startsWith(label + ":")) || "";
+  const head = new RegExp("^" + label.replace("/", "\\/") + ": \\d+$");
+  const lines = [];
+  let inside = false;
+  text.split("\n").forEach(l => {
+    if (head.test(l)) { inside = true; return; }
+    if (inside && /^\d+\. /.test(l)) { lines.push(l); return; }
+    inside = false;
+  });
+  return lines;
 }
 
 test("parade state reports the full span of a chained (extended) MC", async ({ page }) => {
@@ -44,23 +53,20 @@ test("parade state reports the full span of a chained (extended) MC", async ({ p
 
   await page.evaluate(() => openReportModal("FP"));
   const text = await page.locator("#rep-text").inputValue();
-  const attc = section(text, "ATTC");
+  const attc = section(text, "ATT C");
 
   // C1401's run really ends on D3 — the report must not stop at D1.
-  const block1401 = attc.split(/\n\n(?=S\/N:)/).find(b => b.includes("C1401"));
-  expect(block1401, "ATTC has a block for C1401").toBeTruthy();
-  expect(block1401).toContain(`Duration: ${D.d0} - ${D.d3}`);
-  expect(block1401).toContain("4D MC");
+  const line1401 = attc.find(b => b.includes("1401"));
+  expect(line1401, "ATT C has a line for 1401: " + attc).toBeTruthy();
+  expect(line1401).toContain(`4D MC (Fever) (${D.d0}-${D.d3})`);
 
   // A single un-extended MC is untouched.
-  const block1402 = attc.split(/\n\n(?=S\/N:)/).find(b => b.includes("C1402"));
-  expect(block1402).toContain(`Duration: ${D.d0} - ${D.d1}`);
-  expect(block1402).toContain("2D MC");
+  expect(attc.find(b => b.includes("1402"))).toContain(`2D MC (Ankle) (${D.d0}-${D.d1})`);
 
   // A LATER, non-adjacent MC is a separate absence — today's run still ends D1.
-  const block1403 = attc.split(/\n\n(?=S\/N:)/).find(b => b.includes("C1403"));
-  expect(block1403).toContain(`Duration: ${D.d0} - ${D.d1}`);
-  expect(block1403).not.toContain(D.d5);
+  const line1403 = attc.find(b => b.includes("1403"));
+  expect(line1403).toContain(`2D MC (Flu) (${D.d0}-${D.d1})`);
+  expect(line1403).not.toContain(D.d5);
 
   expect(errors).toEqual([]);
 });
@@ -93,7 +99,7 @@ test("dashboard reports the true end + return date of a chained MC", async ({ pa
   await page.screenshot({ path: "test-results/status-chained-spans.png", fullPage: true });
 });
 
-test("back-to-back leave reads as one absence in OTHERS and on the dashboard", async ({ page }) => {
+test("back-to-back leave reads as one absence in OFF/LEAVE and on the dashboard", async ({ page }) => {
   const errors = [];
   page.on("pageerror", e => errors.push(e.message));
   await seedAndGoto(page);
@@ -113,8 +119,9 @@ test("back-to-back leave reads as one absence in OTHERS and on the dashboard", a
   });
 
   await page.evaluate(() => openReportModal("FP"));
-  const others = section(await page.locator("#rep-text").inputValue(), "OTHERS");
-  expect(others).toContain(`Duration: ${D.d0} - ${D.d3}`);
+  const off = section(await page.locator("#rep-text").inputValue(), "OFF/LEAVE");
+  expect(off.length, "one line for one absence: " + off).toBe(1);
+  expect(off[0]).toContain(`OFF-IN-LIEU (OIL) (${D.d0}-${D.d3})`);
   await page.evaluate(() => closeModal());
 
   // Dashboard: the return date and the merged range both reflect both blocks.

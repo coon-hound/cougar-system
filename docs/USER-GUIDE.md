@@ -159,8 +159,10 @@ The heart-rate and training-load engine.
   NDP, Other. Only **Off-in-Lieu** decrements a commander's leave quota. **Night's Out** =
   same-day evening off-camp.
 - **Days auto-calculate** (end − start + 1) but are editable for half-days.
-- **Timeline view** shows who's out across a date range — and feeds the parade state's
-  OTHERS block automatically.
+- **Timeline view** shows who's out across a date range — and feeds the parade state
+  automatically: time off (Leave, Off-in-Lieu, Compassionate, Weekend, Night's Out) files
+  under **OFF/LEAVE**, and duty-ish absences (Course, Guard Duty, NDP, Other) under
+  **OTHERS**.
 
 ---
 
@@ -189,13 +191,33 @@ Open these from the **Dashboard → Generate Report** menu. Each opens a window 
 ready to **copy to clipboard** (one tap) and paste into WhatsApp.
 
 ### First / Last Parade State
-- Pick the **date** and **parade time**. The system composes the full battalion format:
-  **strength block**, **OTHERS** (leave/out currently in range), **MEDICAL APPT**
-  (with in-camp/out-of-camp), and medical sections (MC/Warded/Pending).
-- **Borderline returnees:** recruits whose status ends right around parade time are surfaced
-  with checkboxes so you decide if they're in or out — no silent miscounts.
-- **Appointment camp toggles:** tick whether each appointment-holder is out of camp; an
-  out-of-camp MA shows under OTHERS, not the medical-appointment line.
+Composed in the **40 SAR format** every company in the battalion files (Sep 2026), so HQ can
+collate the battalion's strength without re-typing anything.
+
+- Pick the **date** and **parade time**, then the **command team** — CDO, CDS, COS and a PDS
+  per platoon. The appointments rotate daily, so your picks are saved against that parade's
+  date; the next day starts from the last team you filed. An appointment left unset prints as
+  `<RANK> <NAME>` so a half-filled team is visible rather than silently missing.
+- The state is **one block per sub-unit** — COY HQ first, then PL 7 to PL 9 — each with its
+  own present/strength line, an OFFICER / WOSPEC / ENLISTEE split, and the same six sections
+  in the same order: **ATT C**, **STATUS**, **REPORT SICK**, **MA**, **OFF/LEAVE**, **OTHERS**.
+  A section with nothing in it reads `0`; it is never removed.
+- Each record is **one line**:
+  `<n>. <4D> <RANK> <NAME> - <DESCRIPTION> (<DATES>) [OUT|IN] [@ <LOCATION>]`. Dates are
+  always DDMMYY in brackets. A trailing **IN** or **OUT** appears only when a record
+  contradicts its section — an MC consumed in camp reads `… IN`, an excuse held while out of
+  camp reads `… OUT`.
+- A person holding several records gets **several lines** (an MC plus an excuse is two facts),
+  but is filed in **one block** and counted **once** in the strength — the numbers come from
+  the same in/out-of-camp computation the dashboard uses, never from counting lines.
+- **Borderline returnees:** recruits whose MC ended right around parade time are surfaced
+  with checkboxes so you decide if they're in or out — no silent miscounts. A ticked returnee
+  files under OTHERS as `RETURNING FROM MC`.
+- **Appointment camp toggles:** tick whether each appointment-holder is out of camp. The
+  appointment always files under **MA**, picking up the OUT marker when they have left camp,
+  so the same absence is never listed twice.
+- **Compare with previous** still works across the changeover — a state copied in the old
+  format is still understood, so the person-level diff keeps working.
 
 ### Medical Status List & MSK Report
 - One-tap compiled lists of everyone on a status / every MSK case — the chief-safety brief,

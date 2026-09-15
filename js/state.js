@@ -48,6 +48,7 @@ const DIRTY_OPS_KEY = "cougar-dirty-ops-v1";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
 const PROGRAMS_KEY = "cougar-programs";
 const COMBINED_KEY = "cougar-combined-groups";
+const DUTY_KEY = "cougar-duty";
 const PARADE_STATES_KEY = "cougar-parade-snapshots";
 
 // Sheet-tab-name → STATE-array-key lookup. The autoSync coalesce path uses
@@ -148,6 +149,53 @@ function loadCombinedGroups() {
 }
 function saveCombinedGroups() {
   localStorage.setItem(COMBINED_KEY, JSON.stringify(STATE.combinedGroups || []));
+}
+
+// Duty appointment holders, per date. The command team (CDO / CDS / COS and a
+// PDS per platoon) heads every parade state and ROTATES daily, so it is stored
+// per ISO date rather than as a roster attribute:
+//   { "2026-09-15": { "CDO": "0001", "PDS 7": "0004", ... } }
+// Values are commander 4Ds; an unset appointment renders as the battalion's
+// "<RANK> <NAME>" placeholder so a half-filled command team is visible rather
+// than silently wrong. Per-device for now (own localStorage key, no sheet tab)
+// — dutyForDate is the single read point, so promoting it to a synced tab
+// later touches nothing else.
+function loadDutyRoster() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DUTY_KEY) || "{}");
+    if (!d || typeof d !== "object") return {};
+    const out = {};
+    Object.keys(d).forEach(date => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !d[date] || typeof d[date] !== "object") return;
+      const day = {};
+      Object.keys(d[date]).forEach(role => { if (d[date][role]) day[role] = String(d[date][role]); });
+      out[date] = day;
+    });
+    return out;
+  } catch { return {}; }
+}
+function saveDutyRoster() {
+  try { localStorage.setItem(DUTY_KEY, JSON.stringify(STATE.duty || {})); }
+  catch { /* quota — the parade state still generates, just unremembered */ }
+}
+// The command team for a date. An unrecorded date inherits the most recent
+// EARLIER date's team as a starting point (most appointments carry over; the
+// PDS corrects whichever rotated), and never a later date's — tomorrow's plan
+// must not rewrite what yesterday actually filed.
+function dutyForDate(dateIso) {
+  const all = STATE.duty || {};
+  if (all[dateIso]) return { ...all[dateIso] };
+  const prev = Object.keys(all).filter(d => d < dateIso).sort().pop();
+  return prev ? { ...all[prev] } : {};
+}
+function setDutyHolder(dateIso, role, d4) {
+  if (!dateIso || !role) return;
+  const all = (STATE.duty = STATE.duty || {});
+  // Materialise the inherited team on first edit so changing one appointment
+  // doesn't drop the five that were only being inherited.
+  const day = (all[dateIso] = all[dateIso] || dutyForDate(dateIso));
+  if (d4) day[role] = String(d4); else delete day[role];
+  saveDutyRoster();
 }
 
 // Parade-state snapshots (Compare feature): every FP/LP "Copy to Clipboard"
@@ -266,6 +314,9 @@ const STATE = {
   // Saved combined-group formulas (see loadCombinedGroups). Surfaced in the
   // group filter dropdown and the book-out picker alongside plain groups.
   combinedGroups: loadCombinedGroups(),
+  // Per-date duty appointment holders (see loadDutyRoster) — the CDO/CDS/COS/PDS
+  // block at the head of every parade state.
+  duty: loadDutyRoster(),
   // IPPT stats aggregation: "latest" (most recent attempt per recruit) or
   // "best" (highest-scoring attempt). Drives the IPPT tab's stats row, charts,
   // and leaderboard. Does NOT affect the underlying table — that always

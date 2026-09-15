@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 132;
+const APP_VERSION = 134;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,19 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 134,
+    date: "15 Sep 2026",
+    title: "The parade state is now the battalion's format",
+    intro: "40 SAR asked all five companies to file one common format so HQ can collate the battalion's strength without re-typing it. First and Last Parade State now generate exactly that. Everything you already record still appears - it is just grouped by platoon and written one line per record instead of a five-line block, which is about 65% less text.",
+    items: [
+      { t: "\ud83c\udfd7\ufe0f Grouped by platoon, COY HQ first", d: "Instead of one company-wide list, the state is a block per sub-unit: COY HQ, then each platoon, each with its own present/strength, officer/wospec/enlistee split and its own six sections." },
+      { t: "\ud83d\udcdd One line per record", d: "\u201c1209 REC IRFAN NUR HAQIMI - 4D MC (Conjunctivitis) (010926-040926) @ Woodlands Polyclinic\u201d replaces the old S/N block. Someone with an MC and an excuse gets two lines - one per fact - but is only ever counted once in the strength." },
+      { t: "\ud83c\udf96\ufe0f Pick the command team", d: "The FP/LP screen now asks for CDO, CDS, COS and a PDS per platoon. It rotates daily, so your picks are saved against that parade\u2019s date and the next day starts from the last team you filed." },
+      { t: "\ud83d\udd24 The section names changed", d: "MEDICAL STATUS is now STATUS, MEDICAL APPT is now MA, RSI sits under REPORT SICK, and leave has its own OFF/LEAVE section. Warded, guard duty, courses and book-outs all file under OTHERS." },
+      { t: "\ud83d\udd0e Compare still works across the change", d: "Comparing today\u2019s state against one you copied before this release still reports the same person-level changes - the old format is still understood." },
+    ],
+  },
   {
     v: 132,
     date: "14 Sep 2026",

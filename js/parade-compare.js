@@ -17,16 +17,23 @@
 const PC_RANKS = "REC|PTE|LCP|CPL|CFC|SCT|3SG|2SG|1SG|SSG|MSG|3WO|2WO|1WO|MWO|SWO|OCT|2LT|LTA|CPT|MAJ|LTC|COL|ME[1-8]|SGT|CDT";
 const PC_RANK_RE = new RegExp("^(?:" + PC_RANKS + ")\\b[ .]*", "i");
 
+// Canonical section keys are format-independent: the 40 SAR format's "ATT C",
+// "STATUS" and "MA" are the same sections as the old "ATTC", "MEDICAL STATUS"
+// and "MEDICAL APPT", so a state filed before the changeover still diffs
+// against one filed after it. OFF/LEAVE is genuinely new — the old format
+// folded leave into OTHERS — so a person on leave across the changeover reads
+// as a section move, which is the honest answer.
 const PC_SECTION_LABELS = {
-  ATTC: "ATTC",
+  ATTC: "ATT C",
   REPORT_SICK: "REPORT SICK",
-  MEDICAL_STATUS: "MEDICAL STATUS",
-  MEDICAL_APPT: "MEDICAL APPT",
+  MEDICAL_STATUS: "STATUS",
+  MEDICAL_APPT: "MA",
+  OFF_LEAVE: "OFF/LEAVE",
   OTHERS: "OTHERS",
   UNKNOWN: "OTHER SECTION"
 };
 // Sections whose members are physically OUT of camp (drive CURRENT STRENGTH).
-const PC_OUT_SECTIONS = { ATTC: true, OTHERS: true };
+const PC_OUT_SECTIONS = { ATTC: true, OFF_LEAVE: true, OTHERS: true };
 // The mostly-exclusive medical trio: a person shifting between these is one
 // real-world event (e.g. Pending → MC issued, MC force-inned to MEDICAL
 // STATUS) and must render as ONE "moved" change, never an out+in pair.
@@ -115,12 +122,44 @@ function pcParseDuration(raw) {
 // Fuzzy canonical-section mapping on a squeezed ALL-CAPS header label.
 function pcSectionOf(label) {
   const l = String(label || "").toUpperCase().replace(/\s+/g, " ").trim();
-  if (/^ATT?C\b|ATTACHED OUT/.test(l)) return "ATTC";
+  if (/^ATT ?C\b|^ATTC\b|ATTACHED OUT/.test(l)) return "ATTC";
   if (/^(REPORT(ED)? SICK|RSO|RSI)$/.test(l)) return "REPORT_SICK";
-  if (/^MED(ICAL)? STATUS(ES)?( LIST)?$/.test(l)) return "MEDICAL_STATUS";
+  if (/^(MED(ICAL)? )?STATUS(ES)?( LIST)?$/.test(l)) return "MEDICAL_STATUS";
   if (/^(MED(ICAL)? APPTS?|MEDICAL APPOINTMENTS?|APPOINTMENTS?|MA)$/.test(l)) return "MEDICAL_APPT";
-  if (/^(OTHERS?|LEAVE|OFF|DUTY)$/.test(l)) return "OTHERS";
+  if (/^(OFF\/LEAVE|LEAVE\/OFF|OFF|LEAVE)$/.test(l)) return "OFF_LEAVE";
+  if (/^(OTHERS?|DUTY)$/.test(l)) return "OTHERS";
   return "UNKNOWN";
+}
+
+// ─── One-line record parsing (40 SAR format) ────────────
+// "1209 REC IRFAN ... - 4D MC (Conjunctivitis) (010926-040926) OUT @ TTSH"
+// splits into the person (left of the first " - ") and the record. The record
+// is peeled from the RIGHT, because only the tail is positional: location
+// after "@", then the OUT/IN marker, then the bracketed dates, leaving the
+// description with its optional "(reason)".
+function pcSplitRecord(rest) {
+  let s = String(rest || "").trim();
+  let location = "";
+  const at = s.lastIndexOf("@");
+  if (at >= 0) { location = s.slice(at + 1).trim(); s = s.slice(0, at).trim(); }
+  let marker = "";
+  let m = /\s(OUT|IN)$/i.exec(s);
+  if (m) { marker = m[1].toUpperCase(); s = s.slice(0, m.index).trim(); }
+  let dates = "";
+  // The last bracket is the dates only if it actually carries a date — a
+  // record with a reason but no dates must not lose its reason to this.
+  m = /\(([^()]*)\)\s*$/.exec(s);
+  if (m && /\d{6}|\bSINCE\b/i.test(m[1])) { dates = m[1].trim(); s = s.slice(0, m.index).trim(); }
+  let reason = "";
+  m = /\(([^()]*)\)\s*$/.exec(s);
+  if (m) { reason = m[1].trim(); s = s.slice(0, m.index).trim(); }
+  return { desc: s.trim(), reason, dates, marker, location };
+}
+
+// An appointment's dates carry a time: "(290926 1420)".
+function pcSplitApptDates(dates) {
+  const m = /^(\d{6})(?:\s+(\d{3,4}))?$/.exec(String(dates || "").trim());
+  return m ? { dateIso: ddmmyyToISO(m[1]), dateRaw: m[1], time: m[2] ? m[2].padStart(4, "0") : "" } : null;
 }
 
 // ─── parseParadeState(text) ─────────────────────────────
@@ -130,8 +169,11 @@ function pcSectionOf(label) {
 // tells the UI how hard to lean on the raw text diff instead.
 function parseParadeState(text) {
   const out = {
-    header: { type: null, dateIso: "", time: "", companyLine: null },
-    strength: { total: null, current: null, platoons: {}, commanders: null },
+    header: { type: null, dateIso: "", time: "", companyLine: null, commandTeam: {} },
+    // blocks: label → { in, total, categories: { OFFICER: {in,total}, … } } for
+    // the 40 SAR per-sub-unit strength; platoons/commanders stay populated too
+    // so a diff spans the format changeover.
+    strength: { total: null, current: null, platoons: {}, commanders: null, blocks: {} },
     people: [],
     sectionCounts: {},
     sectionsSeen: {},          // canonical section → true (headers seen, even if empty)
@@ -142,6 +184,7 @@ function parseParadeState(text) {
   };
   const rawLines = String(text || "").split(/\r?\n/);
 
+  let block = "";                  // 40 SAR sub-unit block ("COY HQ", "PL 7")
   let section = null;              // canonical section key, null = pre-section header region
   let sectionLabelRaw = "";
   let entry = null;                // entry under construction
@@ -171,7 +214,7 @@ function parseParadeState(text) {
       key: "", d4: d4 || null,
       name: normalizeParadeName(d4 ? String(rnValue).replace(new RegExp("C?" + d4), " ") : rnValue),
       rnRaw: String(rnValue || "").trim(),
-      section: section || "UNKNOWN", sectionLabelRaw,
+      section: section || "UNKNOWN", sectionLabelRaw, block,
       sn: null, reason: "", location: "",
       apptDateIso: "", apptTime: "",
       statuses: [], rawBlock: line ? [line] : []
@@ -195,12 +238,41 @@ function parseParadeState(text) {
       if (m[2] && out.strength.total == null) out.strength.total = +m[2];
       continue;
     }
-    if ((m = /^(?:PLATOON|PLT)\s*([A-Z0-9]+)\s*[:\-]\s*(\d+)\s*\/\s*(\d+)$/i.exec(t))) {
+    if ((m = /^(?:PLATOON|PLT|PL)\s*([A-Z0-9]+)\s*[:\-]\s*(\d+)\s*\/\s*(\d+)$/i.exec(t))) {
+      // Keyed by the bare platoon designation so "PLATOON 7" (old) and "PL 7"
+      // (new) are the same platoon to the differ.
       out.strength.platoons[m[1]] = { in: +m[2], total: +m[3] };
+      block = "PL " + m[1];
+      out.strength.blocks[block] = { in: +m[2], total: +m[3], categories: {} };
+      section = null; sectionLabelRaw = "";
+      finishEntry();
       continue;
     }
-    if ((m = /^(?:COMMANDERS?|CMDRS?)\s*[:\-]\s*(\d+)\s*\/\s*(\d+)$/i.exec(t))) {
+    // COMPANY is the 40 SAR whole-company line: present/strength in one line,
+    // where the old format spelled it TOTAL + CURRENT over two.
+    if ((m = /^COMPANY\s*[:\-]\s*(\d+)\s*\/\s*(\d+)$/i.exec(t))) {
+      out.strength.current = +m[1];
+      out.strength.total = +m[2];
+      block = "COMPANY";
+      out.strength.blocks[block] = { in: +m[1], total: +m[2], categories: {} };
+      continue;
+    }
+    // Cougar's COY HQ block is the whole command body, which is exactly what
+    // the old format's COMMANDERS line counted.
+    if ((m = /^(?:COMMANDERS?|CMDRS?|COY ?HQ|HQ)\s*[:\-]\s*(\d+)\s*\/\s*(\d+)$/i.exec(t))) {
       out.strength.commanders = { in: +m[1], total: +m[2] };
+      if (!/^COMMANDERS?|^CMDRS?/i.test(t)) {
+        block = "COY HQ";
+        out.strength.blocks[block] = { in: +m[1], total: +m[2], categories: {} };
+        section = null; sectionLabelRaw = "";
+        finishEntry();
+      }
+      continue;
+    }
+    if ((m = /^(OFFICERS?|WOSPECS?|ENLISTEES?)\s*[:\-]\s*(\d+)\s*\/\s*(\d+)$/i.exec(t))) {
+      const cat = m[1].toUpperCase().replace(/S$/, "");
+      const blk = out.strength.blocks[block || "COMPANY"];
+      if (blk) blk.categories[cat] = { in: +m[2], total: +m[3] };
       continue;
     }
 
@@ -217,7 +289,9 @@ function parseParadeState(text) {
         if (section !== "UNKNOWN" && !out.sectionsSeen[section]) canonicalSections++;
         out.sectionsSeen[section] = true;
         out.sectionCounts[section] = out.sectionCounts[section] || { claimed: null, actual: 0 };
-        if (m[2]) out.sectionCounts[section].claimed = +m[2];
+        // Each block repeats the same six headers, so the claimed count is the
+        // SUM across blocks — compared against the total entries parsed.
+        if (m[2]) out.sectionCounts[section].claimed = (out.sectionCounts[section].claimed || 0) + +m[2];
         continue;
       }
     }
@@ -228,7 +302,7 @@ function parseParadeState(text) {
         out.header.type = /FIRST/i.test(t) ? "FP" : "LP";
         continue;
       }
-      if ((m = /\bDATE\s*[:\-]?\s*(\d{6})(?:\s*@?\s*(\d{3,4}))?/i.exec(t)) ||
+      if ((m = /\bDATE\s*[:\-]?\s*(\d{6})(?:\s*(?:@|TIME\s*[:\-]?)\s*(\d{3,4}))?/i.exec(t)) ||
           (m = /\bas of\s+(\d{6})\s*[,@ ]*\s*(\d{3,4})?/i.exec(t))) {
         out.header.dateIso = ddmmyyToISO(m[1]) || out.header.dateIso;
         if (m[2]) out.header.time = m[2].padStart(4, "0");
@@ -236,6 +310,10 @@ function parseParadeState(text) {
       }
       if ((m = /(\d{4}-\d{2}-\d{2})/.exec(t)) && !out.header.dateIso) {
         out.header.dateIso = m[1];
+        continue;
+      }
+      if ((m = /^(CDO|CDS|COS|PDS\s*[A-Z0-9]*)\s*[:\-]\s*(.+)$/i.exec(t))) {
+        out.header.commandTeam[m[1].toUpperCase().replace(/\s+/g, " ")] = m[2].trim();
         continue;
       }
       if (out.header.companyLine === null) { out.header.companyLine = t; continue; }
@@ -302,6 +380,39 @@ function parseParadeState(text) {
       continue;
     }
     if (entry && (m = /^(?:Time|Last visit)\s*[:\-]\s*(.*)$/i.exec(t))) { entry.apptTime = m[1].trim(); entry.rawBlock.push(line); continue; }
+
+    // 40 SAR one-line record: "<n>. <4D> <RANK> <NAME> - <DESC> (<DATES>) …".
+    // Everything about the record lives on this single line, so it is parsed
+    // and closed immediately rather than accumulating field lines.
+    if (section && (m = /^(\d{1,3})[.)]\s+(.+?)\s+[-–—]\s+(.+)$/.exec(t)) &&
+        (pcFind4d(m[2]) || PC_RANK_RE.test(m[2]))) {
+      out.personishLines++;
+      startEntry(m[2], line);
+      entry.sn = m[1];
+      const rec = pcSplitRecord(m[3]);
+      entry.reason = rec.reason;
+      entry.location = rec.location;
+      const appt = section === "MEDICAL_APPT" ? pcSplitApptDates(rec.dates) : null;
+      if (appt) {
+        // An appointment's identity is its date+time, not a status span.
+        entry.apptDateIso = appt.dateIso;
+        entry.apptDateRaw = appt.dateRaw;
+        entry.apptTime = appt.time;
+      } else if (rec.desc) {
+        const st = pcParseStatusLabel(rec.desc);
+        const d = pcParseDuration(rec.dates);
+        st.startIso = d.startIso;
+        st.endIso = d.endIso;
+        st.durationRaw = rec.dates;
+        // An explicit IN marker is this format's way of saying "counted
+        // present in camp" — the same fact the old format spelled out as
+        // "(consume in camp)".
+        if (rec.marker) st.inCamp = rec.marker === "IN";
+        entry.statuses.push(st);
+      }
+      finishEntry();
+      continue;
+    }
 
     // Foreign entry starts: a numbered person line, a rank+name line, or any
     // line carrying a plausible standalone 4D. The bare-4D path must NOT fire
@@ -511,7 +622,7 @@ function diffParadeStates(oldParsed, newParsed, opts) {
   });
 
   // Sort groups by section prominence then name, so ATTC news leads.
-  const secRank = e => ["ATTC", "REPORT_SICK", "MEDICAL_STATUS", "MEDICAL_APPT", "OTHERS", "UNKNOWN"].indexOf(e.section);
+  const secRank = e => ["ATTC", "REPORT_SICK", "MEDICAL_STATUS", "MEDICAL_APPT", "OFF_LEAVE", "OTHERS", "UNKNOWN"].indexOf(e.section);
   res.people.added.sort((a, b) => secRank(a.entry) - secRank(b.entry) || String(a.entry.name).localeCompare(String(b.entry.name)));
   res.people.removed.sort((a, b) => secRank(a.entry) - secRank(b.entry) || String(a.entry.name).localeCompare(String(b.entry.name)));
   res.people.changed.sort((a, b) => secRank(a.new) - secRank(b.new) || String(a.new.name).localeCompare(String(b.new.name)));
@@ -644,9 +755,9 @@ function compareSummaryText(diff, oldLabel, newLabel) {
   if (s.current) L.push(`CURRENT STRENGTH: ${s.current.old} -> ${s.current.new} (${s.current.delta >= 0 ? "+" : ""}${s.current.delta})`);
   Object.keys(s.platoons).forEach(p => {
     const d = s.platoons[p];
-    if (d.deltaIn) L.push(`PLATOON ${p}: ${d.old.in}/${d.old.total} -> ${d.new.in}/${d.new.total}`);
+    if (d.deltaIn) L.push(`PL ${p}: ${d.old.in}/${d.old.total} -> ${d.new.in}/${d.new.total}`);
   });
-  if (s.commanders && s.commanders.deltaIn) L.push(`COMMANDERS: ${s.commanders.old.in}/${s.commanders.old.total} -> ${s.commanders.new.in}/${s.commanders.new.total}`);
+  if (s.commanders && s.commanders.deltaIn) L.push(`COY HQ: ${s.commanders.old.in}/${s.commanders.old.total} -> ${s.commanders.new.in}/${s.commanders.new.total}`);
   if (L[L.length - 1] !== "") L.push("");
 
   const rn = e => e.rnRaw || [e.name, e.d4 ? "C" + e.d4 : ""].filter(Boolean).join(" ");

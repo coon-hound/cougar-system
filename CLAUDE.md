@@ -31,6 +31,8 @@ Break one of these and `node test/run.js` fails.
 - **Prefer `upsertRow` / `deleteRowById` over a full-table `pushTab` write.** ID-based surgical writes are cross-device safe; a full-table rewrite clobbers a concurrent edit from another phone.
 - **`apps-script-Code.gs` is a mirror, not the running code**, and it now serves only Gmail, vision and the Telegram bot. The executing copy lives in the Apps Script editor and is updated by pasting this file; edits do not propagate either direction.
 - **Polar is the source of truth for watch participation.** Attendance LMS counts are recomputed from Polar after every pull, so hand-edited LMS values do not stick.
+- **The parade state is the battalion's format, and the parser must keep understanding BOTH.** `generateParadeStateText` emits the 40 SAR format (blocks, six fixed sections, one line per record); `js/parade-compare.js` parses it AND the pre-Sep-2026 S/N-block format, because saved snapshots are the ground truth of what was filed and are never regenerated. A round-trip test pins parser and generator together, so any change to the emitted text updates the parser in the same PR.
+- **Parade strength never counts section lines.** Present/strength comes from `outOfCampMap` plus the ticked borderline returnees, so a person legitimately listed on several lines (an MC and an excuse) is still one body, and the blocks always add up to COMPANY.
 - **Derived state is derived.** Out-of-camp status and the movement board are computed from their source records, never stored separately. Do not introduce a second copy.
 
 ## The Postgres backend

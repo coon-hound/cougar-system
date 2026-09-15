@@ -34,10 +34,10 @@ test("extended MC is not a borderline returnee; genuinely-ended MC still is", as
   await expect(borderline).toContainText("1402");   // genuine returnee still offered
   await expect(borderline).not.toContainText("1401"); // extension covers today -> not a returnee
 
-  // The extension keeps 1401 in ATTC (still out of camp) regardless of ticks.
+  // The extension keeps 1401 under ATT C (still out of camp) regardless of ticks.
   const text = await page.locator("#rep-text").inputValue();
-  const attc = text.slice(text.indexOf("ATTC:"), text.indexOf("REPORT SICK:"));
-  expect(attc).toContain("1401");
+  const attc = text.split("\n").filter(l => /^\d+\. \d{4} /.test(l) && /MC/.test(l));
+  expect(attc.some(l => l.includes("1401")), "ATT C lines: " + attc).toBeTruthy();
 
   expect(errors).toEqual([]);
   await page.screenshot({ path: "test-results/parade-borderline.png", fullPage: true });

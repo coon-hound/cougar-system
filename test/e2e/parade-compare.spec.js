@@ -60,12 +60,12 @@ test("inline compare in the FP modal: newly-out card + strength delta", async ({
   const outCard = results.locator(".cmp-card-out");
   await expect(outCard).toContainText("1401");
   await expect(outCard).toContainText("HFMD");
-  await expect(outCard.locator(".badge", { hasText: "ATTC" })).toBeVisible();
+  await expect(outCard.locator(".badge", { hasText: "ATT C" })).toBeVisible();
   // One extra body out of camp → CURRENT dropped by 1, styled red (guards
   // the badge() class contract — it prefixes "badge-" itself).
   await expect(results.locator(".cmp-summary")).toContainText("CURRENT");
   await expect(results.locator(".cmp-summary .badge.badge-red", { hasText: "-1" })).toBeVisible();
-  await expect(outCard.locator(".badge.badge-red", { hasText: "ATTC" })).toBeVisible();
+  await expect(outCard.locator(".badge.badge-red", { hasText: "ATT C" })).toBeVisible();
 
   await page.screenshot({ path: "test-results/parade-compare.png", fullPage: true });
   expect(errors).toEqual([]);

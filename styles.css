@@ -57,6 +57,7 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
 .badge-yellow{background:#E3B34122;color:var(--yellow);border:1px solid #E3B34144}
 .badge-purple{background:#BC8CFF22;color:var(--purple);border:1px solid #BC8CFF44}
 .badge-accent{background:#58A6FF22;color:var(--accent);border:1px solid #58A6FF44}
+.badge-teal{background:#39D2C022;color:var(--teal);border:1px solid #39D2C044}
 .badge-pink{background:#F778BA22;color:var(--pink);border:1px solid #F778BA44}
 
 .btn{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;border:1px solid var(--border);background:var(--surface2);color:var(--text)}

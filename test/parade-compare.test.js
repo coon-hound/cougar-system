@@ -34,10 +34,9 @@ function loadBundle(state) {
 
 const DATE = "2026-07-11";
 
-// A company slice exercising every parade section at once: away MC (ATTC),
-// LD (MEDICAL STATUS), Pending (REPORT SICK), an upcoming appointment
-// (MEDICAL APPT), active leave (OTHERS), plus a commander for the
-// COMMANDERS strength line.
+// A company slice exercising every parade section at once: away MC (ATT C),
+// LD (STATUS), Pending (REPORT SICK), an upcoming appointment (MA), active
+// leave (OFF/LEAVE), plus a commander for the COY HQ strength block.
 const richState = () => ({
   roster: [
     { id: "1401", role: "Recruit", name: "Alpha One" },
@@ -92,7 +91,7 @@ module.exports = async function run() {
     eq(String(by["d4:2401"]), "REPORT_SICK", "Pending → REPORT SICK");
     eq(String(by["d4:1403"]), "MEDICAL_STATUS", "LD → MEDICAL STATUS");
     eq(String(by["d4:2403"]), "MEDICAL_APPT", "appointment → MEDICAL APPT");
-    eq(String(by["d4:2402"]), "OTHERS", "leave → OTHERS");
+    eq(String(by["d4:2402"]), "OFF_LEAVE", "leave → OFF/LEAVE");
     eq(parsedA.people.length, 5, "exactly 5 person entries (empty skeletons never count)");
   });
 
@@ -118,8 +117,10 @@ module.exports = async function run() {
     const bundle = loadBundle(st);
     const parsed = bundle.parseParadeState(bundle.generateParadeStateText("FP", DATE, "0730"));
     const mc = parsed.people.find(p => p.key === "d4:1402");
-    eq(mc.section, "MEDICAL_STATUS", "kept-in-camp MC lives under MEDICAL STATUS");
-    ok(mc.statuses[0].inCamp === true, "inCamp suffix detected");
+    // An MC is an MC wherever it is consumed: it stays under ATT C and the
+    // trailing IN marker is what says the body is counted present.
+    eq(mc.section, "ATTC", "kept-in-camp MC stays under ATT C");
+    ok(mc.statuses[0].inCamp === true, "IN marker detected");
   });
 
   await test("an MC extended by a second record parses as one MC run", () => {
@@ -137,7 +138,12 @@ module.exports = async function run() {
     eq(mc.statuses[0].family, "MC", "family is still MC");
     eq(mc.statuses[0].days, 6, "6D across both records");
     eq(mc.statuses[0].endIso, "2026-07-16", "ends at the extension, not 13 Jul");
-    ok(mc.statuses[0].extended === true, "flagged extended");
+    // The 40 SAR line carries no "(extended)" note — the merged span and day
+    // count already say it — but the parser still understands one, so a
+    // snapshot filed in the old format keeps diffing as the same MC.
+    ok(mc.statuses[0].extended === false, "no (extended) suffix in the 40 SAR line");
+    const legacy = bundle.parseParadeState(txt.replace("6D MC", "6D MC (extended)"));
+    ok(legacy.people.find(p => p.key === "d4:1402").statuses[0].extended === true, "legacy suffix still parsed");
     eq(parsed.unparsed.length, 0, "still lossless: " + JSON.stringify(parsed.unparsed));
     eq(parsed.warnings.length, 0, "no warnings: " + JSON.stringify(parsed.warnings));
   });
@@ -164,7 +170,7 @@ module.exports = async function run() {
     const chg = diffAB.people.changed.find(c => c.key === "d4:2401");
     ok(chg, "2401 is a changed entry");
     const moved = chg.changes.find(ch => ch.field === "section" && ch.kind === "moved");
-    ok(moved && moved.old === "REPORT SICK" && moved.new === "ATTC", "moved REPORT SICK → ATTC");
+    ok(moved && moved.old === "REPORT SICK" && moved.new === "ATT C", "moved REPORT SICK → ATT C");
   });
 
   await test("MC extension shows as extended (+2D), not added+removed", () => {
@@ -195,7 +201,7 @@ module.exports = async function run() {
   });
 
   await test("hand-edited strength line triggers the reconcile note", () => {
-    const mangled = txtB.replace("CURRENT STRENGTH: 5", "CURRENT STRENGTH: 3");
+    const mangled = txtB.replace("COMPANY: 5/7", "COMPANY: 3/7");
     const d = rich.diffParadeStates(rich.parseParadeState(txtA), rich.parseParadeState(mangled), {});
     ok(d.warnings.some(w => /reconcile|imply/.test(w)), "warning present: " + JSON.stringify(d.warnings));
   });
@@ -348,6 +354,6 @@ module.exports = async function run() {
     ok(txt.includes("PARADE STATE CHANGES"), "title");
     ok(txt.includes("NO LONGER LISTED (2)"), "returned group (leave return + appt done): " + txt);
     ok(txt.includes("CHANGED (3)"), "changed group: " + txt);
-    ok(/REPORT SICK -> ATTC/.test(txt), "section move line");
+    ok(/REPORT SICK -> ATT C/.test(txt), "section move line");
   });
 };
