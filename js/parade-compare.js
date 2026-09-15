@@ -12,7 +12,7 @@
 // parsed from text — never from live records.
 
 // Rank tokens stripped from names so a promotion (3SG → 2SG) never makes the
-// same person diff as removed+added. Commanders print with NO 4D (paradeRN),
+// same person diff as removed+added. A commander normally prints with NO 4D,
 // so their identity is the rank-stripped name.
 const PC_RANKS = "REC|PTE|LCP|CPL|CFC|SCT|3SG|2SG|1SG|SSG|MSG|3WO|2WO|1WO|MWO|SWO|OCT|2LT|LTA|CPT|MAJ|LTC|COL|ME[1-8]|SGT|CDT";
 const PC_RANK_RE = new RegExp("^(?:" + PC_RANKS + ")\\b[ .]*", "i");

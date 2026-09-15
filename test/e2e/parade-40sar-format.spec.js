@@ -60,9 +60,15 @@ test("the command team is picked per date and remembered for it", async ({ page 
   await expect(page.locator("#duty-section")).toContainText("unfilled");
 
   const cdo = page.locator("#duty-section label", { hasText: "CDO" }).locator("select");
+  const before = await page.locator("#duty-missing").innerText();
   await cdo.selectOption({ index: 1 });
   const picked = (await cdo.locator("option:checked").innerText()).trim();
   expect(await page.locator("#rep-text").inputValue()).toContain(`CDO: ${picked.toUpperCase()}`);
+  // The unfilled counter tracks the pick without rebuilding the selects (which
+  // would drop the focus the user is still inside).
+  expect(parseInt(await page.locator("#duty-missing").innerText(), 10))
+    .toBe(parseInt(before, 10) - 1);
+  await expect(cdo.locator("option:checked")).toHaveText(picked);
 
   // Saved against the parade date, so reopening the same date restores it.
   const date = await page.locator("#rep-date").inputValue();

@@ -2058,9 +2058,10 @@ function toDDMMYY(iso) {
   return m[3] + m[2] + m[1].slice(2);
 }
 
-// R/N formatting per chat convention. Commanders are rank+name, no 4D.
-// Recruits are "REC <NAME> C<4D>" — the C prefix marks Cougar in the
-// battalion-wide parade state.
+// R/N formatting for the S/N-block reports (the standalone Medical Status List
+// and the per-conduct chat message). Commanders are rank+name, no 4D; recruits
+// are "REC <NAME> C<4D>", the C prefix marking Cougar company. The parade state
+// itself uses paradeLineName — 4D first, per the battalion format.
 function paradeRN(d4) {
   const r = STATE.roster.find(x => x.id === d4);
   if (!r) return d4;
@@ -2792,8 +2793,22 @@ function onParadeTimeChange(type) {
 // reproduces the same command team.
 function setDutyFromPicker(dateIso, role, d4, type) {
   setDutyHolder(dateIso, role, d4);
+  // Only the unfilled counter is refreshed, not the whole section: re-rendering
+  // would rebuild the <select> the user is still inside and drop their focus.
+  const badge = document.getElementById("duty-missing");
+  if (badge) {
+    const n = paradeUnfilledDuty(dateIso);
+    badge.textContent = n ? `${n} unfilled` : "all filled";
+    badge.style.color = n ? "var(--orange)" : "var(--green)";
+  }
   regenerateReport(type);
 }
+
+// How many command-team appointments have nobody assigned for this date.
+const paradeUnfilledDuty = dateIso => {
+  const duty = dutyForDate(dateIso);
+  return paradeDutyRoles(paradeBlocks()).filter(role => !STATE.roster.some(r => r.id === duty[role])).length;
+};
 
 function renderDutySection(dateIso, type) {
   const host = document.getElementById("duty-section");
@@ -2811,9 +2826,9 @@ function renderDutySection(dateIso, type) {
       <select onchange="setDutyFromPicker('${dateIso}', '${role}', this.value, '${type}')" style="flex:1;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px">${opts}</select>
     </label>`;
   }).join("");
-  const missing = paradeDutyRoles(paradeBlocks()).filter(role => !STATE.roster.some(r => r.id === duty[role])).length;
+  const missing = paradeUnfilledDuty(dateIso);
   host.innerHTML = `<div style="font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
-    <div style="font-weight:600;margin-bottom:4px">🎖 Command team${missing ? ` — <span style="color:var(--orange)">${missing} unfilled</span>` : ""}</div>
+    <div style="font-weight:600;margin-bottom:4px">🎖 Command team — <span id="duty-missing" style="color:${missing ? "var(--orange)" : "var(--green)"}">${missing ? `${missing} unfilled` : "all filled"}</span></div>
     <div style="color:var(--muted);margin-bottom:6px">Rotates daily, so it is saved against this parade date. Unfilled appointments print as <span class="mono">&lt;RANK&gt; &lt;NAME&gt;</span>.</div>
     ${commanders.length ? rows : `<div style="color:var(--orange)">No commanders in the roster yet — add them from the Roster tab.</div>`}
   </div>`;
@@ -2846,7 +2861,7 @@ function renderApptCampSection(dateIso, type) {
     const reason = "Appt: " + (a.reason || "appointment");
     return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 6px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <input type="checkbox" ${checked} onchange="toggleApptCamp('${a.d4}', this.checked, ${JSON.stringify(reason)}, '${type}')" style="width:14px;height:14px;cursor:pointer">
-      <span>${paradeRN(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
+      <span>${paradeLineName(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
     </label>`;
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:8px 10px">
@@ -2868,7 +2883,7 @@ function renderBorderlineSection(dateIso, type) {
     const endShort = toDDMMYY(displayDateToISO(m.endDate || "")) || m.endDate || "";
     return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 6px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <input type="checkbox" ${checked} onchange="toggleBorderline('${m.d4}', this.checked, '${type}')" style="width:14px;height:14px;cursor:pointer">
-      <span>${paradeRN(m.d4)} — ${m.status} ended ${endShort}</span>
+      <span>${paradeLineName(m.d4)} — ${m.status} ended ${endShort}</span>
     </label>`;
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:#D2992211;border:1px solid #D2992244;border-radius:6px;padding:8px 10px">
