@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0005_access_admin.sql — one token may hand out access; the rest may not
+-- 0006_access_admin.sql — one token may hand out access; the rest may not
 --
 -- Until now every token was equal. Any of the 26 commander phones could, if the
 -- app offered the button, mint a permanent credential under any name it liked,
