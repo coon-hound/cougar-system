@@ -35,7 +35,12 @@
 // check it.
 // ============================================================================
 
-import postgres from "postgres";
+// `postgres` is imported lazily inside main(), NOT at the top level.
+// `.github/workflows/test.yml` runs `node test/run.js` with no `npm install`,
+// so anything a unit test can reach must not pull in an npm package on load -
+// it passes locally, where node_modules exists, and fails only in CI with
+// ERR_MODULE_NOT_FOUND. scripts/issue-invites.mjs broke the job exactly that
+// way. A static guard in test/static.test.js enforces it.
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -133,6 +138,7 @@ async function main() {
     return;
   }
 
+  const { default: postgres } = await import("postgres");
   const sql = postgres(DATABASE_URL, { prepare: false });
   try {
     const [{ label: intake }] = await sql`select label from intakes where is_current limit 1`;

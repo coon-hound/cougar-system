@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 138;
+const APP_VERSION = 139;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 138,
+    v: 139,
     date: "15 Sep 2026",
     title: "The parade state is now the battalion's format",
     intro: "40 SAR asked all five companies to file one common format so HQ can collate the battalion's strength without re-typing it. First and Last Parade State now generate exactly that. Everything you already record still appears - it is just grouped by platoon and written one line per record instead of a five-line block, which is about 65% less text.",
@@ -31,6 +31,18 @@ const PATCH_NOTES = [
       { t: "\ud83c\udf96\ufe0f Pick the command team", d: "The FP/LP screen now asks for CDO, CDS, COS and a PDS per platoon. It rotates daily, so your picks are saved against that parade\u2019s date and the next day starts from the last team you filed." },
       { t: "\ud83d\udd24 The section names changed", d: "MEDICAL STATUS is now STATUS, MEDICAL APPT is now MA, RSI sits under REPORT SICK, and leave has its own OFF/LEAVE section. Warded, guard duty, courses and book-outs all file under OTHERS." },
       { t: "\ud83d\udd0e Compare still works across the change", d: "Comparing today\u2019s state against one you copied before this release still reports the same person-level changes - the old format is still understood." },
+    ],
+  },
+  {
+    v: 138,
+    date: "15 Sep 2026",
+    title: "Handing out access from your phone",
+    intro: "Giving someone the app used to mean someone running commands on a laptop. It is now a screen in the app - but only on your device.",
+    items: [
+      { t: "\u{1F511} Access tab", d: "Pick a person from the roster, tap Create link, tap Copy. The link is tagged to them, so everything they do in the app is recorded under their name." },
+      { t: "\u{1F441}\uFE0F See who can get in", d: "Who currently has access, when they last used it, and which invites have been sent but not opened yet." },
+      { t: "\u{1F6AB} Take access away", d: "Remove a device that is already signed in, or cancel a link that has not been opened. Both from the same screen." },
+      { t: "\u{1F464} The app knows who you are", d: "It now shows who this device is signed in as, instead of holding an anonymous key." },
     ],
   },
   {

@@ -630,6 +630,172 @@ async function authenticate(req: Request, bodyAuth?: unknown) {
   return { ok: !!row?.ok, person: row?.person ?? null, reason: row?.reason ?? "unknown", token };
 }
 
+// ── Access management ───────────────────────────────────────────────────────
+//
+// EVERY ONE OF THESE IS REFUSED UNLESS THE CALLING TOKEN HAS can_invite.
+// js/* is public code served to every phone, so the screen being hidden in the
+// client protects nothing — anyone can read the source and send the request by
+// hand. This check is the control. The hiding is only so 25 people are not
+// shown a button that would tell them no.
+//
+// Refusals answer the same opaque 403 whatever the reason, so the endpoint does
+// not become a way to discover who is privileged.
+const forbidden = () => json({ error: "Not allowed", code: 403 });
+
+async function canInvite(token: string): Promise<boolean> {
+  const [row] = await sql`
+    select can_invite from auth_tokens
+     where token = ${token} and revoked_at is null and expires_at > now()`;
+  return !!row?.can_invite;
+}
+
+// The access list, carrying no credentials of any kind (see access_overview).
+async function listAccess() {
+  // `token` is populated for OPEN INVITES ONLY, and is null for everything
+  // else. A deliberate narrowing of "no credentials cross the wire": an
+  // unredeemed invite link is precisely what this page exists to hand out, and
+  // without it the link is visible once at creation and then lost forever.
+  //
+  // Auth tokens are still never sent. A redeemed or revoked invite sends
+  // nothing either — those links are dead, and a dead credential on screen is
+  // just something to confuse somebody later.
+  const rows = await sql`
+    select kind, person, d4, device_label, at, expires_at, last_seen_at, status,
+           can_invite, used_count, max_uses,
+           case when kind = 'invite' and status = 'open' then token end as token
+      from access_overview
+     order by coalesce(person, 'zzz'), device_label, at desc`;
+  return json({ ok: true, access: rows });
+}
+
+// Create an invite already tagged to a person. The name and 4D are taken from
+// the ROSTER, not from whatever the client sent: a client-supplied name would
+// let a tampered request mint a credential labelled as somebody it is not, and
+// that label is what the audit trail reports for everything they then do.
+async function createInvite(d4: unknown, deviceLabel: unknown, days: unknown, uses: unknown) {
+  const key = padD4(d4);
+  if (!key) return json({ error: "No 4D given" });
+
+  const [person] = await sql`
+    select "id", "name", "role" from roster
+     where "id" = ${key} and deleted_at is null`;
+  if (!person) return json({ error: `Nobody on the current roster has 4D ${key}` });
+
+  // Scoped to (person, DEVICE), not person. Someone with a phone and a tablet
+  // needs two open links at once, and blocking the second was the screen
+  // refusing the exact thing it exists to do.
+  //
+  // A second open link for the SAME device is still refused: that is two live
+  // credentials for one device with no way to tell which was used, which is
+  // the one case where the block helps rather than gets in the way.
+  const label = String(deviceLabel || "device");
+  const [existing] = await sql`
+    select token from invites
+     where d4 = ${key} and device_label = ${label} and revoked_at is null
+       and used_count < max_uses and (expires_at is null or expires_at > now())`;
+  if (existing) {
+    return json({ error: `${person.name} already has an unopened link for "${label}". Cancel it, or name this device something else.` });
+  }
+
+  const n = Math.min(Math.max(Number(days) || 14, 1), 90);
+  // More than one use lets the same link cover a second device, and lets
+  // someone re-join after their browser cleared its storage — which takes the
+  // token with it, and is the most common way access is lost. Capped so a link
+  // cannot be passed around indefinitely.
+  const u = Math.min(Math.max(Number(uses) || 1, 1), 5);
+  const token = crypto.randomUUID();
+  await sql`
+    insert into invites (token, person, d4, device_label, max_uses, expires_at)
+    values (${token}, ${person.name}, ${key}, ${label},
+            ${u}, now() + make_interval(days => ${n}))`;
+  return json({ ok: true, token, person: person.name, d4: key, days: n, uses: u });
+}
+
+// Revoke by PERSON, never by token: the client is never given a credential, so
+// it cannot be asked to hand one back. Kills the open invite, the live devices,
+// or both — because "take away their access" almost always means both, and
+// revoking only the link leaves a phone that is already signed in still signed in.
+// "I cleared my browser and now I cannot get in."
+//
+// The commonest way access is lost, and until now a dead end: clearing site
+// data takes localStorage with it, so the token is gone from the phone while
+// the row in auth_tokens still looks perfectly active. last_seen_at quietly
+// stops moving and nothing surfaces it. issue-invites.mjs --from-roster even
+// SKIPS them, because they count as already set up.
+//
+// Both halves in one transaction, so a failure cannot leave someone revoked
+// with no way back in: kill the dead token for that person and device, mint a
+// fresh link for the same person and device, hand it back ready to send.
+async function reissueAccess(d4: unknown, deviceLabel: unknown, days: unknown, uses: unknown) {
+  const key = padD4(d4);
+  if (!key) return json({ error: "No 4D given" });
+  const label = String(deviceLabel || "device");
+
+  const [person] = await sql`
+    select "id", "name" from roster where "id" = ${key} and deleted_at is null`;
+  if (!person) return json({ error: `Nobody on the current roster has 4D ${key}` });
+
+  const n = Math.min(Math.max(Number(days) || 90, 1), 90);
+  const u = Math.min(Math.max(Number(uses) || 3, 1), 5);
+  const token = crypto.randomUUID();
+
+  const out = await sql.begin(async (tx) => {
+    // Never the owner's own token: the screen that manages everyone else's
+    // access must not be able to lock its operator out of it.
+    const dead = await tx`
+      update auth_tokens set revoked_at = now()
+       where d4 = ${key} and device_label = ${label}
+         and revoked_at is null and can_invite = false
+       returning token`;
+    // Any unopened link for the same device is superseded by this one.
+    await tx`
+      update invites set revoked_at = now()
+       where d4 = ${key} and device_label = ${label}
+         and revoked_at is null and used_count < max_uses`;
+    await tx`
+      insert into invites (token, person, d4, device_label, max_uses, expires_at)
+      values (${token}, ${person.name}, ${key}, ${label}, ${u},
+              now() + make_interval(days => ${n}))`;
+    return { replaced: dead.length };
+  });
+
+  return json({ ok: true, token, person: person.name, d4: key,
+                device: label, days: n, uses: u, replaced: out.replaced });
+}
+
+async function revokeAccess(d4: unknown, what: unknown, device: unknown) {
+  const key = padD4(d4);
+  if (!key) return json({ error: "No 4D given" });
+  const scope = String(what || "all");
+  // A person may hold several tokens — a phone and a tablet are two rows, and
+  // nothing in the schema stops that. `device` narrows the revoke to one of
+  // them, so a lost tablet does not sign someone out of the phone in their
+  // pocket. Absent, it means all of them, which is what "remove their access"
+  // usually means.
+  const one = device ? String(device) : null;
+  let invites = 0, tokens = 0;
+
+  if (scope === "all" || scope === "invite") {
+    const r = await sql`
+      update invites set revoked_at = now()
+       where d4 = ${key} and revoked_at is null and used_count < max_uses
+         and (${one}::text is null or device_label = ${one})
+       returning token`;
+    invites = r.length;
+  }
+  if (scope === "all" || scope === "token") {
+    // can_invite tokens are excluded: the owner cannot be locked out of the
+    // system by the screen that exists to manage everyone else's access.
+    const r = await sql`
+      update auth_tokens set revoked_at = now()
+       where d4 = ${key} and revoked_at is null and can_invite = false
+         and (${one}::text is null or device_label = ${one})
+       returning token`;
+    tokens = r.length;
+  }
+  return json({ ok: true, d4: key, device: one, invitesRevoked: invites, devicesRevoked: tokens });
+}
+
 async function redeemInvite(token: string) {
   return await sql.begin(async (tx) => {
     const [inv] = await tx`select * from invites where token = ${token} for update`;
@@ -702,6 +868,43 @@ Deno.serve(async (req) => {
     // touches revs, the write queue, or the audit log — see the section above.
     if (action === "usageAppend") return await usageAppend(body);
     if (action === "usageRead") return await usageRead(body);
+
+    // ── Identity and access management ─────────────────────────────────────
+    //
+    // whoami needs no capability: every client asks it on launch so it can show
+    // who is signed in. The three that follow are refused without can_invite,
+    // and that refusal — not the client hiding a button — is the control.
+    if (action === "whoami") {
+      const [me] = await sql`select * from whoami(${auth.token})`;
+      return json({
+        ok: true,
+        person: me?.person ?? null,
+        d4: me?.d4 ?? null,
+        device: me?.device_label ?? null,
+        canInvite: !!me?.can_invite,
+        expiresAt: me?.expires_at ?? null,
+      });
+    }
+
+    if (action === "listAccess" || action === "createInvite"
+        || action === "reissueAccess" || action === "revokeAccess") {
+      if (!(await canInvite(auth.token))) {
+        await sql`select log_audit(${auth.token}, ${action}, null, null, false,
+                                   ${sql.json({ reason: "not allowed" })})`;
+        return forbidden();
+      }
+      let out: Response;
+      if (action === "listAccess") out = await listAccess();
+      else if (action === "createInvite") out = await createInvite(body.d4, body.device, body.days, body.uses);
+      else if (action === "reissueAccess") out = await reissueAccess(body.d4, body.device, body.days, body.uses);
+      else out = await revokeAccess(body.d4, body.what, body.device);
+      // Handing out or taking away access is exactly the kind of act the audit
+      // trail exists for, so it is recorded like any other mutation.
+      await sql`select log_audit(${auth.token}, ${action}, null,
+                                 ${String(body.d4 ?? "")}, true,
+                                 ${sql.json({ what: String(body.what ?? "") })})`;
+      return out;
+    }
 
     const tab = String(body.tab ?? "");
     const table = TABLE[tab];
