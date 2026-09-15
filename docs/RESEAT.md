@@ -36,10 +36,13 @@ Keep that file **outside this repository**: it carries real names, and this repo
 
 ```
 SECTION 1 — 9
-HU CHEN — 🔵 Hunter Driver
-HO SAM HIN, JAYDEN — 🟢 AI
+LI WEI — 🔵 Hunter Driver
+NG SOON KIT, DARREN — 🟢 AI
 ...
 ```
+
+(Every name in this file is invented. Real ones must never land in this
+repository - it is public. See the note on `*.csv` in `CLAUDE.md`.)
 
 Preview first. It reads and writes nothing, and you can run it as often as you like.
 
@@ -68,10 +71,10 @@ Near misses are **ranked but never accepted**.
 The report prints the candidates with a similarity score and the exact line to add:
 
 ```
-  ✗ line 8: no recruit in platoon 9 is named "AHMAD BAHAGGI BIN JURAIMI".
-      9101  79%  AHMAD BAIHAQQI BIN JURAIMI
+  ✗ line 8: no recruit in platoon 5 is named "ZAKIR MAHFUZ BIN OMAR".
+      5101  83%  ZAKIR MAHFOOZ BIN OMAR
       ...
-      if that is him, change the line to:  AHMAD BAHAGGI BIN JURAIMI [9101]
+      if that is him, change the line to:  ZAKIR MAHFUZ BIN OMAR [5101]
 ```
 
 A trailing `[4D]` pins that line to that roster row.
