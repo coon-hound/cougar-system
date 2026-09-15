@@ -15,11 +15,13 @@ function openPerson(d4) {
   const p = STATE.roster.find(r => r.id === d4); if (!p) return;
   const med = STATE.medical.filter(m => m.d4 === d4);
   const ippts = STATE.ippt.filter(i => i.d4 === d4).sort((a, b) => a.attempt - b.attempt);
-  // Commanders never show their 00xx id — surface rank instead. Recruits keep
-  // the existing "4D — status" header.
+  // Commanders never show their 00xx id — surface rank instead. Enlistees show
+  // "<RANK> · <4D> — status": the rank is there because it now MOVES (REC to
+  // PTE on posting into unit training), so a commander checking a man against
+  // the battalion's nominal roll can see it without opening the parade state.
   let html = p.role === "Commander"
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}</div>`;
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} — ${statusBadge(p.status)}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ────────
   // Reflects the shared out-of-camp computation. The lever is state-specific:
@@ -1693,8 +1695,23 @@ function toDDMMYY(iso) {
   return m[3] + m[2] + m[1].slice(2);
 }
 
+// An enlistee's rank is whatever the Roster says, NOT a constant. A cohort
+// enlists as REC and is promoted — to PTE on posting out of BMT into unit
+// training — and the parade state has to follow them, because it is read
+// against the battalion's nominal roll. This used to be the literal "REC" at
+// three call sites, which silently outranked the column for everybody.
+//
+// "REC" remains the fallback for a row whose rank was never filled in, which
+// is what every enlistee row looked like before the column carried anything.
+// `role` is deliberately NOT consulted here: that field is the Commander /
+// not-Commander switch the whole app scopes on, and it has only ever had two
+// values. Rank is the thing that moves.
+function rosterRank(r) {
+  return String(r?.rank || "").trim().toUpperCase() || "REC";
+}
+
 // R/N formatting per chat convention. Commanders are rank+name, no 4D.
-// Recruits are "REC <NAME> C<4D>" — the C prefix marks Cougar in the
+// Enlistees are "<RANK> <NAME> C<4D>" — the C prefix marks Cougar in the
 // battalion-wide parade state.
 function paradeRN(d4) {
   const r = STATE.roster.find(x => x.id === d4);
@@ -1705,7 +1722,7 @@ function paradeRN(d4) {
   // store the recruit 4D as "C1415" already, which would round-trip to
   // "CC1415" otherwise.
   const bareId = String(r.id).replace(/^C/i, "");
-  return `REC ${name} C${bareId}`;
+  return `${rosterRank(r)} ${name} C${bareId}`;
 }
 
 // Duration label per chat samples ("Duration: 180526 - 010626"). Pending /
@@ -2057,7 +2074,7 @@ function generateMSKReportText(dateIso, time) {
     const name = (r.name || "").toUpperCase();
     if (r.role === "Commander") return [r.rank, name].filter(Boolean).join(" ");
     const bareId = String(r.id).replace(/^C/i, "");
-    return `REC ${name} ${bareId}`;
+    return `${rosterRank(r)} ${name} ${bareId}`;
   };
 
   const blocks = cases.map((c, idx) => {
@@ -2889,7 +2906,7 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
   const startNice = isoToDisplayDate(startIso);
   const endNice = isoToDisplayDate(endIso);
   const bareId = String(r.id).replace(/^C/i, "");
-  const recHeader = `REC ${(r.name || "").toUpperCase()} ${bareId}`;
+  const recHeader = `${rosterRank(r)} ${(r.name || "").toUpperCase()} ${bareId}`;
 
   // Two parallel chart blocks — same layout/captions, different image src.
   const noChartsBlock = "";
