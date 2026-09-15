@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 132;
+const APP_VERSION = 136;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 136,
+    date: "15 Sep 2026",
+    title: "Handing out access from your phone",
+    intro: "Giving someone the app used to mean someone running commands on a laptop. It is now a screen in the app - but only on your device.",
+    items: [
+      { t: "\u{1F511} Access tab", d: "Pick a person from the roster, tap Create link, tap Copy. The link is tagged to them, so everything they do in the app is recorded under their name." },
+      { t: "\u{1F441}\uFE0F See who can get in", d: "Who currently has access, when they last used it, and which invites have been sent but not opened yet." },
+      { t: "\u{1F6AB} Take access away", d: "Remove a device that is already signed in, or cancel a link that has not been opened. Both from the same screen." },
+      { t: "\u{1F464} The app knows who you are", d: "It now shows who this device is signed in as, instead of holding an anonymous key." },
+    ],
+  },
   {
     v: 132,
     date: "14 Sep 2026",

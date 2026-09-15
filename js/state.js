@@ -209,6 +209,11 @@ const STATE = {
   nav: "dashboard",
   apiUrl: API_URL,
   authToken: localStorage.getItem(AUTH_KEY) || "",
+  // Who this device is signed in as, answered by the backend on launch. Null
+  // until then, and null for an offline/unauthenticated session. `canInvite`
+  // is a rendering hint ONLY - the backend enforces it regardless of what this
+  // says, because this file is public code.
+  me: null,
   roster: [], medical: [], attendance: [], ippt: [], conductDetail: [], appointments: [], leave: [], msk: [],
   // Canonical conduct registry: [{id: "c001", name: "Orientation Run"}, ...].
   // Source of truth for the conduct dimension — records on attendance/polar/

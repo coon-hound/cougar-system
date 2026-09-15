@@ -252,6 +252,12 @@ async function tryRedeemInviteFromURL() {
     maybeRestoreDirty();
   }
 
+  // Ask the backend who this device is signed in as, and whether it may hand
+  // out access. Deliberately AFTER the first render: it is one extra round
+  // trip and nothing on screen depends on it, so it must not delay the app
+  // appearing on a phone with poor signal.
+  if (STATE.authToken) refreshIdentity();
+
   // Keep this tab fresh: poll the cheap revCheck endpoint (~20s while visible +
   // on focus/visibility/online) and pull only changed tabs. STATE.rev was just
   // baselined by the launch pull (awaited above, or in autoSyncOnLaunch's
@@ -280,4 +286,25 @@ function maybeRestoreDirty() {
     scheduleAutoRetry(true);
   }
   if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();
+}
+
+// Who is holding this phone, and may they hand out access?
+//
+// The Access tab is hidden in index.html and revealed only if the BACKEND says
+// this token has the capability. That is presentation, not protection: js/* is
+// public code, so anyone can unhide the button or call the action directly.
+// The Edge Function refuses it either way. Hiding just spares 25 commanders a
+// button that would only ever tell them no.
+async function refreshIdentity() {
+  try {
+    const me = await API.whoami();
+    if (!me || me.error) return;
+    STATE.me = me;
+    const btn = document.querySelector('.nav-btn[data-nav="access"]');
+    if (btn && me.canInvite) btn.hidden = false;
+    if (STATE.nav === "access") render();
+  } catch {
+    // An offline launch or an old backend that has never heard of whoami.
+    // Neither is an error worth showing: the app works, the tab stays hidden.
+  }
 }

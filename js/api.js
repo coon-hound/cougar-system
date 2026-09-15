@@ -82,6 +82,31 @@ const API = {
       body: JSON.stringify({ action: "redeemInvite", token })
     });
   },
+  // ── Access management ─────────────────────────────────────────────────
+  //
+  // whoami is asked by EVERY client on launch, so the app can say who is
+  // signed in instead of holding an anonymous token string. The other three
+  // are refused by the backend for any token without the can_invite
+  // capability; hiding the screen in this file protects nothing, because this
+  // file is public code served to every phone.
+  async whoami() {
+    return this.post({ action: "whoami" });
+  },
+  async listAccess() {
+    return this.post({ action: "listAccess" });
+  },
+  // The name is NOT sent: the backend takes it from the roster row for this
+  // 4D, so a tampered request cannot mint a credential labelled as someone it
+  // is not — and that label is what the audit trail reports thereafter.
+  async createInvite(d4, device, days) {
+    return this.post({ action: "createInvite", d4, device, days });
+  },
+  // Revokes by PERSON. The client is never handed a token, so it cannot be
+  // asked to give one back.
+  async revokeAccess(d4, what) {
+    return this.post({ action: "revokeAccess", d4, what });
+  },
+
   async pullAll() {
     // readAll moves every tab in one response - give it double the timeout.
     const data = await this.get("readAll", "", { timeoutMs: 60000 });

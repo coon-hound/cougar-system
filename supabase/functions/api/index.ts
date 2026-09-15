@@ -630,6 +630,93 @@ async function authenticate(req: Request, bodyAuth?: unknown) {
   return { ok: !!row?.ok, person: row?.person ?? null, reason: row?.reason ?? "unknown", token };
 }
 
+// ── Access management ───────────────────────────────────────────────────────
+//
+// EVERY ONE OF THESE IS REFUSED UNLESS THE CALLING TOKEN HAS can_invite.
+// js/* is public code served to every phone, so the screen being hidden in the
+// client protects nothing — anyone can read the source and send the request by
+// hand. This check is the control. The hiding is only so 25 people are not
+// shown a button that would tell them no.
+//
+// Refusals answer the same opaque 403 whatever the reason, so the endpoint does
+// not become a way to discover who is privileged.
+const forbidden = () => json({ error: "Not allowed", code: 403 });
+
+async function canInvite(token: string): Promise<boolean> {
+  const [row] = await sql`
+    select can_invite from auth_tokens
+     where token = ${token} and revoked_at is null and expires_at > now()`;
+  return !!row?.can_invite;
+}
+
+// The access list, carrying no credentials of any kind (see access_overview).
+async function listAccess() {
+  const rows = await sql`
+    select kind, person, d4, device_label, at, expires_at, last_seen_at, status, can_invite
+      from access_overview
+     order by coalesce(d4, 'zzzz'), at desc`;
+  return json({ ok: true, access: rows });
+}
+
+// Create an invite already tagged to a person. The name and 4D are taken from
+// the ROSTER, not from whatever the client sent: a client-supplied name would
+// let a tampered request mint a credential labelled as somebody it is not, and
+// that label is what the audit trail reports for everything they then do.
+async function createInvite(d4: unknown, deviceLabel: unknown, days: unknown) {
+  const key = padD4(d4);
+  if (!key) return json({ error: "No 4D given" });
+
+  const [person] = await sql`
+    select "id", "name", "role" from roster
+     where "id" = ${key} and deleted_at is null`;
+  if (!person) return json({ error: `Nobody on the current roster has 4D ${key}` });
+
+  // One live invite per person. Issuing a second while the first is still open
+  // means two working links for one seat and no way to tell which was used.
+  const [existing] = await sql`
+    select token from invites
+     where d4 = ${key} and revoked_at is null
+       and used_count < max_uses and (expires_at is null or expires_at > now())`;
+  if (existing) {
+    return json({ error: `${person.name} already has an open invite. Revoke it first.` });
+  }
+
+  const n = Math.min(Math.max(Number(days) || 14, 1), 90);
+  const token = crypto.randomUUID();
+  await sql`
+    insert into invites (token, person, d4, device_label, max_uses, expires_at)
+    values (${token}, ${person.name}, ${key}, ${String(deviceLabel || "phone")},
+            1, now() + make_interval(days => ${n}))`;
+  return json({ ok: true, token, person: person.name, d4: key, days: n });
+}
+
+// Revoke by PERSON, never by token: the client is never given a credential, so
+// it cannot be asked to hand one back. Kills the open invite, the live devices,
+// or both — because "take away their access" almost always means both, and
+// revoking only the link leaves a phone that is already signed in still signed in.
+async function revokeAccess(d4: unknown, what: unknown) {
+  const key = padD4(d4);
+  if (!key) return json({ error: "No 4D given" });
+  const scope = String(what || "all");
+  let invites = 0, tokens = 0;
+
+  if (scope === "all" || scope === "invite") {
+    const r = await sql`
+      update invites set revoked_at = now()
+       where d4 = ${key} and revoked_at is null and used_count < max_uses
+       returning token`;
+    invites = r.length;
+  }
+  if (scope === "all" || scope === "token") {
+    const r = await sql`
+      update auth_tokens set revoked_at = now()
+       where d4 = ${key} and revoked_at is null and can_invite = false
+       returning token`;
+    tokens = r.length;
+  }
+  return json({ ok: true, d4: key, invitesRevoked: invites, devicesRevoked: tokens });
+}
+
 async function redeemInvite(token: string) {
   return await sql.begin(async (tx) => {
     const [inv] = await tx`select * from invites where token = ${token} for update`;
@@ -702,6 +789,41 @@ Deno.serve(async (req) => {
     // touches revs, the write queue, or the audit log — see the section above.
     if (action === "usageAppend") return await usageAppend(body);
     if (action === "usageRead") return await usageRead(body);
+
+    // ── Identity and access management ─────────────────────────────────────
+    //
+    // whoami needs no capability: every client asks it on launch so it can show
+    // who is signed in. The three that follow are refused without can_invite,
+    // and that refusal — not the client hiding a button — is the control.
+    if (action === "whoami") {
+      const [me] = await sql`select * from whoami(${auth.token})`;
+      return json({
+        ok: true,
+        person: me?.person ?? null,
+        d4: me?.d4 ?? null,
+        device: me?.device_label ?? null,
+        canInvite: !!me?.can_invite,
+        expiresAt: me?.expires_at ?? null,
+      });
+    }
+
+    if (action === "listAccess" || action === "createInvite" || action === "revokeAccess") {
+      if (!(await canInvite(auth.token))) {
+        await sql`select log_audit(${auth.token}, ${action}, null, null, false,
+                                   ${sql.json({ reason: "not allowed" })})`;
+        return forbidden();
+      }
+      let out: Response;
+      if (action === "listAccess") out = await listAccess();
+      else if (action === "createInvite") out = await createInvite(body.d4, body.device, body.days);
+      else out = await revokeAccess(body.d4, body.what);
+      // Handing out or taking away access is exactly the kind of act the audit
+      // trail exists for, so it is recorded like any other mutation.
+      await sql`select log_audit(${auth.token}, ${action}, null,
+                                 ${String(body.d4 ?? "")}, true,
+                                 ${sql.json({ what: String(body.what ?? "") })})`;
+      return out;
+    }
 
     const tab = String(body.tab ?? "");
     const table = TABLE[tab];

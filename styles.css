@@ -648,3 +648,10 @@ tbody tr:last-child td{border-bottom:none}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0ms!important;scroll-behavior:auto!important}
 }
+
+/* A nav button carrying [hidden] must actually be hidden.
+   `.nav-btn { display: flex }` wins over the browser's `[hidden]{display:none}`
+   on specificity, so the Access tab rendered for everybody while reporting
+   el.hidden === true. Caught by test/e2e/access-admin.spec.js, which asserts
+   visibility rather than the property. */
+.nav-btn[hidden] { display: none !important; }
