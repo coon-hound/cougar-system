@@ -219,6 +219,33 @@ test("changing the parade date re-renders the command team and the state", async
   expect(errors).toEqual([]);
 });
 
+test("the view filter never narrows the parade state", async ({ page }) => {
+  // The topbar scope filter narrows every per-recruit view. A parade state is
+  // the WHOLE company by definition, so a PDS who left the app filtered to one
+  // platoon must not file a state missing two thirds of the company.
+  const errors = [];
+  page.on("pageerror", e => errors.push(e.message));
+  await seedAndGoto(page);
+  await seedBusyMorning(page);
+
+  const unfiltered = await page.evaluate(() => { openReportModal("FP"); const t = document.getElementById("rep-text").value; closeModal(); return t; });
+  const filtered = await page.evaluate(() => {
+    STATE.filterPlt = "1";
+    STATE.filterRole = "Recruit";
+    STATE.filterProgram = "PTP";
+    saveFilter(); render();
+    openReportModal("FP");
+    return document.getElementById("rep-text").value;
+  });
+
+  expect(violations(filtered), filtered).toEqual([]);
+  expect(filtered).toBe(unfiltered);
+  expect(filtered).toMatch(/^COMPANY: \d+\/7$/m);
+  expect(filtered).toMatch(/^PL 2: /m);          // the filtered-out platoon is still filed
+  expect(filtered).toMatch(/^COY HQ: \d\/1$/m);   // …and so is the commander
+  expect(errors).toEqual([]);
+});
+
 test("copy archives the new format and the change summary reads it back", async ({ page }) => {
   page.on("dialog", d => d.accept());   // headless clipboard is blocked → alert fallback
   const errors = [];
