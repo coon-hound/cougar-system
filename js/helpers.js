@@ -3,6 +3,48 @@
 
 const getName = d4 => STATE.roster.find(r => r.id === d4)?.name || d4;
 
+// ── Design tokens on canvas ──────────────────────────────
+// Chart.js paints into a <canvas>, which only understands real colour strings —
+// `var(--accent)` resolves to nothing there. cssColor() reads a custom property
+// off :root so styles.css stays the single source of truth for the palette even
+// for charts. Resolve once per chart build, never per data point: each lookup is
+// a getComputedStyle call. Values are cached because the palette is static for
+// the life of the page.
+const _cssColorCache = new Map();
+function cssColor(name, fallback) {
+  if (_cssColorCache.has(name)) return _cssColorCache.get(name);
+  let v = "";
+  try {
+    v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  } catch (e) { v = ""; }
+  // Fall back to a visible colour, never to "" — an empty string reads as
+  // transparent on canvas and the chart silently loses a series. An explicit
+  // "" fallback is the one exception: it is how cssColorA asks "does this
+  // token exist?" without being handed a stand-in.
+  const out = v || (fallback === "" ? "" : (fallback || "#A69E98"));
+  _cssColorCache.set(name, out);
+  return out;
+}
+
+// The alpha washes charts use (fills under a line, soft grid, faint bar tints).
+// styles.css publishes rgb triplets (--accentRGB etc.) exactly so these can be
+// derived. Tokens without a triplet (--border, --muted) are decomposed here
+// instead, because canvas cannot parse color-mix() and dropping the alpha would
+// turn a faint gridline into a solid one.
+function cssColorA(name, alpha, fallback) {
+  const rgb = cssColor(name + "RGB", "");
+  if (rgb) return `rgba(${rgb},${alpha})`;
+  const solid = cssColor(name, fallback);
+  const hex = /^#([0-9a-f]{6})$/i.exec(solid.trim());
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+  }
+  const m = /^rgba?\(([^)]+)\)$/i.exec(solid.trim());
+  if (m) return `rgba(${m[1].split(/[,\s\/]+/).slice(0, 3).join(",")},${alpha})`;
+  return solid;
+}
+
 // ── Global platoon/section scope ─────────────────────────
 // Filter applies to every per-recruit view (Roster, Medical, IPPT, RM, SOC,
 // Polar, Dashboard counts). Attendance is per-conduct (no recruit linkage in
@@ -27,60 +69,30 @@ function getSect(r) {
   return m ? m[1] : "";
 }
 
-// ── Training programs (PTP / BMT / Combined) ─────────────
-// The company can split into parallel training programs, each owning a set of
-// platoons (e.g. PTP = Plt 1+4, BMT = Plt 2+3). A conduct is logged per program
-// so the two never collide; "Combined" means both programs together (everyone).
-// The plt→program mapping lives in STATE.programs (editable), but the resolved
-// label is STORED on each conduct record so it's authoritative and never drifts.
-const PROGRAM_COMBINED = "Combined";
+// ── Conduct scope ────────────────────────────────────────────────
+// A conduct is logged against a SCOPE: the whole company, one platoon, a named
+// group, or a saved combined group. The resolved value is STORED on each
+// conduct record (the `program` field, kept under that name so the sheet
+// column, the dedup tuple and every archived row stay byte-identical).
+//
+// This replaced a PTP / BMT / Combined program dimension, which split the
+// company into parallel training programs owning fixed platoons. Intake 16
+// does not split that way, and the platoon map it depended on (1+4 / 2+3) died
+// with the platoons themselves. Archived records still carry their old bare
+// program key; those read as company-wide and keep their original label.
+const SCOPE_COMPANY = "company";
 
-// Single choke point for legacy rows: any conduct record written before programs
-// existed (no `program` field) reads as "Combined" so history keeps working.
-const progKey = x => (x && x.program) ? String(x.program) : PROGRAM_COMBINED;
-
-// Program key owning a given platoon string, or "" if unmapped.
-function programOfPlt(plt) {
-  if (plt === "" || plt == null) return "";
-  const p = String(plt);
-  const hit = (STATE.programs || []).find(pr => (pr.platoons || []).map(String).includes(p));
-  return hit ? hit.key : "";
-}
-// A recruit's training program. The explicit per-recruit `program` column is
-// authoritative (BMT membership isn't a clean platoon partition — some Plt1/Plt4
-// recruits do BMT); fall back to the platoon→program map only when the column is
-// blank, so recruits added later without a value still resolve sensibly.
-const programOf = r => (r && r.program && String(r.program).trim()) || programOfPlt(getPlt(r));
-
-// Roster (recruits only — commanders aren't tracked in conduct attendance) for a
-// program. Combined / "" / unknown key → all recruits (both programs together).
-function recruitsInProgram(key) {
-  const recruits = STATE.roster.filter(r => r.role !== "Commander");
-  if (!key || key === PROGRAM_COMBINED) return recruits;
-  return recruits.filter(r => programOf(r) === key);
-}
-
-const programLabel = key => {
-  const k = key || PROGRAM_COMBINED;
-  if (k === PROGRAM_COMBINED) return PROGRAM_COMBINED;
-  const hit = (STATE.programs || []).find(pr => pr.key === k);
-  return hit ? (hit.name || hit.key) : k;
-};
-// Distinct CSS-var colour per program for the table badges / pills.
-function programColor(key) {
-  const k = key || PROGRAM_COMBINED;
-  if (k === PROGRAM_COMBINED) return "var(--muted)";
-  const idx = (STATE.programs || []).findIndex(pr => pr.key === k);
-  const palette = ["var(--accent)", "var(--green)", "var(--purple)", "var(--orange)", "var(--yellow)"];
-  return idx >= 0 ? palette[idx % palette.length] : "var(--accent)";
-}
+// Single choke point for legacy rows: a conduct record written before scopes
+// existed (no `program` field) reads as the whole company, as does one written
+// against a program that no longer exists.
+const scopeKey = x => (x && x.program) ? String(x.program) : SCOPE_COMPANY;
 
 // ── Recruit groups (ad-hoc named subsets, e.g. "Guard Duty") ─────
 // A group cuts ACROSS platoons and behaves like the platoon filter/scope.
 // Membership is stored on the Roster row as a comma-delimited `groups` string
 // (synced like `location`), so the whole company shares it; the set of group
 // NAMES is DERIVED from the roster - a group exists exactly while it has ≥1
-// member - so there's one source of truth, same as platoons/programs. Commas
+// member - so there's one source of truth, same as platoons. Commas
 // are the delimiter, so group names must not contain commas (enforced on input).
 function getGroups(r) {
   return String((r && r.groups) || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -92,29 +104,27 @@ function allGroupNames() {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 // Recruit members of a group (commanders excluded, matching strength/conduct/
-// book-out convention). Named distinctly from recruitsInProgram.
+// book-out convention).
 function groupMembers(name) {
   return (STATE.roster || []).filter(r => r.role !== "Commander" && recruitInGroup(r, name));
 }
 
 // ── Combined groups (saved set-formulas) ─────────────────────────
 // A scope token → the recruit d4s it selects (commanders always excluded).
-// Tokens: "company" | "plt:N" | "prog:KEY" | "grp:NAME". THE resolver shared by
+// Tokens: "company" | "plt:N" | "grp:NAME". THE resolver shared by
 // combined-group membership, the filter and the book-out scope, so a combined
 // group means the same everywhere.
 function scopeTokenMembers(token) {
   const recruits = (STATE.roster || []).filter(r => r.role !== "Commander");
   if (token === "company") return recruits.map(r => r.id);
   if (token.indexOf("plt:") === 0) { const p = token.slice(4); return recruits.filter(r => getPlt(r) === p).map(r => r.id); }
-  if (token.indexOf("prog:") === 0) { const k = token.slice(5); return recruits.filter(r => programOf(r) === k).map(r => r.id); }
   if (token.indexOf("grp:") === 0) { const g = token.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
   return [];
 }
-// Human label for a token, e.g. "P4", "PTP", "⦿ Guard Duty", "▣ Night Ex".
+// Human label for a token, e.g. "P4", "⦿ Guard Duty", "▣ Night Ex".
 function scopeTokenLabel(token) {
   if (token === "company") return "Company";
   if (token.indexOf("plt:") === 0) return "P" + token.slice(4);
-  if (token.indexOf("prog:") === 0) return programLabel(token.slice(5));
   if (token.indexOf("grp:") === 0) return "⦿ " + token.slice(4);
   if (token.indexOf("comb:") === 0) return "▣ " + token.slice(5);
   return token;
@@ -140,7 +150,7 @@ function combinedFormula(def) {
 
 // Resolve a scope value to the recruit d4s it selects (commanders excluded).
 // Accepts the same values the book-out picker uses: "company" | "plt:N" |
-// "prog:KEY" | "grp:NAME" | "comb:NAME". Unlike bookOutTargets this is NOT
+// "grp:NAME" | "comb:NAME". Unlike bookOutTargets this is NOT
 // camp-filtered — callers like bulk leave/out want everyone in the scope
 // regardless of their current in/out-of-camp state. "person"/"" → [].
 function scopeRecruits(scope) {
@@ -148,30 +158,38 @@ function scopeRecruits(scope) {
   if (!scope || scope === "person") return [];
   if (scope === "company") return recruits.map(r => r.id);
   if (scope.indexOf("plt:") === 0) { const p = scope.slice(4); return recruits.filter(r => getPlt(r) === p).map(r => r.id); }
-  if (scope.indexOf("prog:") === 0) { const k = scope.slice(5); return recruits.filter(r => programOf(r) === k).map(r => r.id); }
   if (scope.indexOf("grp:") === 0) { const g = scope.slice(4); return recruits.filter(r => recruitInGroup(r, g)).map(r => r.id); }
   if (scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return recruits.filter(r => set.has(r.id)).map(r => r.id); }
   return [];
 }
 
-// ── Conduct scope (program key OR scope token) ───────────────────
-// Conduct records historically store a bare program key ("PTP"/"BMT"/
-// "Combined") in their `program` field. Group-scoped conducts widen that
-// value domain to scope tokens ("plt:N"/"grp:NAME"/"comb:NAME") — the field
-// name, sheet column and dedup tuple stay unchanged, old rows stay byte-
-// identical. "prog:KEY" is never written (it would alias the bare key and
-// break dedup against existing rows).
+// ── Resolving a stored conduct scope ─────────────────────────────
+// A conduct's stored scope is either a token ("plt:N"/"grp:NAME"/"comb:NAME")
+// or the bare company scope. "prog:KEY" is never written here: the field also
+// holds bare values, so a prefixed program key would alias one and split the
+// dedup tuple against existing rows.
 const isConductScopeToken = v => typeof v === "string" && /^(plt|grp|comb):/.test(v);
-// Roster objects (commanders excluded) in a conduct's scope value.
+// Roster objects (commanders excluded) in a conduct's scope value. Anything
+// that is not a token - the company scope, a blank, or an archived program key
+// like "PTP" - resolves to every recruit.
 function conductScopeRoster(v) {
-  if (!isConductScopeToken(v)) return recruitsInProgram(v);
+  if (!isConductScopeToken(v)) return (STATE.roster || []).filter(r => r.role !== "Commander");
   const ids = new Set(scopeRecruits(v));
   return STATE.roster.filter(r => ids.has(r.id));
 }
-const conductScopeLabel = v => isConductScopeToken(v) ? scopeTokenLabel(v) : programLabel(v);
-const conductScopeColor = v => isConductScopeToken(v) ? "var(--purple)" : programColor(v);
+// Legacy program keys are shown verbatim rather than rewritten to "Company":
+// the record really was logged against PTP or BMT, and an archive that relabels
+// itself is worse than one that names something no longer in use.
+const conductScopeLabel = v =>
+  isConductScopeToken(v) ? scopeTokenLabel(v)
+    : (!v || v === SCOPE_COMPANY) ? "Company"
+    : String(v);
+const conductScopeColor = v =>
+  isConductScopeToken(v) ? "var(--purple)"
+    : (!v || v === SCOPE_COMPANY) ? "var(--muted)"
+    : "var(--dim)";
 
-const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterProgram || STATE.filterGroup);
+const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterGroup);
 
 function filteredRoster() {
   if (!isFilterActive()) return STATE.roster;
@@ -179,7 +197,6 @@ function filteredRoster() {
     if (STATE.filterRole && r.role !== STATE.filterRole) return false;
     if (STATE.filterPlt && getPlt(r) !== String(STATE.filterPlt)) return false;
     if (STATE.filterSect && getSect(r) !== String(STATE.filterSect)) return false;
-    if (STATE.filterProgram && programOf(r) !== STATE.filterProgram) return false;
     if (STATE.filterGroup && !filterGroupHas(STATE.filterGroup, r)) return false;
     return true;
   });
@@ -212,7 +229,6 @@ function filterLabel() {
   else if (STATE.filterRole === "Recruit") parts.push("Recs");
   if (STATE.filterPlt) parts.push("P" + STATE.filterPlt);
   if (STATE.filterSect) parts.push("S" + STATE.filterSect);
-  if (STATE.filterProgram) parts.push(programLabel(STATE.filterProgram));
   if (STATE.filterGroup) parts.push(filterGroupLabel(STATE.filterGroup));
   return parts.join(" ");
 }
@@ -379,34 +395,28 @@ function nextConductId() {
 }
 
 // Best-guess time for a conduct based on existing data. Returns the most
-// frequently-logged time (across conductDetail + polar) for matches of
-// the given conductId. Empty string if no match — caller can fall back
-// to a default like "0730".
+// frequently-logged time in conductDetail for matches of the given conductId.
+// Empty string if no match — caller can fall back to a default like "0730".
 function inferTimeForConduct(conductId) {
   if (!conductId) return "";
   const counts = {};
   const tally = (t) => { const k = pad4Time(t); if (k) counts[k] = (counts[k] || 0) + 1; };
   STATE.conductDetail.forEach(c => { if (c.conductId === conductId && c.time) tally(c.time); });
-  STATE.polar.forEach(p => { if (p.conductId === conductId && p.time) tally(p.time); });
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   return sorted.length ? sorted[0][0] : "";
 }
 
 // Best-guess ISO date for a conduct. Looks at attendance first (the canonical
-// "when did this conduct happen" log), falling back to conductDetail. Prefers
-// the most recent date that DOESN'T already have polar data — that's the
-// session the user is most likely about to import photos for. If every
-// attendance date for the conduct already has polar coverage, returns the
-// single most-recent date so the user can still overwrite manually. Empty
-// string when nothing's known (caller can fall back to today).
+// "when did this conduct happen" log), falling back to conductDetail, and
+// returns the most recent. Empty string when nothing's known (caller can fall
+// back to today).
+//
+// This used to prefer the most recent date with NO polar coverage, on the
+// assumption the user was about to import photos for the session that did not
+// have any yet. With Polar gone there is nothing to prefer, so it is simply the
+// latest known date.
 function inferDateForConduct(conductId) {
   if (!conductId) return "";
-  const polarDates = new Set(
-    STATE.polar.filter(p => p.conductId === conductId).map(p => {
-      const iso = displayDateToISO(p.date);
-      return iso || p.date || "";
-    }).filter(Boolean)
-  );
   const candidateDates = [];
   STATE.attendance.forEach(a => {
     if (a.conductId !== conductId) return;
@@ -420,10 +430,7 @@ function inferDateForConduct(conductId) {
   });
   if (!candidateDates.length) return "";
   candidateDates.sort();  // ascending ISO sort
-  // Prefer most-recent date that doesn't yet have polar coverage.
-  const uncovered = candidateDates.filter(d => !polarDates.has(d));
-  const pick = uncovered.length ? uncovered[uncovered.length - 1] : candidateDates[candidateDates.length - 1];
-  return pick;
+  return candidateDates[candidateDates.length - 1];
 }
 
 // Generic delete: removes a row from STATE[arrayName] by id with a confirm
@@ -431,7 +438,7 @@ function inferDateForConduct(conductId) {
 // no need for the user to navigate to the tab and click Re-push all.
 const STATE_TO_TAB = {
   roster: "Roster", medical: "Medical", attendance: "Attendance",
-  ippt: "IPPT", rm: "RouteMarch", soc: "SOC", polar: "PolarFlow",
+  ippt: "IPPT",
   conductDetail: "ConductDetail", appointments: "Appointments",
   leave: "Leave", msk: "MSK", conducts: "Conducts"
 };
@@ -899,21 +906,21 @@ function currentMedicalEffectiveAll(todayIso) {
 // the gradient between severity tiers.
 function medTagBadge(tag) {
   const palettes = {
-    "MC":               { bg: "#F8514922", bd: "#F8514944", fg: "var(--red)" },
-    "Warded":           { bg: "#F8514922", bd: "#F8514944", fg: "var(--red)" },
-    "MC+1":             { bg: "#D2992233", bd: "#D2992266", fg: "var(--orange)" },
-    "MC+2":             { bg: "#E3B34122", bd: "#E3B34144", fg: "var(--yellow)" },
-    "LD":               { bg: "#D2992222", bd: "#D2992244", fg: "var(--orange)" },
-    "LD+1":             { bg: "#E3B34122", bd: "#E3B34144", fg: "var(--yellow)" },
-    "LD+2":             { bg: "#E3B34111", bd: "#E3B34133", fg: "#8B7521" },
-    "RMJ":              { bg: "#58A6FF22", bd: "#58A6FF44", fg: "var(--accent)" },
-    "Pending":          { bg: "#8B949E22", bd: "#8B949E44", fg: "var(--muted)" },
-    "NIL":              { bg: "#3FB95022", bd: "#3FB95044", fg: "var(--green)" }
+    "MC":               { bg: "rgba(var(--redRGB),.13)",    bd: "rgba(var(--redRGB),.27)",    fg: "var(--red)" },
+    "Warded":           { bg: "rgba(var(--redRGB),.13)",    bd: "rgba(var(--redRGB),.27)",    fg: "var(--red)" },
+    "MC+1":             { bg: "rgba(var(--orangeRGB),.2)",  bd: "rgba(var(--orangeRGB),.4)",  fg: "var(--orange)" },
+    "MC+2":             { bg: "rgba(var(--yellowRGB),.13)", bd: "rgba(var(--yellowRGB),.27)", fg: "var(--yellow)" },
+    "LD":               { bg: "rgba(var(--orangeRGB),.13)", bd: "rgba(var(--orangeRGB),.27)", fg: "var(--orange)" },
+    "LD+1":             { bg: "rgba(var(--yellowRGB),.13)", bd: "rgba(var(--yellowRGB),.27)", fg: "var(--yellow)" },
+    "LD+2":             { bg: "rgba(var(--yellowRGB),.07)", bd: "rgba(var(--yellowRGB),.2)",  fg: "color-mix(in srgb, var(--yellow) 55%, var(--dim))" },
+    "RMJ":              { bg: "rgba(var(--accentRGB),.13)", bd: "rgba(var(--accentRGB),.27)", fg: "var(--accent)" },
+    "Pending":          { bg: "color-mix(in srgb, var(--muted) 13%, transparent)", bd: "color-mix(in srgb, var(--muted) 27%, transparent)", fg: "var(--muted)" },
+    "NIL":              { bg: "rgba(var(--greenRGB),.13)",  bd: "rgba(var(--greenRGB),.27)",  fg: "var(--green)" }
   };
   const p = palettes[tag] || (typeof tag === "string" && tag.startsWith("Excuse")
-    ? { bg: "#BC8CFF22", bd: "#BC8CFF44", fg: "var(--purple)" }
+    ? { bg: "rgba(var(--purpleRGB),.13)", bd: "rgba(var(--purpleRGB),.27)", fg: "var(--purple)" }
     : customStatusByName(medStatusBaseFamily(tag))
-    ? { bg: "#39D2C022", bd: "#39D2C044", fg: "#39D2C0" }
+    ? { bg: "rgba(var(--tealRGB),.13)", bd: "rgba(var(--tealRGB),.27)", fg: "var(--teal)" }
     : palettes.Pending);
   return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;background:${p.bg};color:${p.fg};border:1px solid ${p.bd}">${tag}</span>`;
 }
@@ -937,13 +944,8 @@ function medDurationLabel(record, run) {
   return `${startLabel} – ${endLabel}${note ? ` (${note})` : ""}`;
 }
 const badge = (text, cls) => `<span class="badge badge-${cls}">${text}</span>`;
-// Program pill — inline-styled (colour is dynamic per program, so it can't use
-// the static badge-<name> classes). Used in the conduct tables.
-const programBadge = key => {
-  const col = programColor(key);
-  return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${programLabel(key)}</span>`;
-};
-// Same pill for a conduct's scope value: program key OR scope token.
+// Conduct scope pill — inline-styled (the colour varies by scope kind, so it
+// can't use the static badge-<name> classes). Used in the conduct tables.
 const conductScopeBadge = v => {
   const col = conductScopeColor(v);
   return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${conductScopeLabel(v)}</span>`;
@@ -1230,18 +1232,38 @@ const MSK_REGION_LIST = [
   "Hand / Wrist", "Foot", "Upper Leg / Hip", "Neck", "Other"
 ];
 
+// A CATEGORICAL ramp, not a status ramp: these encode which body part, so they
+// must never be mapped onto --green/--red/--orange (a knee is not an error) and
+// their only real job is being telling apart from each other. They are literals
+// rather than tokens because styles.css is not ours to edit; if a future palette
+// wants to own them, define --mskAnkle .. --mskOther on :root and they will win
+// via mskRegionColor() below with no change here.
+//
+// Re-tuned for the ink blue-black ground: every hue lifted to the same vividness
+// as the status colours, "Other" kept as a slate grey drawn from the --muted
+// family so it recedes without reading as a hole in the deck, and "Neck" moved
+// off pink-red to lime, because it, "Hand / Wrist" and "Ankle" were three
+// neighbouring reds and the whole point of the set is that you can tell one
+// segment from the next.
 const MSK_REGION_COLORS = {
-  "Ankle":             "#E8573A",
-  "Knee":              "#F2A93B",
-  "Back / Spine":      "#5B8DEF",
-  "Shin / Lower Leg":  "#43C59E",
-  "Shoulder":          "#A87BDB",
-  "Hand / Wrist":      "#E97BC2",
-  "Foot":              "#6EC8DB",
-  "Upper Leg / Hip":   "#FFD93D",
-  "Neck":              "#FF6B9D",
-  "Other":             "#8E99A4"
+  "Ankle":             "#FF6A4D",
+  "Knee":              "#FFA83D",
+  "Back / Spine":      "#4DA3FF",
+  "Shin / Lower Leg":  "#34D98F",
+  "Shoulder":          "#A98CFF",
+  "Hand / Wrist":      "#FF6FC4",
+  "Foot":              "#35CFDB",
+  "Upper Leg / Hip":   "#FFD34A",
+  "Neck":              "#A8DB4D",
+  "Other":             "#8A94AC"
 };
+
+// Region -> colour, preferring a --msk<Region> token if styles.css ever defines
+// one, falling back to the literal ramp above.
+function mskRegionColor(region) {
+  const key = "--msk" + String(region || "Other").replace(/[^A-Za-z]/g, "");
+  return cssColor(key, MSK_REGION_COLORS[region] || MSK_REGION_COLORS.Other);
+}
 
 function classifyInjuryRegions(text) {
   const t = String(text || "").toLowerCase();

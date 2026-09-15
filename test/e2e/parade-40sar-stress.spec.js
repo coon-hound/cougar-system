@@ -231,8 +231,8 @@ test("the view filter never narrows the parade state", async ({ page }) => {
   const unfiltered = await page.evaluate(() => { openReportModal("FP"); const t = document.getElementById("rep-text").value; closeModal(); return t; });
   const filtered = await page.evaluate(() => {
     STATE.filterPlt = "1";
+    STATE.filterSect = "4";
     STATE.filterRole = "Recruit";
-    STATE.filterProgram = "PTP";
     saveFilter(); render();
     openReportModal("FP");
     return document.getElementById("rep-text").value;

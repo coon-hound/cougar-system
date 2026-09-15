@@ -6,7 +6,7 @@ function renderSync(el) {
   // Three access states: revoked (server rejected our token - loudest),
   // authenticated, never authenticated.
   const authStatusHtml = (_authFailed && authed)
-    ? `<div style="background:#F8514922;border:1px solid #F8514944;border-radius:6px;padding:10px;margin-bottom:12px;color:var(--red);font-size:12px;line-height:1.55">
+    ? `<div style="background:rgba(var(--redRGB),.13);border:1px solid rgba(var(--redRGB),.27);border-radius:6px;padding:10px;margin-bottom:12px;color:var(--red);font-size:12px;line-height:1.55">
          <strong>Access revoked or expired.</strong> The sheet rejected this device's sign-in.
          Ask your admin for a <strong>NEW invite link</strong> and open it on this phone.
          Your unsaved changes are kept on this device and will push automatically after you sign in again.
@@ -17,7 +17,7 @@ function renderSync(el) {
          <span class="mono" style="font-size:10px;color:var(--dim)">${STATE.authToken.slice(0, 8)}…</span>
          <button class="btn btn-danger" onclick="signOut()" style="margin-left:auto">Sign Out</button>
        </div>`
-    : `<div style="background:#F8514922;border:1px solid #F8514944;border-radius:6px;padding:10px;margin-bottom:12px;color:var(--red);font-size:12px">
+    : `<div style="background:rgba(var(--redRGB),.13);border:1px solid rgba(var(--redRGB),.27);border-radius:6px;padding:10px;margin-bottom:12px;color:var(--red);font-size:12px">
          <strong>Not authenticated.</strong> Ask your admin for an invite link, then open it on this device.
        </div>`;
 
@@ -44,15 +44,12 @@ function renderSync(el) {
       </div>
       <div class="card">
         <h3 style="color:var(--accent)">📤 Export</h3>
-        <button class="btn" onclick="exportJSON({roster:STATE.roster,medical:STATE.medical,attendance:STATE.attendance,ippt:STATE.ippt,rm:STATE.rm,soc:STATE.soc,polar:STATE.polar,conductDetail:STATE.conductDetail,appointments:STATE.appointments,leave:STATE.leave,msk:STATE.msk},'cougar_backup.json')" style="margin-bottom:8px;width:100%">Full Backup (JSON)</button>
+        <button class="btn" onclick="exportJSON({roster:STATE.roster,medical:STATE.medical,attendance:STATE.attendance,ippt:STATE.ippt,conductDetail:STATE.conductDetail,appointments:STATE.appointments,leave:STATE.leave,msk:STATE.msk},'cougar_backup.json')" style="margin-bottom:8px;width:100%">Full Backup (JSON)</button>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')" style="font-size:10px">Roster</button>
           <button class="btn" onclick="exportCSV(STATE.medical,'medical.csv')" style="font-size:10px">Medical</button>
           <button class="btn" onclick="exportCSV(STATE.attendance,'attendance.csv')" style="font-size:10px">Attend.</button>
           <button class="btn" onclick="exportCSV(STATE.ippt,'ippt.csv')" style="font-size:10px">IPPT</button>
-          <button class="btn" onclick="exportCSV(STATE.rm,'rm.csv')" style="font-size:10px">RM</button>
-          <button class="btn" onclick="exportCSV(STATE.soc,'soc.csv')" style="font-size:10px">SOC</button>
-          <button class="btn" onclick="exportCSV(STATE.polar,'polar.csv')" style="font-size:10px">Polar</button>
           <button class="btn" onclick="exportCSV(STATE.conductDetail,'conduct_detail.csv')" style="font-size:10px">Detail</button>
         </div>
       </div>
@@ -835,7 +832,7 @@ async function doPull() {
 async function doPushAll() {
   const tabs = [
     ["Roster", STATE.roster], ["Medical", STATE.medical], ["Attendance", STATE.attendance],
-    ["IPPT", STATE.ippt], ["RouteMarch", STATE.rm], ["SOC", STATE.soc], ["PolarFlow", STATE.polar],
+    ["IPPT", STATE.ippt],
     ["ConductDetail", STATE.conductDetail],
     ["Appointments", STATE.appointments],
     ["Leave", STATE.leave],
@@ -965,8 +962,8 @@ function ensureBannerEl() {
   el = document.createElement("div");
   el.id = "sync-banner";
   el.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9999;display:none;" +
-    "align-items:center;gap:12px;background:var(--surface,#1c2128);color:var(--text,#e6edf3);" +
-    "border:1px solid var(--accent,#58A6FF);border-radius:8px;padding:10px 14px;font-size:13px;" +
+    "align-items:center;gap:12px;background:var(--surface,#141924);color:var(--text,#EDF1F7);" +
+    "border:1px solid var(--accent,#0A84FF);border-radius:8px;padding:10px 14px;font-size:13px;" +
     "box-shadow:0 6px 24px rgba(0,0,0,.4);max-width:92vw";
   document.body.appendChild(el);
   return el;

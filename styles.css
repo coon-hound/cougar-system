@@ -1,91 +1,287 @@
-:root{--bg:#0D1117;--surface:#161B22;--surface2:#21262D;--border:#30363D;--text:#E6EDF3;--muted:#8B949E;--dim:#484F58;--accent:#58A6FF;--accentDim:#1F6FEB;--green:#3FB950;--red:#F85149;--orange:#D29922;--yellow:#E3B341;--purple:#BC8CFF;--teal:#39D2C0;--pink:#F778BA}
+/* ═══════════════════════════════════════════════════════════════════════════
+   COUGAR DESIGN SYSTEM
+   ───────────────────────────────────────────────────────────────────────────
+   CONTRACT: class and id names here are FIXED. Every screen in this app is
+   built by string-templated HTML inside js/render.js and js/forms.js — there
+   is no compiler, no scoping, no dead-class detection. Renaming or deleting a
+   selector silently unstyles a view nobody will look at until a section
+   commander is standing in the sun trying to read it. Restyle freely; add new
+   classes freely; never rename, never delete.
+
+   PALETTE — "dusk". A deep ink blue-black ground carrying iOS system colours.
+   The ground is blue-biased rather than neutral grey (hue ≈ 222, ~22% sat), so
+   it reads as a considered surface rather than "black with colours on it", and
+   it lets the iOS blue sit on it as a relative rather than a stranger.
+   Status colours are iOS system colours, lifted 1–2 steps in lightness because
+   this is read on a phone in Singapore daylight where a screen loses roughly
+   half its apparent contrast. Every foreground/ground pair clears 4.5:1;
+   --muted and --dim are both brighter than the values they replace.
+   Interaction is iOS blue (--accent). Identity is blue→indigo (--accent2), and
+   that gradient appears in exactly two places — the wordmark and the active
+   nav rail — so it stays a signature rather than decoration.
+
+   ELEVATION — five steps, each a real surface, not a shadow trick:
+     --bg        the deck everything sits on
+     --field     inset (inputs, wells) — reads *below* the deck
+     --surface   raised (cards, stats, sidebar, topbar, modal)
+     --surface2  controls on a raised surface (table heads, chips, buttons)
+     --surface3  hover/selected state of a control
+   Hairlines (--border → --borderHi on hover) carry structure; --sh1..--sh4
+   carry distance. Shadows are static: we never animate them.
+
+   MOTION — --d1 120ms (state flips), --d2 190ms (hover/press), --d3 280ms
+   (page enter), --d4 360ms (sheets). --ez is the workhorse ease-out; --spring
+   has a touch of overshoot for things that "arrive" (sheets, presses).
+   Only transform and opacity are ever animated — these run on mid-range
+   Android. Page-enter exploits the fact that render() replaces #content's
+   innerHTML wholesale: fresh children fire the animation with zero JS.
+   Everything collapses under prefers-reduced-motion (very bottom of file).
+
+   TOUCH — hover states live inside @media (hover:hover) so phones don't latch
+   a sticky :hover after a tap. Tap targets are ≥44px wherever the layout
+   allows, ≥36px where it doesn't.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root{
+  /* ground / elevation ramp — ink blue-black */
+  --bg:#0B0E14;--field:#10141D;--surface:#141924;--surface2:#1D2433;--surface3:#273042;
+  --border:#2A3345;--borderHi:#3C4860;
+  /* type */
+  --text:#EDF1F7;--muted:#8D9AB0;--dim:#606D85;
+  /* interaction */
+  --accent:#0A84FF;--accentDim:#0060DF;--accentLift:#54AEFF;--accent2:#5E5CE6;
+  /* status — iOS system colours, lifted for daylight */
+  --green:#30D158;--red:#FF453A;--orange:#FF9F0A;--yellow:#FFD60A;--purple:#BF5AF2;--teal:#40CBE0;--pink:#FF6482;
+  /* rgb triplets — let washes/borders be derived instead of hand-mixed hex */
+  --accentRGB:10,132,255;--accent2RGB:94,92,230;--greenRGB:48,209,88;--redRGB:255,69,58;--orangeRGB:255,159,10;--yellowRGB:255,214,10;--purpleRGB:191,90,242;--tealRGB:64,203,224;--pinkRGB:255,100,130;
+  /* radii — 14px on cards, per the design review; r1 chips, r2 controls,
+     r3 cards, r4 sheets. The rest of the scale is derived from r3. */
+  --r1:7px;--r2:10px;--r3:14px;--r4:20px;--rp:999px;
+  /* elevation shadows — blue-black to match the ground, never animated */
+  --sh1:0 1px 2px rgba(2,5,12,.5);
+  --sh2:0 1px 2px rgba(2,5,12,.45),0 5px 14px -6px rgba(2,5,12,.62);
+  --sh3:0 2px 6px rgba(2,5,12,.48),0 14px 34px -12px rgba(2,5,12,.68);
+  --sh4:0 4px 12px rgba(2,5,12,.52),0 28px 68px -14px rgba(2,5,12,.78);
+  /* the top-edge catchlight that makes a surface read as physical */
+  --lift:inset 0 1px 0 rgba(255,255,255,.045);
+  /* focus ring — two-stop so it reads on any surface */
+  --ring:0 0 0 2px var(--bg),0 0 0 4px rgba(var(--accentRGB),.85);
+  /* motion */
+  --d1:120ms;--d2:190ms;--d3:280ms;--d4:360ms;
+  --ez:cubic-bezier(.2,.8,.32,1);--spring:cubic-bezier(.22,1.12,.36,1);
+  /* the identity gradient — used twice, on purpose */
+  --brandline:linear-gradient(140deg,var(--accent),var(--accent2));
+}
 *{margin:0;padding:0;box-sizing:border-box}
 /* `dvh` adjusts as iOS Safari's address bar grows/shrinks — prevents the
    page from sitting partially behind the toolbar on first load. position:fixed
    inset:0 locks the body so nothing can scroll outside #content. overflow-x
    hidden is a safety net against rogue wide elements. */
-body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);font-size:13px;display:flex;height:100vh;height:100dvh;overflow:hidden;overflow-x:hidden;position:fixed;inset:0}
-.mono{font-family:'JetBrains Mono',monospace}
+body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:13px;line-height:1.45;display:flex;height:100vh;height:100dvh;overflow:hidden;overflow-x:hidden;position:fixed;inset:0;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+::selection{background:rgba(var(--accentRGB),.32);color:#fff}
+/* Scrollbars: thin, recessive, and they only show themselves once you're scrolling
+   a list — a full-width grey gutter next to a data table is visual noise. */
+*{scrollbar-width:thin;scrollbar-color:var(--surface3) transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:var(--rp);border:2px solid transparent;background-clip:content-box}
 
-/* Sidebar */
-#sidebar{width:190px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
-#sidebar .logo{padding:14px 12px;border-bottom:1px solid var(--border)}
-#sidebar .logo small{font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:1.5px;font-weight:700}
-#sidebar .logo h2{font-size:14px;margin-top:2px}
-.nav-btn{display:flex;align-items:center;gap:8px;padding:9px 12px;border:none;cursor:pointer;background:transparent;color:var(--muted);font:inherit;font-size:12px;text-align:left;border-left:2px solid transparent;transition:all .15s;width:100%}
-.nav-btn:hover{background:var(--surface2)}
-.nav-btn.active{background:var(--surface2);color:var(--accent);font-weight:600;border-left-color:var(--accent)}
-#sidebar-footer{margin-top:auto;padding:12px;border-top:1px solid var(--border);font-size:10px;color:var(--dim)}
+/* ── Motion primitives ─────────────────────────────────────
+   page-in fires on every child #content gets. render() blows away innerHTML
+   on each nav/filter change, so the browser re-runs it for free. */
+@keyframes page-in{from{opacity:0;transform:translate3d(0,10px,0)}to{opacity:1;transform:none}}
+@keyframes pop-in{from{opacity:0;transform:scale(.96) translate3d(0,-4px,0)}to{opacity:1;transform:none}}
+@keyframes dialog-in{from{opacity:0;transform:scale(.965) translate3d(0,12px,0)}to{opacity:1;transform:none}}
+@keyframes sheet-in{from{transform:translate3d(0,100%,0)}to{transform:none}}
+@keyframes veil-in{from{opacity:0}to{opacity:1}}
+@keyframes sync-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 
-/* Main */
+/* Stagger: cards cascade in. Capped at six steps (~90ms) — past that a long
+   roster would be waiting on choreography, which is the opposite of the point. */
+/* fill-mode is `backwards`, NOT `both`, and that is load-bearing. With `both`
+   the final keyframe's `transform:none` is retained as a RESOLVED identity
+   matrix, and an identity matrix still creates a stacking context — so every
+   direct child of #content became one permanently, trapping the Generate
+   Report dropdown's z-index:50 inside the header's context and letting the
+   later-sibling .stats-row paint on top of it. `backwards` gives the stagger
+   its pre-delay from-state and then gets out of the way entirely. */
+#content>*,.stagger>*{animation:page-in var(--d3) var(--ez) backwards}
+#content>*:nth-child(1),.stagger>*:nth-child(1){animation-delay:0ms}
+#content>*:nth-child(2),.stagger>*:nth-child(2){animation-delay:22ms}
+#content>*:nth-child(3),.stagger>*:nth-child(3){animation-delay:44ms}
+#content>*:nth-child(4),.stagger>*:nth-child(4){animation-delay:64ms}
+#content>*:nth-child(5),.stagger>*:nth-child(5){animation-delay:80ms}
+#content>*:nth-child(n+6),.stagger>*:nth-child(n+6){animation-delay:92ms}
+
+/* ── Sidebar ───────────────────────────────────────────────
+   Translucent + blurred. On desktop it sits beside the content so the blur
+   has nothing behind it and simply resolves to the tint — harmless. On mobile
+   it slides *over* the content (position:fixed below) and the frost is real. */
+#sidebar{width:190px;background:rgba(28,25,23,.78);-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto}
+#sidebar .logo{padding:16px 14px 14px;border-bottom:1px solid var(--border)}
+/* Wordmark eyebrow carries the identity gradient. -webkit-text-fill-color is
+   the transparent-text mechanism; `color` stays set as the no-clip fallback. */
+/* Solid accent, not the gradient. At 10px with 1.6px tracking a two-stop
+   gradient just makes the letterforms muddy, and the wordmark is the one place
+   that has to stay crisp. --brandline still signs the active nav rail, where
+   there is enough area for it to read as a gradient rather than as noise. */
+#sidebar .logo small{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.6px;color:var(--accent)}
+#sidebar .logo h2{font-size:15px;font-weight:600;letter-spacing:-.015em;margin-top:3px;color:var(--text)}
+/* Nav rail: a rounded 3px bar in the identity gradient, scaled in on activate.
+   Replaces the old flat border-left — a rail with a radius reads considered,
+   a full-height square border reads like a default. */
+.nav-btn{position:relative;display:flex;align-items:center;gap:9px;min-height:40px;padding:10px 14px 10px 16px;border:none;cursor:pointer;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;font-weight:500;text-align:left;width:100%;border-radius:0;transition:color var(--d2) var(--ez),background-color var(--d2) var(--ez)}
+.nav-btn::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:3px;border-radius:0 var(--rp) var(--rp) 0;background:var(--brandline);transform:scaleY(0);transform-origin:center;transition:transform var(--d2) var(--spring)}
+.nav-btn.active{background:var(--surface2);color:var(--text);font-weight:600}
+.nav-btn.active::before{transform:scaleY(1)}
+/* Nav icons are monochrome glyphs, not emoji, and that is the point: a glyph
+   inherits currentColor, so the icon goes accent exactly when its label does.
+   An emoji is always its own colour no matter what the row is doing, which is
+   what made the sidebar read as a pile of stickers rather than one control. */
+.nav-btn>span:first-child,.nav-ico{font-size:13px;line-height:1;width:15px;flex-shrink:0;text-align:center;color:var(--dim);transition:color var(--d2) var(--ez)}
+.nav-btn.active>.nav-ico{color:var(--accent)}
+@media (hover:hover) and (pointer:fine){.nav-btn:hover>.nav-ico{color:var(--muted)}}
+.nav-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+#sidebar-footer{margin-top:auto;padding:14px;border-top:1px solid var(--border);font-size:10px;line-height:1.6;color:var(--dim);font-variant-numeric:tabular-nums}
+
+/* ── Main / topbar ─────────────────────────────────────────*/
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden}
-#topbar{padding:10px 20px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;gap:10px;align-items:center;position:sticky;top:0;z-index:50;flex-shrink:0}
-#topbar input{flex:1;max-width:350px;padding:7px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;font-size:12px;outline:none}
+#topbar{padding:10px 20px;border-bottom:1px solid var(--border);background:rgba(28,25,23,.8);-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6);display:flex;gap:10px;align-items:center;position:sticky;top:0;z-index:50;flex-shrink:0}
+#topbar .topbar-search-icon{font-size:15px;color:var(--dim);line-height:1}
+#topbar input{flex:1;max-width:350px;min-height:34px;padding:8px 13px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;transition:border-color var(--d2) var(--ez)}
+#topbar input::placeholder{color:var(--dim)}
+#topbar input:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 #topbar-filters{margin-left:auto;display:flex;gap:6px;align-items:center}
 #topbar-filters .filter-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600}
 
 /* Always-visible push/sync status pill (mirrors the sidebar indicator, which is
-   hidden behind ☰ on mobile). Green=saved, orange=saving, red=NOT saved. */
-#sync-status{flex-shrink:0;border:1px solid transparent;border-radius:14px;padding:5px 11px;font:inherit;font-size:11px;font-weight:700;line-height:1;white-space:nowrap;background:none;color:var(--muted)}
-#sync-status.s-ok{color:var(--green);background:#3FB95018;border-color:#3FB95033}
-#sync-status.s-syncing{color:var(--orange);background:#D2992218;border-color:#D2992233}
-#sync-status.s-error{color:#fff;background:var(--red);border-color:var(--red);cursor:pointer;animation:sync-pulse 1.3s ease-in-out infinite}
-@keyframes sync-pulse{0%,100%{opacity:1}50%{opacity:.55}}
-.topbar-select{padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;font-size:12px;outline:none;min-width:78px}
+   hidden behind ☰ on mobile). Green=saved, orange=saving, red=NOT saved.
+   The red state is the one that has to survive glare, so it goes solid fill
+   + white text rather than the tinted wash the other two states use. */
+#sync-status{flex-shrink:0;border:1px solid transparent;border-radius:var(--rp);padding:6px 12px;font:inherit;font-size:11px;font-weight:700;line-height:1;white-space:nowrap;background:none;color:var(--muted);transition:transform var(--d1) var(--ez)}
+#sync-status.s-ok{color:var(--green);background:rgba(var(--greenRGB),.14);border-color:rgba(var(--greenRGB),.3)}
+#sync-status.s-syncing{color:var(--orange);background:rgba(var(--orangeRGB),.14);border-color:rgba(var(--orangeRGB),.3)}
+#sync-status.s-error{color:#fff;background:var(--red);border-color:var(--red);cursor:pointer;animation:sync-pulse 1.3s ease-in-out infinite;box-shadow:0 0 0 1px rgba(var(--redRGB),.35),0 2px 10px -2px rgba(var(--redRGB),.5)}
+#sync-status:active{transform:scale(.94)}
+.topbar-select{min-height:34px;padding:7px 10px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12px;font-weight:500;outline:none;min-width:80px;cursor:pointer;transition:border-color var(--d2) var(--ez),color var(--d2) var(--ez)}
 .topbar-select:disabled{opacity:.4;cursor:not-allowed}
+.topbar-select:focus-visible{outline:none;box-shadow:var(--ring)}
 /* Highlight selectors when a filter is active so the global scope is obvious. */
-.topbar-select.active{border-color:var(--accent);color:var(--accent);background:#58A6FF11}
-/* Role segmented control — sits in the same scope row, switches view between
- * commanders, recruits, or all. Visually pill-grouped to read as one control. */
-.filter-role-group{display:inline-flex;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden}
-.filter-role-group .role-btn{padding:6px 10px;font:inherit;font-size:11px;font-weight:600;background:var(--bg);color:var(--muted);border:none;border-right:1px solid var(--border);cursor:pointer;outline:none}
-.filter-role-group .role-btn:last-child{border-right:none}
-.filter-role-group .role-btn.active{background:#58A6FF22;color:var(--accent)}
-#content{flex:1;padding:20px;overflow-y:auto}
+.topbar-select.active{border-color:rgba(var(--accentRGB),.65);color:var(--accentLift);background:rgba(var(--accentRGB),.12)}
 
-/* Components */
-.stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;flex:1;min-width:120}
-.stat label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.stat .val{font-size:22px;font-weight:700;margin-top:2px;font-family:'JetBrains Mono',monospace}
-.stat .sub{font-size:10px;color:var(--muted);margin-top:1px}
+/* Role segmented control — iOS-style: a recessed track with a raised pill for
+ * the selected segment, instead of three flat buttons behind one border. The
+ * bare .role-btn also appears standalone in the IPPT view (Latest/Best), so it
+ * is styled on its own and the group only adjusts the fit. */
+.role-btn{min-height:32px;padding:7px 13px;font:inherit;font-size:11.5px;font-weight:600;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:var(--r1);cursor:pointer;outline:none;transition:color var(--d2) var(--ez),background-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.role-btn.active{background:rgba(var(--accentRGB),.16);border-color:rgba(var(--accentRGB),.45);color:var(--accentLift)}
+.role-btn:active{transform:scale(.96)}
+.role-btn:focus-visible{box-shadow:var(--ring)}
+.filter-role-group{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--r2);background:var(--field);overflow:hidden}
+.filter-role-group .role-btn{padding:6px 11px;min-height:28px;background:transparent;border:none;border-right:none;border-radius:calc(var(--r2) - 3px)}
+.filter-role-group .role-btn.active{background:var(--surface3);color:var(--text);box-shadow:var(--sh1),var(--lift)}
+#content{flex:1;padding:22px 22px 40px;overflow-y:auto;overscroll-behavior:contain}
+#content>h2{font-size:19px;font-weight:700;letter-spacing:-.02em}
+
+/* ── Stats ─────────────────────────────────────────────────
+   The showcase surface. This app's whole reason to exist is a number a
+   commander reads at a glance, so the numeral is the hero: mono, tabular,
+   tight tracking, twice the size of anything around it. Label above in small
+   caps, optional sub below in dim — a fixed three-part rhythm. */
+.stat{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:13px 15px 14px;flex:1;min-width:122px;box-shadow:var(--sh1),var(--lift);transition:border-color var(--d2) var(--ez),transform var(--d2) var(--ez),background-color var(--d2) var(--ez)}
+.stat label{display:block;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
+.stat .val{font-size:25px;font-weight:700;line-height:1.1;margin-top:4px;font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.035em}
+.stat .sub{font-size:10px;color:var(--muted);margin-top:3px;line-height:1.35}
 .stats-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
 
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase}
-.badge-green{background:#3FB95022;color:var(--green);border:1px solid #3FB95044}
-.badge-red{background:#F8514922;color:var(--red);border:1px solid #F8514944}
-.badge-orange{background:#D2992222;color:var(--orange);border:1px solid #D2992244}
-.badge-yellow{background:#E3B34122;color:var(--yellow);border:1px solid #E3B34144}
-.badge-purple{background:#BC8CFF22;color:var(--purple);border:1px solid #BC8CFF44}
-.badge-accent{background:#58A6FF22;color:var(--accent);border:1px solid #58A6FF44}
-.badge-teal{background:#39D2C022;color:var(--teal);border:1px solid #39D2C044}
-.badge-pink{background:#F778BA22;color:var(--pink);border:1px solid #F778BA44}
+/* ── Badges ────────────────────────────────────────────────
+   Pill-shaped, tinted wash + matching hairline. Uppercase and tracked so a
+   3-letter tag ("MC", "LD") still reads as a deliberate label, not a typo. */
+.badge{display:inline-block;padding:3px 9px;border-radius:var(--rp);font-size:10px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;line-height:1.5}
+.badge-green{background:rgba(var(--greenRGB),.15);color:var(--green);border:1px solid rgba(var(--greenRGB),.32)}
+.badge-red{background:rgba(var(--redRGB),.15);color:var(--red);border:1px solid rgba(var(--redRGB),.32)}
+.badge-orange{background:rgba(var(--orangeRGB),.15);color:var(--orange);border:1px solid rgba(var(--orangeRGB),.32)}
+.badge-yellow{background:rgba(var(--yellowRGB),.14);color:var(--yellow);border:1px solid rgba(var(--yellowRGB),.3)}
+.badge-purple{background:rgba(var(--purpleRGB),.15);color:var(--purple);border:1px solid rgba(var(--purpleRGB),.32)}
+.badge-accent{background:rgba(var(--accentRGB),.15);color:var(--accentLift);border:1px solid rgba(var(--accentRGB),.32)}
+.badge-teal{background:rgba(var(--tealRGB),.15);color:var(--teal);border:1px solid rgba(var(--tealRGB),.32)}
+.badge-pink{background:rgba(var(--pinkRGB),.15);color:var(--pink);border:1px solid rgba(var(--pinkRGB),.32)}
 
-.btn{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;border:1px solid var(--border);background:var(--surface2);color:var(--text)}
-.btn:hover{filter:brightness(1.2)}.btn:disabled{opacity:.5;cursor:not-allowed}
-.btn-primary{background:var(--accentDim);border-color:var(--accent)}
-.btn-success{background:#23863644;color:var(--green);border-color:#3FB95044}
-.btn-danger{background:#DA363322;color:var(--red);border-color:#F8514944}
+/* ── Buttons ───────────────────────────────────────────────
+   Four ranks: primary (filled azure), success/danger (tinted, semantic),
+   default (raised neutral), ghost (borderless, for dense toolbars — new, not
+   yet used by render.js). Press is a scale-down, which is the single most
+   "native" thing a web button can do on a touchscreen. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:32px;padding:7px 14px;border-radius:var(--r2);font-size:12px;font-weight:600;letter-spacing:.005em;cursor:pointer;font-family:inherit;border:1px solid var(--border);background:var(--surface2);color:var(--text);box-shadow:var(--lift);transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez),color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.btn:active{transform:scale(.96)}
+.btn:disabled{opacity:.42;cursor:not-allowed;transform:none}
+.btn:focus-visible{outline:none;box-shadow:var(--ring)}
+.btn-primary{background:var(--accentDim);border-color:rgba(var(--accentRGB),.55);color:#fff;box-shadow:var(--lift),0 2px 10px -4px rgba(var(--accentRGB),.6)}
+.btn-success{background:rgba(var(--greenRGB),.16);color:var(--green);border-color:rgba(var(--greenRGB),.34)}
+.btn-danger{background:rgba(var(--redRGB),.15);color:var(--red);border-color:rgba(var(--redRGB),.34)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--muted);box-shadow:none}
 
+/* ── Tables ────────────────────────────────────────────────
+   Dense data is the heart of this app. Rhythm comes from a very low-contrast
+   zebra (2.2% white) plus a hairline under every row — enough to track across
+   a wide scrolling table, not enough to stripe the page. Header is sticky and
+   must stay fully opaque, so no translucency here. */
 table{width:100%;border-collapse:collapse}
-th{padding:8px 10px;background:var(--surface2);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px;text-align:center;border-bottom:1px solid var(--border);position:sticky;top:0}
-td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:center;font-size:12px}
-tr:hover{background:var(--surface2)}
-.table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border);max-height:60vh;overflow-y:auto}
+th{padding:9px 12px;background:var(--surface2);color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.06em;text-align:center;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1;white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:center;font-size:12px;line-height:1.4}
+tbody tr:nth-child(2n){background:rgba(255,255,255,.022)}
+tbody tr:last-child td{border-bottom:none}
+.table-wrap{overflow-x:auto;border-radius:var(--r3);border:1px solid var(--border);max-height:60vh;overflow-y:auto;background:var(--surface);box-shadow:var(--sh1);-webkit-overflow-scrolling:touch}
 
-.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
-.card h3{font-size:13px;color:var(--muted);margin-bottom:12px}
+/* ── Cards ─────────────────────────────────────────────────*/
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:17px 18px;margin-bottom:16px;box-shadow:var(--sh1),var(--lift);transition:border-color var(--d2) var(--ez),transform var(--d2) var(--ez)}
+/* Kept at 13px/muted deliberately: a lot of render.js emits inline-styled
+   <h3 style="font-size:13px;color:var(--muted)"> siblings, and inline wins.
+   Matching the inline value is the only way these read as one family. */
+.card h3{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.005em;margin-bottom:12px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 
-/* Forms */
-.form-group{display:flex;flex-direction:column;gap:4px}
-.form-group label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.form-group input,.form-group select{padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px;outline:none}
+/* ── Dashboard sections ────────────────────────────────────
+   A card whose closed header IS the summary: chevron, title, count pill and a
+   one-line note that already answers the question, so a commander can read the
+   whole dashboard without opening anything. The body collapses. */
+.dash-sec{padding:0;overflow:hidden}
+.dash-sec-head{display:flex;align-items:center;gap:4px;padding-right:10px}
+.dash-sec-head.open{border-bottom:1px solid var(--border)}
+.dash-sec-toggle{flex:1 1 auto;min-width:0;min-height:46px;padding:11px 14px;border-radius:0;justify-content:flex-start;text-align:left;gap:8px;flex-wrap:wrap}
+.dash-sec-note{font-size:11px;font-weight:400;color:var(--dim);min-width:0}
+.dash-sec-body{padding:13px 14px 14px}
+.dash-sec-body.flush{padding:0}
+/* A table flush inside a section card: the card already draws the border and
+   the surface, so the wrap keeps only its scrolling. */
+.table-wrap.flush{border:0;border-radius:0;background:transparent;box-shadow:none}
+
+/* ── Forms ─────────────────────────────────────────────────
+   Fields are --field: a step *below* the card they sit on, so they read as
+   wells you type into rather than more cards. */
+.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:2px}
+.form-group label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.form-group input,.form-group select,.form-group textarea{min-height:34px;padding:8px 11px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;transition:border-color var(--d2) var(--ez)}
+.form-group input::placeholder,.form-group textarea::placeholder{color:var(--dim)}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
-/* Modal */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto;min-height:0}
-.modal.wide{max-width:760px}
+/* Command team picker (parade state). One row per appointment: a fixed-width
+   mono role label and the commander select, which borrows the form-field
+   treatment so it reads as part of the same sheet on a phone. */
+.duty-row{display:flex;align-items:center;gap:8px;padding:3px 0}
+.duty-row .duty-role{flex:0 0 52px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:.02em}
+.duty-row select{flex:1;min-width:0;min-height:34px;padding:8px 11px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;cursor:pointer;transition:border-color var(--d2) var(--ez)}
+.duty-row select:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
+
+/* ── Modal ─────────────────────────────────────────────────
+   Desktop: a centred dialog that scales in. Mobile: a true iOS sheet (see the
+   media query). The overlay is genuinely frosted — it is the one surface that
+   always has content behind it. */
+.modal-overlay{position:fixed;inset:0;background:rgba(3,6,13,.55);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px;animation:veil-in var(--d2) var(--ez) both}
+.modal{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--r4);padding:22px 24px 24px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto;min-height:0;box-shadow:var(--sh4),var(--lift);animation:dialog-in var(--d3) var(--spring) both}
+.modal.wide{max-width:780px}
 /* Chart wrappers: explicit height so Chart.js (maintainAspectRatio:false) has
    something to fill instead of recomputing height from canvas width — that
    recompute is what was breaking the modal's overflow:auto scroll. */
@@ -94,89 +290,143 @@ tr:hover{background:var(--surface2)}
 /* Modal header is sticky inside the modal's scrollable area so the title
    and ✕ close button stay reachable no matter how far you've scrolled.
    Surface background makes it opaque so content scrolling underneath
-   doesn't bleed through. */
-.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;position:sticky;top:0;background:var(--surface);z-index:10;padding-bottom:10px;border-bottom:1px solid var(--border)}
-.modal-close{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;min-width:36px;min-height:36px;line-height:1}
+   doesn't bleed through. ::before is the mobile drag handle (see media query);
+   it lives on the header, not .modal, because .modal is the scroll container
+   and a handle drawn there would scroll away. */
+.modal-header{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-22px -24px 16px;padding:20px 24px 12px;background:var(--surface);border-bottom:1px solid var(--border);border-radius:var(--r4) var(--r4) 0 0}
+.modal-header h3{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);min-width:0}
+.modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;min-width:36px;min-height:36px;line-height:1;border-radius:var(--rp);flex-shrink:0;transition:color var(--d2) var(--ez),background-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.modal-close:active{transform:scale(.9)}
+.modal-close:focus-visible{outline:none;box-shadow:var(--ring)}
 .hidden{display:none!important}
 /* Dashboard "Generate Report" dropdown — anchored to its button, opens
  * downward toward the right edge so it doesn't get clipped by the topbar. */
 .dropdown-wrapper{position:relative;display:inline-block}
-.dropdown-menu{position:absolute;top:100%;right:0;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:50;min-width:200px;padding:4px;display:flex;flex-direction:column;gap:2px}
-.dropdown-menu button{padding:8px 12px;font-size:12px;font-weight:500;background:transparent;color:var(--text);border:none;border-radius:4px;cursor:pointer;text-align:left;font-family:inherit;outline:none}
-.dropdown-menu button:hover{background:var(--surface2);color:var(--accent)}
+.dropdown-menu{position:absolute;top:100%;right:0;margin-top:6px;background:rgba(29,36,51,.94);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border:1px solid var(--borderHi);border-radius:var(--r2);box-shadow:var(--sh3);z-index:50;min-width:210px;padding:5px;display:flex;flex-direction:column;gap:2px;animation:pop-in var(--d2) var(--spring) both;transform-origin:top right}
+.dropdown-menu button{min-height:36px;padding:9px 12px;font-size:12px;font-weight:500;background:transparent;color:var(--text);border:none;border-radius:var(--r1);cursor:pointer;text-align:left;font-family:inherit;outline:none;transition:background-color var(--d1) var(--ez),color var(--d1) var(--ez)}
+.dropdown-menu button:focus-visible{box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
 
-/* Sync */
-.sync-panel{background:var(--surface);border:1px solid #58A6FF44;border-radius:8px;padding:20px;margin-bottom:20px}
-.sync-log{max-height:160px;overflow-y:auto;font-size:11px;font-family:'JetBrains Mono',monospace}
-.sync-log div{padding:2px 0;border-bottom:1px solid var(--border)}
+/* ── Sync ──────────────────────────────────────────────────*/
+.sync-panel{background:var(--surface);border:1px solid rgba(var(--accentRGB),.32);border-radius:var(--r3);padding:20px;margin-bottom:20px;box-shadow:var(--sh1),var(--lift)}
+.sync-log{max-height:170px;overflow-y:auto;font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;line-height:1.5;border-radius:var(--r1);background:var(--field);padding:4px 10px}
+.sync-log div{padding:3px 0;border-bottom:1px solid var(--border)}
+.sync-log div:last-child{border-bottom:none}
 
 /* Hamburger button — only shown on mobile via the media query below. */
-#mobile-nav-toggle{display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer;padding:4px 10px;line-height:1}
-#sidebar-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:150}
+#mobile-nav-toggle{display:none;background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;padding:4px 10px;line-height:1;border-radius:var(--r1)}
+#sidebar-backdrop{position:fixed;inset:0;background:rgba(3,6,13,.5);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:150;animation:veil-in var(--d2) var(--ez) both}
 /* Mobile filter toggle — desktop hides it, mobile shows it as the entry
    point to the scope filter popover. */
 #mobile-filter-toggle{display:none}
 
-/* Empty state */
-.empty-state{padding:40px;text-align:center;color:var(--muted)}
+/* Empty state — an invitation, so it gets real air rather than a shrug. */
+.empty-state{padding:48px 24px;text-align:center;color:var(--muted);font-size:13px;line-height:1.6}
 
 /* Inline edit button on table rows */
-.btn-icon{padding:2px 8px;font-size:14px;line-height:1.2;min-width:0}
+.btn-icon{padding:4px 9px;min-height:28px;font-size:14px;line-height:1.2;min-width:0}
 
 /* ── Log Conduct wizard: Status Personnel checklist ────────
    Each row is a <label> so the WHOLE row toggles its checkbox — the bare
    checkbox alone was too small a tap target. Base presentation lives here
    (not inline) so the .np "not participating" state can restyle the row. */
-.lc-wiz-status-row{display:grid;grid-template-columns:28px 48px minmax(0,1.4fr) minmax(80px,auto) minmax(0,1fr);gap:8px;align-items:center;min-height:44px;padding:6px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);box-sizing:border-box;cursor:pointer;user-select:none;-webkit-user-select:none}
-.lc-wiz-status-row:hover{border-color:var(--dim)}
-.lc-wiz-status-row.np{background:#D2992211;border-color:#D2992244}
+.lc-wiz-status-row{display:grid;grid-template-columns:28px 48px minmax(0,1.4fr) minmax(80px,auto) minmax(0,1fr);gap:8px;align-items:center;min-height:44px;padding:7px 11px;border-radius:var(--r2);background:var(--surface);border:1px solid var(--border);box-sizing:border-box;cursor:pointer;user-select:none;-webkit-user-select:none;transition:border-color var(--d2) var(--ez),background-color var(--d2) var(--ez)}
+.lc-wiz-status-row.np{background:rgba(var(--orangeRGB),.08);border-color:rgba(var(--orangeRGB),.3)}
 .lc-wiz-status-row>input[type="checkbox"]{width:20px;height:20px;cursor:pointer;accent-color:var(--orange);flex-shrink:0}
-.lc-wiz-status-row>.mono{font-weight:700;color:var(--accent);font-size:12px}
+.lc-wiz-status-row>.mono{font-weight:700;color:var(--accentLift);font-size:12px}
 .lc-wiz-status-name{font-size:12px;min-width:0;line-height:1.3}
-.lc-wiz-status-tag{font-size:10px;color:var(--orange);font-weight:600;line-height:1.4;background:#D2992222;border:1px solid #D2992244;border-radius:10px;padding:3px 9px;white-space:normal;justify-self:start}
-.lc-wiz-status-row>input[type="text"]{min-width:0;width:100%;padding:5px 10px;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font:inherit;font-size:11px;box-sizing:border-box;cursor:text;user-select:text;-webkit-user-select:text}
+.lc-wiz-status-tag{font-size:10px;color:var(--orange);font-weight:600;line-height:1.4;background:rgba(var(--orangeRGB),.14);border:1px solid rgba(var(--orangeRGB),.3);border-radius:var(--rp);padding:3px 9px;white-space:normal;justify-self:start}
+.lc-wiz-status-row>input[type="text"]{min-width:0;width:100%;padding:6px 10px;border-radius:var(--r1);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:11px;box-sizing:border-box;cursor:text;user-select:text;-webkit-user-select:text;outline:none}
+.lc-wiz-status-row>input[type="text"]:focus{border-color:rgba(var(--accentRGB),.7)}
 
 /* Filter chips above the checklist (participation segment + status families).
    Pill-shaped like the combined-group builder chips, ≥36px tap height. */
-.lc-wiz-filter-chip{padding:7px 12px;min-height:36px;border-radius:14px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2}
-.lc-wiz-filter-chip:hover{filter:brightness(1.2)}
-.lc-wiz-filter-chip.active{background:#58A6FF22;border-color:var(--accent);color:var(--accent)}
+.lc-wiz-filter-chip{padding:8px 13px;min-height:36px;border-radius:var(--rp);border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2;transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez),color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.lc-wiz-filter-chip:active{transform:scale(.96)}
+.lc-wiz-filter-chip:focus-visible{outline:none;box-shadow:var(--ring)}
+.lc-wiz-filter-chip.active{background:rgba(var(--accentRGB),.16);border-color:rgba(var(--accentRGB),.45);color:var(--accentLift)}
 
 /* ── Compare Parade States ─────────────────────────────────
    Deliberately single-column at every viewport: the diff is a reading flow
    (summary → change cards → collapsibles), so the desktop layout IS the
    mobile layout — no reflow, no horizontal scroll ever (raw diff wraps). */
-.cmp-paste{width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.45;resize:vertical;white-space:pre;margin-top:10px;box-sizing:border-box}
-.cmp-summary .cmp-strength{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.cmp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.cmp-chip{font-family:'JetBrains Mono',monospace;font-size:10px;padding:5px 10px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);white-space:nowrap}
+.cmp-paste{width:100%;padding:11px 12px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;line-height:1.45;resize:vertical;white-space:pre;margin-top:10px;box-sizing:border-box;outline:none}
+.cmp-paste:focus{border-color:rgba(var(--accentRGB),.7)}
+.cmp-summary .cmp-strength{font-size:17px;font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cmp-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.cmp-chip{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:10px;padding:5px 11px;border-radius:var(--rp);border:1px solid var(--border);background:var(--surface2);color:var(--muted);white-space:nowrap}
 .cmp-neg{color:var(--red)} .cmp-pos{color:var(--green)} .cmp-zero{color:var(--dim)}
-.cmp-meta{margin-top:8px;font-size:10px;color:var(--muted)}
-.cmp-warnings{margin-top:8px;font-size:10px;color:var(--orange);display:flex;flex-direction:column;gap:2px}
-.cmp-group{margin-top:14px}
-.cmp-group-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;margin-bottom:8px}
-.cmp-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.cmp-meta{margin-top:9px;font-size:10px;color:var(--muted)}
+.cmp-warnings{margin-top:9px;font-size:10px;color:var(--orange);display:flex;flex-direction:column;gap:2px}
+.cmp-group{margin-top:16px}
+.cmp-group-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.005em;margin-bottom:9px}
+/* The 3px left edge is the classification: out / returned / changed. It is the
+   only place in the app where colour alone carries meaning, and it is always
+   paired with a verb in the card body. */
+.cmp-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:11px 13px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere;box-shadow:var(--sh1)}
 .cmp-card-out{border-left:3px solid var(--red)}
 .cmp-card-ret{border-left:3px solid var(--green)}
 .cmp-card-chg{border-left:3px solid var(--yellow)}
 .cmp-card-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:24px}
-.cmp-4d{font-weight:700;color:var(--accent);font-size:12px}
+.cmp-4d{font-weight:700;color:var(--accentLift);font-size:12px}
 .cmp-name{font-size:13px;font-weight:600;min-width:0}
 .cmp-arrow{color:var(--muted)}
-.cmp-verb{font-size:10px;color:var(--muted)}
-.cmp-reason{font-size:12px;color:var(--muted);line-height:1.4}
+.cmp-verb{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.cmp-reason{font-size:12px;color:var(--muted);line-height:1.45}
 .cmp-dur{font-size:11px;color:var(--dim)}
 .cmp-note{color:var(--muted);font-size:11px}
 .cmp-diffline{font-size:12px;line-height:1.5}
 .cmp-diffline s{color:var(--red);opacity:.75}
-.cmp-details{border:1px solid var(--border);border-radius:8px;background:var(--surface);margin-top:10px}
-.cmp-details summary{padding:12px;min-height:44px;display:flex;align-items:center;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);user-select:none;-webkit-user-select:none;box-sizing:border-box}
+.cmp-details{border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);margin-top:10px;overflow:hidden}
+.cmp-details summary{padding:12px 13px;min-height:44px;display:flex;align-items:center;cursor:pointer;font-size:12px;font-weight:600;color:var(--muted);user-select:none;-webkit-user-select:none;box-sizing:border-box}
 .cmp-details[open] summary{border-bottom:1px solid var(--border)}
-.cmp-rawdiff,.cmp-pre{padding:10px 12px;font-size:11px;line-height:1.5;overflow-x:hidden;margin:0;font-family:'JetBrains Mono',monospace}
+.cmp-rawdiff,.cmp-pre{padding:11px 13px;font-size:11px;line-height:1.5;overflow-x:hidden;margin:0;font-family:'JetBrains Mono',ui-monospace,monospace}
 .cmp-pre{white-space:pre-wrap;word-break:break-word;color:var(--muted)}
-.cmp-line{white-space:pre-wrap;word-break:break-word;padding:1px 6px;border-radius:3px}
-.cmp-del{background:#F8514918;color:var(--red)}
-.cmp-add{background:#3FB95018;color:var(--green)}
+.cmp-line{white-space:pre-wrap;word-break:break-word;padding:1px 6px;border-radius:4px}
+.cmp-del{background:rgba(var(--redRGB),.12);color:var(--red)}
+.cmp-add{background:rgba(var(--greenRGB),.12);color:var(--green)}
+
+/* ── Hover affordances (pointer devices only) ──────────────
+   Every :hover in the app lives in here. Touch browsers latch :hover after a
+   tap — a card that stays "lifted" until you tap elsewhere looks broken — and
+   (hover:hover) is the only reliable way out. Affordance emerges rather than
+   being permanently on: the hairline brightens, the surface lifts 1px. No
+   box-shadow transitions on cards/rows; those are large repaints. */
+@media (hover:hover) and (pointer:fine){
+  .nav-btn:hover{background:var(--surface2);color:var(--text)}
+  .nav-btn:hover::before{transform:scaleY(.5)}
+  .nav-btn.active:hover::before{transform:scaleY(1)}
+  .btn:hover:not(:disabled){background:var(--surface3);border-color:var(--borderHi)}
+  .btn-primary:hover:not(:disabled){background:#2277F0;border-color:rgba(var(--accentRGB),.8)}
+  .btn-success:hover:not(:disabled){background:rgba(var(--greenRGB),.24);border-color:rgba(var(--greenRGB),.5)}
+  .btn-danger:hover:not(:disabled){background:rgba(var(--redRGB),.24);border-color:rgba(var(--redRGB),.5)}
+  .btn-ghost:hover:not(:disabled){background:var(--surface2);border-color:transparent}
+  .card:hover{border-color:var(--borderHi)}
+  .stat:hover{border-color:var(--borderHi);transform:translateY(-1px)}
+  tbody tr:hover{background:var(--surface2)}
+  .topbar-select:hover:not(:disabled){border-color:var(--borderHi)}
+  #topbar input:hover{border-color:var(--borderHi)}
+  .role-btn:hover{color:var(--text)}
+  .filter-role-group .role-btn:hover:not(.active){background:var(--surface2)}
+  .dropdown-menu button:hover{background:var(--surface3);color:var(--accentLift)}
+  .modal-close:hover{color:var(--text);background:var(--surface2)}
+  .lc-wiz-status-row:hover{border-color:var(--borderHi)}
+  .lc-wiz-filter-chip:hover:not(.active){background:var(--surface3);border-color:var(--borderHi);color:var(--text)}
+  .cmp-details summary:hover{color:var(--text)}
+  #mobile-nav-toggle:hover,#mobile-filter-toggle:hover{background:var(--surface2)}
+  #sync-status.s-ok:hover,#sync-status.s-syncing:hover{filter:brightness(1.12)}
+}
+
+/* ── No backdrop-filter (older Android WebView / Firefox w/ flag off) ──
+   Fall back to fully opaque surfaces. A translucent panel with no blur behind
+   it is unreadable over a data table, which is exactly the failure case. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  #sidebar{background:var(--surface)}
+  #topbar{background:var(--surface)}
+  .modal-overlay{background:rgba(3,6,13,.82)}
+  .dropdown-menu{background:var(--surface2)}
+  #sidebar-backdrop{background:rgba(3,6,13,.7)}
+  #topbar-filters{background:var(--surface)}
+}
 
 /* ── Mobile (≤768px) ───────────────────────────────────────
    Sidebar slides in from the left over the content, triggered by the
@@ -191,72 +441,102 @@ tr:hover{background:var(--surface2)}
      Safari's address bar doesn't clip the bottom items; falls back to
      100vh. -webkit-overflow-scrolling enables momentum scrolling on iOS.
      padding-bottom adds safe-area inset so the home indicator doesn't
-     overlap the last nav button on notched iPhones. */
-  #sidebar{position:fixed;top:0;left:-260px;width:240px;height:100vh;height:100dvh;z-index:200;transition:left .22s ease-out;box-shadow:2px 0 16px rgba(0,0,0,.6);overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom,0)}
+     overlap the last nav button on notched iPhones. `left` is what
+     animates here rather than transform — it is a one-off 240px panel, not
+     a scrolling list, and the existing open/close JS toggles .open only. */
+  #sidebar{position:fixed;top:0;left:-260px;width:250px;height:100vh;height:100dvh;z-index:200;transition:left .24s var(--ez);box-shadow:var(--sh4);overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom,0);background:rgba(28,25,23,.86)}
   #sidebar.open{left:0}
-  .nav-btn{font-size:14px;padding:12px 16px}  /* bigger tap target but trimmed so all 13 fit */
+  .nav-btn{font-size:14px;padding:13px 18px;min-height:46px}  /* ≥44px thumb target, still fits all 13 */
   .nav-btn span:last-child{display:inline}    /* show labels on mobile menu */
+  .nav-btn>span:first-child{font-size:16px}
   #sidebar-footer{font-size:11px;padding:14px}
 
   /* Hamburger visible, backdrop ready to be revealed */
-  #mobile-nav-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px}
+  #mobile-nav-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px}
 
   /* Topbar is now a single short row: hamburger | search | filter toggle.
      The scope-filter selects live in a popover panel below the topbar
      instead of taking up a permanent second row. */
   #topbar{flex-wrap:nowrap;padding:8px 12px;gap:8px}
   #topbar .topbar-search-icon{display:none}
-  #topbar input{flex:1 1 auto;min-width:0;max-width:none;font-size:14px;padding:10px 12px}
+  #topbar input{flex:1 1 auto;min-width:0;max-width:none;font-size:14px;padding:10px 13px;min-height:40px}
   #search-results{order:99;flex-basis:100%;margin-top:4px}  /* drops below row if any */
 
   /* The "Scope" toggle — shows current filter state ("All", "P1", "P1S2"). */
-  #mobile-filter-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:54px;min-height:36px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.5px;flex-shrink:0}
-  #mobile-filter-toggle.active{color:var(--accent);border-color:var(--accent);background:#58A6FF11}
+  #mobile-filter-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:56px;min-height:40px;padding:6px 11px;border-radius:var(--r2);border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em;flex-shrink:0;transition:color var(--d2) var(--ez),border-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+  #mobile-filter-toggle:active{transform:scale(.95)}
+  #mobile-filter-toggle.active{color:var(--accentLift);border-color:rgba(var(--accentRGB),.6);background:rgba(var(--accentRGB),.12)}
 
   /* Sync pill: a proper tap target on mobile and impossible to miss when red. */
-  #sync-status{min-height:36px;display:inline-flex;align-items:center;font-size:12px;padding:6px 12px}
+  #sync-status{min-height:40px;display:inline-flex;align-items:center;font-size:12px;padding:6px 13px}
+  /* On a phone the topbar has to hold search, scope and status in 390px, and
+     the full status text ("⚠ Sign in again - access revoked") took nearly half
+     the bar and crushed the search field to four characters. So the pill is a
+     sentence on desktop and a glyph on a phone. The text is HIDDEN, not
+     removed - font-size:0 keeps it in the accessibility tree, so screen
+     readers and the e2e assertions still read the real status - and the
+     sidebar footer carries the full sentence for anyone who wants it. Colour
+     already does most of this work; tapping still retries. */
+  #sync-status{width:40px;min-width:40px;padding:0;justify-content:center;font-size:0}
+  #sync-status::before{font-size:16px;line-height:1}
+  #sync-status.s-ok::before{content:"●"}
+  #sync-status.s-syncing::before{content:"⟳"}
+  #sync-status.s-error::before{content:"⚠"}
+  /* Section note always takes its own line on a phone rather than wrapping
+     unpredictably mid-header, indented to sit under the title (9px chevron +
+     8px gap) instead of flush against the card edge. */
+  .dash-sec-note{flex:1 0 100%;margin-left:17px}
 
   /* Filter panel: dropdown anchored to the bottom edge of the topbar.
      Hidden by default; .open reveals it. Topbar is the positioning context
-     thanks to position:sticky (a positioned ancestor). */
-  #topbar-filters{position:absolute;top:100%;left:0;right:0;margin:0;padding:14px 14px 16px;background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 6px 18px rgba(0,0,0,.45);display:none;flex-direction:column;gap:10px;z-index:49}
-  #topbar-filters.open{display:flex}
+     thanks to position:sticky (a positioned ancestor). Frosted — this one
+     genuinely overlays the content beneath it. */
+  #topbar-filters{position:absolute;top:100%;left:0;right:0;margin:0;padding:15px 14px 17px;background:rgba(20,25,36,.94);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border-bottom:1px solid var(--border);border-radius:0 0 var(--r3) var(--r3);box-shadow:var(--sh3);display:none;flex-direction:column;gap:10px;z-index:49}
+  #topbar-filters.open{display:flex;animation:pop-in var(--d2) var(--ez) both;transform-origin:top center}
   #topbar-filters .filter-label{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:-4px}
-  #topbar-filters .topbar-select{width:100%;padding:12px;font-size:14px}
+  #topbar-filters .topbar-select{width:100%;padding:12px;font-size:14px;min-height:46px}
+  .filter-role-group{width:100%}
+  .filter-role-group .role-btn{flex:1;min-height:38px;font-size:12.5px}
   #filter-clear{align-self:flex-end;min-width:60px}
 
   /* Content area */
-  #content{padding:12px}
+  #content{padding:13px 13px 32px}
+  #content>h2{font-size:18px}
 
   /* Stat cards: 2-up on mobile, larger touch */
   .stats-row{gap:8px;margin-bottom:14px}
-  .stat{flex:1 1 calc(50% - 4px);min-width:0;padding:10px 12px}
-  .stat .val{font-size:18px}
+  .stat{flex:1 1 calc(50% - 4px);min-width:0;padding:11px 13px 12px;border-radius:var(--r2)}
+  .stat .val{font-size:20px}
 
   /* Card spacing */
-  .card{padding:12px;margin-bottom:12px}
+  .card{padding:13px;margin-bottom:12px;border-radius:var(--r2)}
 
   /* Tables: horizontal scroll already enabled; tighten cell padding */
-  th,td{padding:6px 8px;font-size:11px}
-  .table-wrap{max-height:none}
+  th,td{padding:9px 9px;font-size:11.5px}
+  .table-wrap{max-height:none;border-radius:var(--r2)}
 
-  /* Buttons: minimum 36px height for thumb targets */
-  .btn{padding:10px 14px;font-size:13px;min-height:36px}
-  .btn-icon{min-width:36px;min-height:36px;padding:6px 10px}
+  /* Buttons: minimum 40px height for thumb targets */
+  .btn{padding:11px 15px;font-size:13px;min-height:40px}
+  .btn-icon{min-width:40px;min-height:40px;padding:8px 11px}
 
   /* Forms */
-  .form-group input,.form-group select,.form-group textarea{padding:10px 12px;font-size:14px}
+  .form-group input,.form-group select,.form-group textarea{padding:11px 12px;font-size:14px;min-height:44px}
+  .duty-row select{padding:11px 12px;font-size:14px;min-height:44px}
   .form-row{grid-template-columns:1fr}
 
-  /* Modal: full-screen on phones. Use 100dvh so it sizes to the visible
-     viewport (not behind iOS's toolbar). Bottom padding ensures the last
-     bit of content is reachable when iOS's bottom toolbar appears. Top
-     padding pulls the sticky header up to the very edge. */
-  .modal-overlay{padding:0;align-items:stretch;justify-content:stretch}
-  .modal,.modal.wide{max-width:100%;width:100%;max-height:100vh;max-height:100dvh;height:100vh;height:100dvh;border-radius:0;padding:16px 16px 80px;border-left:none;border-right:none;border-bottom:none}
-  /* On mobile the sticky header should hug the modal top edge, so pull its
-     background out to cover the full width. */
-  .modal-header{margin:-16px -16px 12px;padding:16px 16px 10px}
+  /* Modal → iOS sheet. Slides up from the bottom edge, rounded top corners,
+     hugs its own content up to 92dvh instead of always being full-screen.
+     dvh (not vh) so it sizes to the visible viewport, not behind iOS's
+     toolbar. The drag handle is pure CSS on .modal-header::before — the
+     header is sticky at the sheet's top edge, so the handle stays put while
+     the body scrolls under it. There is no drag gesture wired up; the handle
+     is the affordance that says "this panel is a sheet", and ✕ / backdrop-tap
+     are the real dismissals. */
+  .modal-overlay{padding:0;align-items:flex-end;justify-content:center}
+  .modal,.modal.wide{max-width:100%;width:100%;max-height:92vh;max-height:92dvh;height:auto;border-radius:var(--r4) var(--r4) 0 0;padding:20px 16px calc(28px + env(safe-area-inset-bottom,0));border-bottom:none;border-left:none;border-right:none;animation:sheet-in var(--d4) var(--spring) both}
+  .modal-header{margin:-20px -16px 14px;padding:22px 16px 11px;border-radius:var(--r4) var(--r4) 0 0}
+  .modal-header::before{content:"";position:absolute;top:8px;left:50%;width:38px;height:4px;margin-left:-19px;border-radius:var(--rp);background:var(--surface3)}
+  .modal-header h3{font-size:16px}
 
   /* Two-col grids collapse — !important defeats any inline style override
      coming from openPerson's chart grid, and min-width:0 on children lets
@@ -270,10 +550,10 @@ tr:hover{background:var(--surface2)}
   #chart-status,#chart-participation{max-height:180px}
 
   /* Sync panel padding */
-  .sync-panel{padding:14px}
+  .sync-panel{padding:14px;border-radius:var(--r2)}
 
   /* iOS Safari select arrow override — make sure selects look tappable */
-  select.topbar-select,.form-group select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
+  select.topbar-select,.form-group select,.duty-row select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
 
   /* Hard cap any inline min-width on selects/inputs so a wide dropdown (the
      Conduct-Detail filter is 260px on desktop) can't force the page wider
@@ -314,10 +594,10 @@ tr:hover{background:var(--surface2)}
   .lc-wiz-status-row > span:nth-child(3){grid-area:name;font-size:13px!important;overflow:visible!important;text-overflow:clip!important;white-space:normal!important;line-height:1.3}
   .lc-wiz-status-row > span:nth-child(4){
     grid-area:tag;
-    background:#D2992222;
-    border:1px solid #D2992244;
+    background:rgba(var(--orangeRGB),.14);
+    border:1px solid rgba(var(--orangeRGB),.3);
     color:var(--orange);
-    border-radius:10px;
+    border-radius:var(--rp);
     padding:3px 9px;
     font-size:10px!important;
     line-height:1.4!important;
@@ -326,7 +606,7 @@ tr:hover{background:var(--surface2)}
     text-overflow:clip!important;
     justify-self:start;
   }
-  .lc-wiz-status-row > input[type="text"]{grid-area:reason;padding:8px 10px!important;font-size:12px!important;height:auto}
+  .lc-wiz-status-row > input[type="text"]{grid-area:reason;padding:9px 11px!important;font-size:12px!important;height:auto;min-height:40px}
 
   /* Bulk-add rows (Report Sick / Fallout): SN + recruit dropdown + ✕ on
      top row; reason field on its own row below for full-width typing. */
@@ -340,7 +620,7 @@ tr:hover{background:var(--surface2)}
   }
   .lc-wiz-bulk-row > span:first-child{grid-area:sn;font-size:12px!important;align-self:center}
   .lc-wiz-bulk-row > div{grid-area:select}
-  .lc-wiz-bulk-row > input[type="text"]{grid-area:reason;padding:8px 10px!important;font-size:12px!important;height:auto}
+  .lc-wiz-bulk-row > input[type="text"]{grid-area:reason;padding:9px 11px!important;font-size:12px!important;height:auto;min-height:40px}
   .lc-wiz-bulk-row > button{grid-area:remove;padding:4px 8px!important;align-self:center}
 
   /* Stats strip: Total Str takes its own full-width row, then Status /
@@ -348,7 +628,7 @@ tr:hover{background:var(--surface2)}
      + LMS) keeps 2 cols so the Participating count stays prominent. */
   .lc-wiz-stats-top{grid-template-columns:repeat(3,1fr)!important;gap:6px!important}
   .lc-wiz-stats-top > div:first-child{grid-column:1 / -1}
-  .lc-wiz-stats-top > div:first-child input{padding:8px 10px!important;font-size:15px!important}
+  .lc-wiz-stats-top > div:first-child input{padding:9px 11px!important;font-size:15px!important}
   .lc-wiz-stats-top .stat .val{font-size:20px!important}
   .lc-wiz-stats-bot{grid-template-columns:1fr 1fr!important}
   .lc-wiz-stats-bot .stat .val{font-size:22px!important}
@@ -378,4 +658,13 @@ tr:hover{background:var(--surface2)}
   .cmp-paste{font-size:12px;padding:12px}
   .cmp-chip{font-size:11px;padding:6px 11px}
   .cmp-details summary{min-height:48px;font-size:13px}
+}
+
+/* ── Reduced motion ────────────────────────────────────────
+   Non-negotiable, and deliberately a blanket rule placed last so it beats
+   everything above including the mobile sheet. Note this also stops the
+   #sync-status.s-error pulse — the "NOT saved" signal survives on its own
+   because it is the only solid-filled red element in the entire app. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0ms!important;scroll-behavior:auto!important}
 }

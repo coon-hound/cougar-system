@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 134;
+const APP_VERSION = 137;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 134,
+    v: 137,
     date: "15 Sep 2026",
     title: "The parade state is now the battalion's format",
     intro: "40 SAR asked all five companies to file one common format so HQ can collate the battalion's strength without re-typing it. First and Last Parade State now generate exactly that. Everything you already record still appears - it is just grouped by platoon and written one line per record instead of a five-line block, which is about 65% less text.",

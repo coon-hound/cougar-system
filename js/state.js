@@ -46,7 +46,6 @@ const DIRTY_KEY = "cougar-dirty-tabs";
 // Payload: { v:1, tabs: { TabName: [modes] } } - see persistDirtyOps (sync.js).
 const DIRTY_OPS_KEY = "cougar-dirty-ops-v1";
 const CUSTOM_STATUS_KEY = "cougar-custom-statuses";
-const PROGRAMS_KEY = "cougar-programs";
 const COMBINED_KEY = "cougar-combined-groups";
 const DUTY_KEY = "cougar-duty";
 const PARADE_STATES_KEY = "cougar-parade-snapshots";
@@ -61,9 +60,6 @@ const TAB_TO_STATE = {
   "Medical": "medical",
   "Attendance": "attendance",
   "IPPT": "ippt",
-  "RouteMarch": "rm",
-  "SOC": "soc",
-  "PolarFlow": "polar",
   "ConductDetail": "conductDetail",
   "Appointments": "appointments",
   "Leave": "leave",
@@ -102,38 +98,14 @@ function saveCustomStatuses() {
   localStorage.setItem(CUSTOM_STATUS_KEY, JSON.stringify(STATE.customStatuses || []));
 }
 
-// Training-program config, persisted per-device. Shape:
-//   [{ key: "PTP", name: "PTP", platoons: ["1","4"] }, ...]
-// Maps platoons → parallel training programs (see helpers.js). Defaults reflect
-// the current intake (PTP = Plt 1+4, BMT = Plt 2+3). Editable in the Conducts
-// tab. Lives in its own localStorage key so a data-cache reset doesn't wipe it;
-// the resolved program label is also stored on each conduct record, so the
-// mapping only needs to be consistent at log time (defaults ensure that).
-const DEFAULT_PROGRAMS = [
-  { key: "PTP", name: "PTP", platoons: ["1", "4"] },
-  { key: "BMT", name: "BMT", platoons: ["2", "3"] }
-];
-function loadPrograms() {
-  try {
-    const arr = JSON.parse(localStorage.getItem(PROGRAMS_KEY) || "null");
-    if (!Array.isArray(arr)) return DEFAULT_PROGRAMS.map(p => ({ ...p, platoons: [...p.platoons] }));
-    return arr
-      .filter(p => p && p.key)
-      .map(p => ({ key: String(p.key), name: String(p.name || p.key), platoons: (Array.isArray(p.platoons) ? p.platoons : []).map(String) }));
-  } catch { return DEFAULT_PROGRAMS.map(p => ({ ...p, platoons: [...p.platoons] })); }
-}
-function savePrograms() {
-  localStorage.setItem(PROGRAMS_KEY, JSON.stringify(STATE.programs || []));
-}
-
-// Combined groups: saved set-formulas over platoons / programs / groups / the
+// Combined groups: saved set-formulas over platoons / groups / the
 // whole company, e.g. "P4 − Guard Duty" = include {plt:4} minus exclude
 // {grp:Guard Duty}. Membership is resolved LIVE from the current roster (see
 // helpers.js combinedMemberSet), so they track group/platoon changes with no
 // stored member list. Shape: [{ name, include:[token], exclude:[token] }] where
-// a token is "company" | "plt:N" | "prog:KEY" | "grp:NAME". Per-device config
-// like programs (own localStorage key); the underlying groups it references are
-// the shared, synced part.
+// a token is "company" | "plt:N" | "grp:NAME". Per-device config (own
+// localStorage key); the underlying groups it references are the shared,
+// synced part.
 function loadCombinedGroups() {
   try {
     const arr = JSON.parse(localStorage.getItem(COMBINED_KEY) || "[]");
@@ -285,7 +257,7 @@ const STATE = {
   nav: "dashboard",
   apiUrl: API_URL,
   authToken: localStorage.getItem(AUTH_KEY) || "",
-  roster: [], medical: [], attendance: [], ippt: [], rm: [], soc: [], polar: [], conductDetail: [], appointments: [], leave: [], msk: [],
+  roster: [], medical: [], attendance: [], ippt: [], conductDetail: [], appointments: [], leave: [], msk: [],
   // Canonical conduct registry: [{id: "c001", name: "Orientation Run"}, ...].
   // Source of truth for the conduct dimension — records on attendance/polar/
   // conductDetail reference entries here via `conductId` instead of carrying
@@ -300,17 +272,10 @@ const STATE = {
   filterRole: "",
   filterPlt: "",
   filterSect: "",
-  // Training-program scope: "" = all programs. Filters conduct views by the
-  // program stored on each record, and per-recruit views by the recruit's
-  // platoon→program mapping. See helpers.js (programOf, recruitsInProgram).
-  filterProgram: "",
   // Ad-hoc recruit-group scope: "" = all. Filters every per-recruit view to one
   // named group (e.g. "Guard Duty") or a combined group ("c:<name>"). Membership
   // lives on the Roster row (`groups` column); the name list is derived. See helpers.js.
   filterGroup: "",
-  // Editable platoon→program map (see loadPrograms). Drives the conduct
-  // wizard's program scoping and the program badges/filters.
-  programs: loadPrograms(),
   // Saved combined-group formulas (see loadCombinedGroups). Surfaced in the
   // group filter dropdown and the book-out picker alongside plain groups.
   combinedGroups: loadCombinedGroups(),
@@ -538,7 +503,7 @@ function normalizeMSK(records) {
 function saveLocal() {
   const d = {
     roster: STATE.roster, medical: STATE.medical, attendance: STATE.attendance,
-    ippt: STATE.ippt, rm: STATE.rm, soc: STATE.soc, polar: STATE.polar,
+    ippt: STATE.ippt,
     conductDetail: STATE.conductDetail, appointments: STATE.appointments,
     leave: STATE.leave, msk: STATE.msk, conducts: STATE.conducts,
     rev: STATE.rev || {}
@@ -565,9 +530,6 @@ function loadLocal() {
     STATE.medical = normalizeMedical(d.medical);
     STATE.attendance = normalizeAttendance(d.attendance);
     STATE.ippt = padD4OnLayer(d.ippt);
-    STATE.rm = padD4OnLayer(d.rm);
-    STATE.soc = padD4OnLayer(d.soc);
-    STATE.polar = padD4OnLayer(d.polar);
     STATE.conductDetail = normalizeConductDetail(d.conductDetail);
     STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
@@ -591,11 +553,10 @@ function loadFilter() {
     STATE.filterPlt = d.plt || "";
     STATE.filterSect = d.sect || "";
     STATE.filterRole = d.role || "";
-    STATE.filterProgram = d.program || "";
     STATE.filterGroup = d.group || "";
   } catch { /* keep defaults */ }
 }
 
 function saveFilter() {
-  localStorage.setItem(FILTER_KEY, JSON.stringify({ plt: STATE.filterPlt, sect: STATE.filterSect, role: STATE.filterRole, program: STATE.filterProgram, group: STATE.filterGroup }));
+  localStorage.setItem(FILTER_KEY, JSON.stringify({ plt: STATE.filterPlt, sect: STATE.filterSect, role: STATE.filterRole, group: STATE.filterGroup }));
 }

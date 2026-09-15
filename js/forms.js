@@ -15,36 +15,11 @@ function openPerson(d4) {
   const p = STATE.roster.find(r => r.id === d4); if (!p) return;
   const med = STATE.medical.filter(m => m.d4 === d4);
   const ippts = STATE.ippt.filter(i => i.d4 === d4).sort((a, b) => a.attempt - b.attempt);
-  const rms = STATE.rm.filter(r => r.d4 === d4).sort((a, b) => a.rmNum - b.rmNum);
-  const socs = STATE.soc.filter(s => s.d4 === d4).sort((a, b) => a.socNum - b.socNum);
-
-  // Polar sessions, chronological. Dates from the sheet arrive as "17 May 2026",
-  // so convert to ISO for a reliable sort and fall back to raw string if parse fails.
-  const pol = STATE.polar.filter(x => x.d4 === d4).slice().sort((a, b) => {
-    const ai = displayDateToISO(a.date) || a.date || "";
-    const bi = displayDateToISO(b.date) || b.date || "";
-    return ai < bi ? -1 : ai > bi ? 1 : 0;
-  });
-
-  // Per-session derived metrics. Guard against div-by-zero on missing HR/duration.
-  const computed = pol.map(x => {
-    const avg = +x.avgHr || 0, max = +x.maxHr || 0, cal = +x.calories || 0, dur = +x.duration || 0;
-    return {
-      date: x.date, conduct: conductName(x.conductId),
-      avgHr: avg, maxHr: max, calories: cal, duration: dur,
-      efficiency: avg ? +(cal / avg).toFixed(2) : 0,
-      intensity:  max ? +((avg / max) * 100).toFixed(1) : 0,
-      workload:   avg * dur
-    };
-  });
-  const latest = computed[computed.length - 1];
-
   // Commanders never show their 00xx id — surface rank instead. Recruits keep
-  // the existing "4D — status" header, plus a training-program badge (PTP/BMT).
-  const prog = p.role === "Commander" ? "" : programOf(p);
+  // the existing "4D — status" header.
   let html = p.role === "Commander"
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}${prog ? " " + programBadge(prog) : ""}</div>`;
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.id} — ${statusBadge(p.status)}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ────────
   // Reflects the shared out-of-camp computation. The lever is state-specific:
@@ -53,7 +28,7 @@ function openPerson(d4) {
   // present-override active → Undo book-in.
   const campInfo = outOfCampMap(todayISO()).get(d4);
   const forcedInHere = !campInfo && isForcedIn(p, todayISO()) && derivedCampOut(d4, todayISO());
-  const pill = (txt, bg) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:${bg}22;color:${bg}">${txt}</span>`;
+  const pill = (txt, tok) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(var(${tok}RGB),.13);color:var(${tok})">${txt}</span>`;
   const campBtn = campInfo
     ? (campInfo.kind === "bookedout"
       ? `<button class="btn btn-success" style="font-size:11px;padding:4px 10px" onclick="undoBookOut('${d4}'); openPerson('${d4}')" title="Removes today's book-out">↩ Book in</button>`
@@ -62,7 +37,7 @@ function openPerson(d4) {
       ? `<button class="btn" style="font-size:11px;padding:4px 10px" onclick="clearPresentOverride('${d4}'); openPerson('${d4}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
       : `<button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm({ d4: '${d4}', after: () => openPerson('${d4}') })" title="Book out for today or a date range">🚪 Book out</button>`;
   html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-    ${campInfo ? pill("OUT OF CAMP", "#F85149") : forcedInHere ? pill("IN CAMP (MANUAL)", "#39D2C0") : pill("IN CAMP", "#3FB950")}
+    ${campInfo ? pill("OUT OF CAMP", "--red") : forcedInHere ? pill("IN CAMP (MANUAL)", "--teal") : pill("IN CAMP", "--green")}
     ${campInfo ? `<span style="font-size:11px;color:var(--muted)">${escapeAttr(campInfo.reason || "")}</span>` : ""}
     ${campInfo && campInfo.kind !== "bookedout"
       ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
@@ -96,9 +71,9 @@ function openPerson(d4) {
     </div>
   </div>`;
 
-  if (p.allergies) html += `<div style="background:#E3B34122;border:1px solid #E3B34144;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:var(--yellow)"><strong>Allergies:</strong> ${p.allergies}</div>`;
-  if (p.msk) html += `<div style="background:#F8514922;border:1px solid #F8514944;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--red)"><strong>MSK history:</strong> ${p.msk}</div>`;
-  if (p.otherMedical) html += `<div style="background:#E3B34122;border:1px solid #E3B34144;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--yellow)"><strong>Other medical:</strong> ${p.otherMedical}</div>`;
+  if (p.allergies) html += `<div style="background:rgba(var(--yellowRGB),.13);border:1px solid rgba(var(--yellowRGB),.27);border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:var(--yellow)"><strong>Allergies:</strong> ${p.allergies}</div>`;
+  if (p.msk) html += `<div style="background:rgba(var(--redRGB),.13);border:1px solid rgba(var(--redRGB),.27);border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--red)"><strong>MSK history:</strong> ${p.msk}</div>`;
+  if (p.otherMedical) html += `<div style="background:rgba(var(--yellowRGB),.13);border:1px solid rgba(var(--yellowRGB),.27);border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--yellow)"><strong>Other medical:</strong> ${p.otherMedical}</div>`;
 
   // ── Personal details (enlistment form) ────────────────
   // Only rendered when at least one field is present — hides the whole card for
@@ -137,11 +112,10 @@ function openPerson(d4) {
   const medDays = new Set(med.map(m => m.date)).size;
   html += `<div class="stats-row"><div class="stat" ${rsClickable ? `onclick="toggleReportSickPatterns('${d4}')" style="cursor:pointer" title="Click to see patterns (unique days — multiple medical rows on the same day count as 1)"` : ""}><label>RSIs ${rsClickable ? '<span style="color:var(--dim);font-size:9px">▾ patterns</span>' : ''}</label><div class="val" style="color:${medDays > 1 ? 'var(--red)' : 'var(--muted)'}">${medDays}</div></div>`;
   html += `<div class="stat"><label>IPPT Best</label><div class="val" style="color:var(--orange)">${ippts.length ? Math.max(...ippts.map(i => +i.score)) : "—"}</div></div>`;
-  html += `<div class="stat"><label>RMs</label><div class="val" style="color:var(--teal)">${rms.length}</div></div>`;
-  html += `<div class="stat"><label>SOCs</label><div class="val" style="color:var(--purple)">${socs.length}</div></div></div>`;
+  html += `</div>`;
   html += `<div id="rs-patterns" style="display:none"></div>`;
 
-  // Conduct Participation History — sits above IPPT/RM/SOC so a PC checking
+  // Conduct Participation History — sits above IPPT so a PC checking
   // "why has this recruit been missing conducts" sees the answer first thing.
   const cd = STATE.conductDetail.filter(d => d.d4 === d4).slice().sort((a, b) => {
     const ai = displayDateToISO(a.date) || a.date || "";
@@ -174,16 +148,6 @@ function openPerson(d4) {
     html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">IPPT Progression</h4>`;
     html += `<div class="chart-box"><canvas id="person-ippt-chart"></canvas></div>`;
     html += ippts.map(i => `<span class="badge badge-accent" style="margin:2px">#${i.attempt}: ${i.score} ${awardBadge(i.score)}</span>`).join("");
-  }
-  if (rms.length) {
-    html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">Route March</h4><div style="display:flex;gap:8px;flex-wrap:wrap">`;
-    html += rms.map(r => `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px;border:1px solid var(--border);text-align:center"><div style="font-size:10px;color:var(--muted)">RM ${r.rmNum}</div><div class="mono" style="font-size:16px;font-weight:700;color:var(--teal)">${r.time}</div></div>`).join("");
-    html += `</div>`;
-  }
-  if (socs.length) {
-    html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">SOC</h4><div style="display:flex;gap:8px;flex-wrap:wrap">`;
-    html += socs.map(s => `<div style="background:var(--surface2);border-radius:6px;padding:8px 12px;border:1px solid var(--border);text-align:center"><div style="font-size:10px;color:var(--muted)">SOC ${s.socNum}</div><div class="mono" style="font-size:16px;font-weight:700;color:var(--purple)">${s.time}</div></div>`).join("");
-    html += `</div>`;
   }
   if (med.length) {
     const today = todayISO();
@@ -243,107 +207,33 @@ function openPerson(d4) {
     }
   }
 
-  // ── Polar metrics section ────────────────────────────
-  if (computed.length) {
-    // Color thresholds: HR ranges follow the existing Polar table convention.
-    // Intensity uses standard zone bands (~70 moderate, 80 hard, 90 max).
-    const avgHrCol = latest.avgHr > 160 ? 'var(--red)' : latest.avgHr > 140 ? 'var(--orange)' : latest.avgHr ? 'var(--green)' : 'var(--muted)';
-    const intCol = latest.intensity >= 90 ? 'var(--red)' : latest.intensity >= 80 ? 'var(--orange)' : latest.intensity >= 70 ? 'var(--yellow)' : latest.intensity ? 'var(--green)' : 'var(--muted)';
-
-    html += `<h4 style="font-size:12px;color:var(--muted);margin:16px 0 8px">Polar Metrics & Progression <span style="color:var(--dim);font-weight:400">(${computed.length} session${computed.length === 1 ? '' : 's'}, latest: ${latest.date || '—'})</span></h4>`;
-
-    html += `<div class="stats-row" style="margin-bottom:10px">
-      <div class="stat" title="Latest session average heart rate"><label>Avg HR</label><div class="val" style="color:${avgHrCol};font-size:17px">${latest.avgHr || '—'}</div></div>
-      <div class="stat" title="Latest session peak heart rate"><label>Max HR</label><div class="val" style="color:var(--red);font-size:17px">${latest.maxHr || '—'}</div></div>
-      <div class="stat" title="Calories burned latest session"><label>kcal</label><div class="val" style="color:var(--orange);font-size:17px">${latest.calories || '—'}</div></div>
-      <div class="stat" title="kcal / avg HR — output per heartbeat"><label>Efficiency</label><div class="val" style="color:var(--teal);font-size:17px">${latest.efficiency || '—'}</div></div>
-      <div class="stat" title="avg HR / max HR — how close to ceiling"><label>Intensity</label><div class="val" style="color:${intCol};font-size:17px">${latest.intensity ? latest.intensity + '%' : '—'}</div></div>
-      <div class="stat" title="avg HR × duration — total cardiac load"><label>Workload</label><div class="val" style="color:var(--purple);font-size:17px">${latest.workload || '—'}</div></div>
-    </div>`;
-
-    html += `<div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:12px;line-height:1.55">
-      <div><strong style="color:var(--teal)">Efficiency</strong> = kcal ÷ avg HR. Rising over time means more output per heartbeat — improving conditioning.</div>
-      <div><strong style="color:var(--yellow)">Intensity</strong> = avg HR ÷ max HR (%). How close to their ceiling they worked. &lt;70% easy, 70–80% moderate, 80–90% hard, &gt;90% max effort.</div>
-      <div><strong style="color:var(--pink)">Recovery</strong> = max HR trend across identical sessions. A declining max HR at the same workload suggests improved fitness <em>or</em> fatigue/overtraining — context matters.</div>
-      <div><strong style="color:var(--purple)">Workload</strong> = avg HR × duration (min). Total cardiac load — useful for tracking weekly load and periodisation.</div>
-    </div>`;
-
-    html += `<div class="grid-2" style="gap:10px">
-      <div class="card" style="padding:10px;margin:0"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Heart Rate (avg vs max)</div><div class="chart-box"><canvas id="pm-hr"></canvas></div></div>
-      <div class="card" style="padding:10px;margin:0"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Calories (kcal)</div><div class="chart-box"><canvas id="pm-cal"></canvas></div></div>
-      <div class="card" style="padding:10px;margin:0"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Efficiency (kcal / avg HR)</div><div class="chart-box"><canvas id="pm-eff"></canvas></div></div>
-      <div class="card" style="padding:10px;margin:0"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Intensity (avg / max %)</div><div class="chart-box"><canvas id="pm-int"></canvas></div></div>
-      <div class="card" style="padding:10px;margin:0;grid-column:span 2"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Workload (avg HR × min)</div><div class="chart-box tall"><canvas id="pm-wl"></canvas></div></div>
-    </div>`;
-  }
-
   openModal(p.name, html);
-  // Wide modal: this view is chart-heavy and needs more horizontal room than
-  // the default form-sized modal.
+  // Wide modal: this view carries the conduct-participation and medical-history
+  // tables side by side and needs more horizontal room than a form modal.
   document.querySelector(".modal")?.classList.add("wide");
 
   // Charts need to be created after modal contents are in the DOM.
   setTimeout(() => {
+    // Canvas cannot read `var(--x)` — resolve the tokens once for every chart
+    // built in this modal.
+    const PC = {
+      orange: cssColor("--orange"), orangeWash: cssColorA("--orange", ".2"),
+      accent: cssColor("--accent"), accentWash: cssColorA("--accent", ".13"),
+      red: cssColor("--red"), redWash: cssColorA("--red", ".13"),
+      teal: cssColor("--teal"), tealWash: cssColorA("--teal", ".2"),
+      yellow: cssColor("--yellow"), yellowWash: cssColorA("--yellow", ".2"),
+      purple: cssColor("--purple"), purpleWash: cssColorA("--purple", ".27"),
+      muted: cssColor("--muted"), border: cssColor("--border")
+    };
     const ipptCanvas = document.getElementById("person-ippt-chart");
     if (ipptCanvas && ippts.length) {
       new Chart(ipptCanvas, {
         type: "line",
-        data: { labels: ippts.map(i => "#" + i.attempt), datasets: [{ data: ippts.map(i => +i.score), borderColor: "#D29922", backgroundColor: "#D2992233", fill: true, tension: .3, pointRadius: 5 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: "#30363D" } }, x: { grid: { color: "#30363D" } } } }
+        data: { labels: ippts.map(i => "#" + i.attempt), datasets: [{ data: ippts.map(i => +i.score), borderColor: PC.orange, backgroundColor: PC.orangeWash, fill: true, tension: .3, pointRadius: 5 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: PC.border } }, x: { grid: { color: PC.border } } } }
       });
     }
 
-    if (computed.length) {
-      // Short labels — drop the year so the x-axis stays readable in a small canvas.
-      const labels = computed.map(c => {
-        const parts = (c.date || "").split(" ");
-        return parts.length >= 2 ? parts.slice(0, 2).join(" ") : (c.date || "");
-      });
-      // maintainAspectRatio: false → fill the .chart-box wrapper's fixed height
-      // instead of growing the canvas indefinitely with container width.
-      const axisBase = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => computed[items[0].dataIndex]?.conduct || labels[items[0].dataIndex] } } },
-        scales: {
-          y: { grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 9 } } },
-          x: { grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 9 }, maxRotation: 0, autoSkip: true } }
-        }
-      };
-
-      new Chart(document.getElementById("pm-hr"), {
-        type: "line",
-        data: { labels, datasets: [
-          { label: "Avg HR", data: computed.map(c => c.avgHr), borderColor: "#58A6FF", backgroundColor: "#58A6FF22", tension: .3, pointRadius: 3 },
-          { label: "Max HR", data: computed.map(c => c.maxHr), borderColor: "#F85149", backgroundColor: "#F8514922", tension: .3, pointRadius: 3 }
-        ] },
-        options: { ...axisBase, plugins: { ...axisBase.plugins, legend: { display: true, position: "bottom", labels: { color: "#8B949E", font: { size: 9 }, boxWidth: 10 } } } }
-      });
-
-      new Chart(document.getElementById("pm-cal"), {
-        type: "line",
-        data: { labels, datasets: [{ data: computed.map(c => c.calories), borderColor: "#D29922", backgroundColor: "#D2992233", fill: true, tension: .3, pointRadius: 3 }] },
-        options: axisBase
-      });
-
-      new Chart(document.getElementById("pm-eff"), {
-        type: "line",
-        data: { labels, datasets: [{ data: computed.map(c => c.efficiency), borderColor: "#39D2C0", backgroundColor: "#39D2C033", fill: true, tension: .3, pointRadius: 3 }] },
-        options: axisBase
-      });
-
-      new Chart(document.getElementById("pm-int"), {
-        type: "line",
-        data: { labels, datasets: [{ data: computed.map(c => c.intensity), borderColor: "#E3B341", backgroundColor: "#E3B34133", fill: true, tension: .3, pointRadius: 3 }] },
-        options: { ...axisBase, scales: { ...axisBase.scales, y: { min: 0, max: 100, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 9 }, callback: v => v + '%' } } } }
-      });
-
-      new Chart(document.getElementById("pm-wl"), {
-        type: "bar",
-        data: { labels, datasets: [{ data: computed.map(c => c.workload), backgroundColor: "#BC8CFF44", borderColor: "#BC8CFF", borderWidth: 1 }] },
-        options: axisBase
-      });
-    }
   }, 100);
 }
 
@@ -402,11 +292,18 @@ function toggleReportSickPatterns(d4) {
     .filter(p => p.iso)
     .sort((a, b) => a.iso < b.iso ? -1 : 1);
 
+  // Painted on a canvas, so these are resolved token values, not `var(--x)`.
+  // "NIL" was a brighter green than --green and "—" a grey between muted and
+  // dim; both now read off the palette so a re-theme carries them along.
+  const TC = {
+    red: cssColor("--red"), orange: cssColor("--orange"), yellow: cssColor("--yellow"),
+    muted: cssColor("--muted"), green: cssColor("--green"), dim: cssColor("--dim")
+  };
   const statusColor = {
-    "MC": "#F85149", "Warded": "#F85149",
-    "LD": "#D29922", "RMJ": "#D29922",
-    "Excuse Heavy Load": "#E3B341", "Excuse Kneeling": "#E3B341", "Excuse Squatting": "#E3B341", "Excuse Uniform": "#E3B341", "Excuse RMJ": "#E3B341", "Excuse Swimming": "#E3B341", "Excuse Prolonged Standing": "#E3B341", "Excuse Upper Limb": "#E3B341", "Excuse Lower Limb": "#E3B341",
-    "Pending": "#8B949E", "NIL": "#39D353", "—": "#6E7681"
+    "MC": TC.red, "Warded": TC.red,
+    "LD": TC.orange, "RMJ": TC.orange,
+    "Excuse Heavy Load": TC.yellow, "Excuse Kneeling": TC.yellow, "Excuse Squatting": TC.yellow, "Excuse Uniform": TC.yellow, "Excuse RMJ": TC.yellow, "Excuse Swimming": TC.yellow, "Excuse Prolonged Standing": TC.yellow, "Excuse Upper Limb": TC.yellow, "Excuse Lower Limb": TC.yellow,
+    "Pending": TC.muted, "NIL": TC.green, "—": TC.dim
   };
 
   const dowBars = dow.map((c, i) => {
@@ -476,8 +373,8 @@ function toggleReportSickPatterns(d4) {
       type: "scatter",
       data: { datasets: [{
         data: tlPoints.map(p => ({ x: new Date(p.iso).getTime(), y: 0, _status: p.status, _reason: p.reason, _iso: p.iso })),
-        backgroundColor: tlPoints.map(p => statusColor[p.status] || "#6E7681"),
-        borderColor: tlPoints.map(p => statusColor[p.status] || "#6E7681"),
+        backgroundColor: tlPoints.map(p => statusColor[p.status] || TC.dim),
+        borderColor: tlPoints.map(p => statusColor[p.status] || TC.dim),
         pointRadius: 7, pointHoverRadius: 9
       }] },
       options: {
@@ -488,7 +385,7 @@ function toggleReportSickPatterns(d4) {
         },
         scales: {
           y: { display: false, min: -1, max: 1 },
-          x: { type: "linear", grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 9 }, callback: v => { const d = new Date(v); return `${d.getDate()}/${d.getMonth() + 1}`; } } }
+          x: { type: "linear", grid: { color: cssColor("--border") }, ticks: { color: TC.muted, font: { size: 9 }, callback: v => { const d = new Date(v); return `${d.getDate()}/${d.getMonth() + 1}`; } } }
         }
       }
     });
@@ -739,16 +636,15 @@ function openAttendanceForm(id) {
           ${conductPicker({ inputId: "f-conductId", selectedId: e?.conductId || "" })}
         </div>
         <div class="form-group">
-          <label>Program</label>
+          <label>Scope</label>
           <select id="f-program" class="topbar-select" style="width:100%">
-            ${isConductScopeToken(progKey(e || {})) ? `<option value="${escapeAttr(progKey(e))}" selected>${escapeAttr(conductScopeLabel(progKey(e)))}</option>` : ""}
-            ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => `<option value="${escapeAttr(key)}" ${progKey(e || {}) === key ? "selected" : ""}>${escapeAttr(programLabel(key))}</option>`).join("")}
+            ${isConductScopeToken(scopeKey(e || {})) ? `<option value="${escapeAttr(scopeKey(e))}" selected>${escapeAttr(conductScopeLabel(scopeKey(e)))}</option>` : ""}
+            <option value="${SCOPE_COMPANY}" ${scopeKey(e || {}) === SCOPE_COMPANY ? "selected" : ""}>Company</option>
           </select>
         </div>
         <div class="form-row">
           ${formField("f-total", "Total Str", "number", "", `required min="0" max="999" step="1"${numVal(e?.total)}`)}
           ${formField("f-part", "Participating", "number", "", `required min="0" max="999" step="1"${numVal(e?.participating)}`)}
-          ${formField("f-lms", "LMS Participation", "number", "", `min="0" max="999" step="1" value="${e?.lms ?? 0}"`)}
         </div>
         <div class="form-row">
           ${formField("f-px", "Status (pre-existing medical status)", "number", "", `required min="0" max="999" step="1" value="${e?.px ?? 0}"`)}
@@ -761,18 +657,17 @@ function openAttendanceForm(id) {
 }
 function submitAttendance() {
   const editId = gv("f-entry-id").trim();
-  const total = +gv("f-total"), part = +gv("f-part"), lms = +gv("f-lms"), px = +gv("f-px"), fallout = +gv("f-fallout");
+  const total = +gv("f-total"), part = +gv("f-part"), px = +gv("f-px"), fallout = +gv("f-fallout");
   const conductId = gv("f-conductId");
   if (!conductId) { alert("Pick a conduct (or create a new one from the dropdown)."); return; }
   if (part > total) { alert("Participating cannot exceed total."); return; }
   if (px + fallout > total) { alert("Status + Fallout cannot exceed total."); return; }
-  if (lms > part) { alert("LMS Participation cannot exceed Participating."); return; }
   const entry = {
     id: editId || nextId(),
     date: isoToDisplayDate(gv("f-date")),
     conductId,
-    program: gv("f-program") || PROGRAM_COMBINED,
-    total, participating: part, lms, px, fallout,
+    program: gv("f-program") || SCOPE_COMPANY,
+    total, participating: part, px, fallout,
     remarks: gv("f-remarks")
   };
   if (editId) {
@@ -893,264 +788,6 @@ function submitIPPT() {
   if (STATE.apiUrl) autoSync("IPPT", { type: "upsert", row: entry });
 }
 
-function openRMForm(id) {
-  // f-time is the wall-clock time the march was completed (e.g. 13:45), not a duration.
-  const e = id ? STATE.rm.find(x => x.id === id) : null;
-  const dateVal = e ? displayDateToISO(e.date) || todayISO() : todayISO();
-  const numVal = v => v !== undefined && v !== null && v !== "" ? ` value="${v}"` : "";
-  openModal(e ? "Edit Route March Result" : "Add Route March Result", `
-    <form onsubmit="event.preventDefault(); submitRM(); return false">
-      <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
-      <div style="display:flex;flex-direction:column;gap:10px">
-        ${e ? editHint : ""}
-        <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
-        ${formSelect("f-rm", "RM #", ["1", "2", "3", "4", "5", "6"], true, e?.rmNum ? String(e.rmNum) : "")}
-        ${formField("f-date", "Date", "date", "", `required value="${dateVal}" min="2020-01-01" max="2099-12-31"`)}
-        ${formField("f-time", "Finish Time (hh:mm)", "time", "", `required value="${escapeAttr(e?.time)}"`)}
-        <div class="form-row">
-          ${formField("f-avghr", "Avg HR", "number", "", `required min="30" max="220" step="1"${numVal(e?.avgHr)}`)}
-          ${formField("f-maxhr", "Max HR", "number", "", `required min="30" max="220" step="1"${numVal(e?.maxHr)}`)}
-        </div>
-        ${formSelect("f-pass", "Pass", [["Y", "Pass"], ["N", "Fail"]], true, e?.pass || "")}
-        <button type="submit" class="btn btn-primary">${e ? "Save" : "Submit"}</button>
-      </div>
-    </form>`);
-}
-function submitRM() {
-  const editId = gv("f-entry-id").trim();
-  const avgHr = +gv("f-avghr"), maxHr = +gv("f-maxhr");
-  if (maxHr < avgHr) { alert("Max HR cannot be lower than Avg HR."); return; }
-  const entry = {
-    id: editId || nextId(), d4: gv("f-d4"), rmNum: +gv("f-rm"),
-    date: isoToDisplayDate(gv("f-date")),
-    time: gv("f-time"),
-    avgHr, maxHr, pass: gv("f-pass")
-  };
-  if (editId) {
-    const idx = STATE.rm.findIndex(r => r.id === editId);
-    if (idx >= 0) STATE.rm[idx] = entry;
-  } else {
-    STATE.rm.push(entry);
-  }
-  saveLocal(); closeModal(); render();
-  if (STATE.apiUrl) autoSync("RouteMarch", { type: "upsert", row: entry });
-}
-
-function openSOCForm(id) {
-  const e = id ? STATE.soc.find(x => x.id === id) : null;
-  const dateVal = e ? displayDateToISO(e.date) || todayISO() : todayISO();
-  const numVal = v => v !== undefined && v !== null && v !== "" ? ` value="${v}"` : "";
-  openModal(e ? "Edit SOC Result" : "Add SOC Result", `
-    <form onsubmit="event.preventDefault(); submitSOC(); return false">
-      <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
-      <div style="display:flex;flex-direction:column;gap:10px">
-        ${e ? editHint : ""}
-        <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
-        ${formSelect("f-soc", "SOC #", ["1", "2", "3", "4", "5"], true, e?.socNum ? String(e.socNum) : "")}
-        ${formField("f-date", "Date", "date", "", `required value="${dateVal}" min="2020-01-01" max="2099-12-31"`)}
-        ${formField("f-time", "Completion Time (hh:mm:ss)", "time", "", `required step="1" min="00:04:00" max="00:30:00" value="${escapeAttr(e?.time)}"`)}
-        ${formField("f-avghr", "Avg HR", "number", "", `required min="30" max="220" step="1"${numVal(e?.avgHr)}`)}
-        ${formSelect("f-pass", "Pass", [["Y", "Pass"], ["N", "Fail"]], true, e?.pass || "")}
-        <button type="submit" class="btn btn-primary">${e ? "Save" : "Submit"}</button>
-      </div>
-    </form>`);
-}
-function submitSOC() {
-  const editId = gv("f-entry-id").trim();
-  const entry = {
-    id: editId || nextId(), d4: gv("f-d4"), socNum: +gv("f-soc"),
-    date: isoToDisplayDate(gv("f-date")),
-    time: gv("f-time"),
-    avgHr: +gv("f-avghr"),
-    pass: gv("f-pass")
-  };
-  if (editId) {
-    const idx = STATE.soc.findIndex(s => s.id === editId);
-    if (idx >= 0) STATE.soc[idx] = entry;
-  } else {
-    STATE.soc.push(entry);
-  }
-  saveLocal(); closeModal(); render();
-  if (STATE.apiUrl) autoSync("SOC", { type: "upsert", row: entry });
-}
-
-// ─── CSV IMPORTERS ─────────────────────────────────────
-
-function importIPPT(input) {
-  Papa.parse(input.files[0], { header: true, skipEmptyLines: true, complete: r => {
-    const missing = checkCols(r.meta.fields, ["4D", "Score"]);
-    if (missing.length) { alert("CSV missing required columns: " + missing.join(", ") + "\n\nExpected: 4D, Attempt, Date, Push-ups, Sit-ups, 2.4km, Score"); return; }
-    r.data.forEach(row => STATE.ippt.push({
-      id: nextId(), d4: col(row, "4D", "id"), attempt: colNum(row, "Attempt", "#", "attempt"),
-      date: col(row, "Date", "date"), pushups: colNum(row, "Push-ups", "Pushups", "PU", "push-ups"),
-      situps: colNum(row, "Sit-ups", "Situps", "SU", "sit-ups"), runTime: col(row, "2.4km", "Run", "RunTime", "run time", "2.4"),
-      score: colNum(row, "Score", "Total", "Total Score", "score")
-    }));
-    saveLocal(); render(); alert(`Imported ${r.data.length} IPPT rows`);
-  } }); input.value = "";
-}
-function importRM(input) {
-  Papa.parse(input.files[0], { header: true, skipEmptyLines: true, complete: r => {
-    const missing = checkCols(r.meta.fields, ["4D"]);
-    if (missing.length) { alert("CSV missing required column: 4D\n\nExpected: 4D, RM, Date, Time, Avg HR, Max HR, Pass"); return; }
-    r.data.forEach(row => STATE.rm.push({
-      id: nextId(), d4: col(row, "4D", "id"), rmNum: colNum(row, "RM", "RM #", "RM#", "rmNum", "Route March"),
-      date: col(row, "Date", "date"), time: col(row, "Time", "Completion Time", "time", "Duration"),
-      avgHr: colNum(row, "Avg HR", "AvgHR", "avg_hr", "Average HR", "Heart Rate"),
-      maxHr: colNum(row, "Max HR", "MaxHR", "max_hr", "Maximum HR"),
-      pass: col(row, "Pass", "pass", "Result", "Status") || "Y"
-    }));
-    saveLocal(); render(); alert(`Imported ${r.data.length} Route March rows`);
-  } }); input.value = "";
-}
-// Normalize a free-text date string to the app's display format ("17 May 2026")
-// so CSV-imported rows match form-entered rows on the date half of any
-// (date, conductId) join. Round-trips through displayDateToISO + isoToDisplayDate
-// — if the input is unparseable, falls back to the raw string.
-function normalizeDateToDisplay(raw) {
-  if (!raw) return "";
-  const iso = displayDateToISO(raw);
-  if (iso) return isoToDisplayDate(iso);
-  // Try direct Date parsing (e.g. ISO "2026-05-17" not caught by displayDateToISO).
-  const d = new Date(raw);
-  if (!isNaN(d.getTime())) {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const displayed = isoToDisplayDate(`${yyyy}-${mm}-${dd}`);
-    if (displayed) return displayed;
-  }
-  return raw;
-}
-
-// Holds an in-flight CSV polar import while the user resolves any unknown
-// conduct names. Each entry: { rawRows: [parsed CSV rows], unknownConducts:
-// [{name, count}], rawConductByRowIdx: [conductName per row] }.
-let _polarImportPending = null;
-
-function importPolar(input) {
-  Papa.parse(input.files[0], { header: true, skipEmptyLines: true, complete: r => {
-    const missing = checkCols(r.meta.fields, ["4D"]);
-    if (missing.length) { alert("CSV missing required column: 4D"); return; }
-    // Pre-resolve each row's conduct against the registry. Group unknowns by
-    // normalized key so the modal only asks the user once per distinct name.
-    const rawRows = r.data;
-    const rawConductByRowIdx = rawRows.map(row => col(row, "Conduct", "Activity", "conduct", "Exercise") || "");
-    const unknownsByKey = new Map(); // key -> {name (canonical raw), count}
-    rawConductByRowIdx.forEach(name => {
-      if (!name) return;
-      if (conductIdByName(name)) return;
-      const key = normalizeConductKey(name);
-      if (!unknownsByKey.has(key)) unknownsByKey.set(key, { name, count: 0 });
-      unknownsByKey.get(key).count++;
-    });
-    const unknownConducts = [...unknownsByKey.values()].sort((a, b) => b.count - a.count);
-
-    _polarImportPending = { rawRows, rawConductByRowIdx, unknownConducts };
-    if (unknownConducts.length > 0) {
-      openUnknownPolarConductsModal();
-    } else {
-      finalizePolarImport({});
-    }
-  } }); input.value = "";
-}
-
-// Modal: for each conduct name in the CSV that doesn't match the registry,
-// ask the user to either (a) merge into an existing conduct, or (b) create
-// a new conduct with this name. Maps are keyed by normalized name so the
-// finalize step can look up every row's resolution in one pass.
-function openUnknownPolarConductsModal() {
-  const { unknownConducts } = _polarImportPending;
-  const opts = getAllConducts();
-  openModal(`Resolve ${unknownConducts.length} new conduct${unknownConducts.length === 1 ? "" : "s"} from CSV`, `
-    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
-      The CSV uses conduct names that aren't in your registry yet. For each one, pick an
-      existing conduct to merge it into, or create a new conduct with this name.
-    </p>
-    <div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto">
-      ${unknownConducts.map((u, i) => `
-        <div class="card" style="padding:8px 12px;background:var(--surface2)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
-            <code style="font-family:var(--mono);font-size:12px;color:var(--text)">"${escapeAttr(u.name)}"</code>
-            <span style="font-size:11px;color:var(--muted)">${u.count} row${u.count === 1 ? "" : "s"}</span>
-          </div>
-          <select id="polar-resolve-${i}" data-key="${escapeAttr(normalizeConductKey(u.name))}" style="width:100%;padding:5px 8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px">
-            <option value="__new__" selected>+ Create new conduct: "${escapeAttr(u.name)}"</option>
-            ${opts.map(c => `<option value="${c.id}">→ Merge into "${escapeAttr(c.name)}"</option>`).join("")}
-          </select>
-        </div>
-      `).join("")}
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-      <button class="btn" onclick="cancelPolarImport()">Cancel import</button>
-      <button class="btn btn-success" onclick="confirmPolarConductResolutions()">Continue import</button>
-    </div>
-  `);
-}
-
-function cancelPolarImport() {
-  _polarImportPending = null;
-  closeModal();
-}
-
-function confirmPolarConductResolutions() {
-  const { unknownConducts } = _polarImportPending;
-  // Build keyResolutions: normalizeConductKey(unknown) → conductId
-  const keyResolutions = {};
-  unknownConducts.forEach((u, i) => {
-    const sel = document.getElementById(`polar-resolve-${i}`);
-    if (!sel) return;
-    const key = sel.dataset.key;
-    if (sel.value === "__new__") {
-      keyResolutions[key] = createConduct(u.name);
-    } else {
-      keyResolutions[key] = sel.value;
-    }
-  });
-  closeModal();
-  finalizePolarImport(keyResolutions);
-}
-
-// Walks the staged rows and pushes them onto STATE.polar with resolved
-// conductIds + normalized dates. keyResolutions covers the unknowns;
-// the rest resolve directly via the registry.
-function finalizePolarImport(keyResolutions) {
-  const { rawRows, rawConductByRowIdx } = _polarImportPending;
-  const insertedRows = [];
-  rawRows.forEach((row, idx) => {
-    const rawConduct = rawConductByRowIdx[idx];
-    const conductId = conductIdByName(rawConduct) || keyResolutions[normalizeConductKey(rawConduct)] || "";
-    const entry = {
-      id: nextId(),
-      d4: col(row, "4D", "id"),
-      conductId,
-      date: normalizeDateToDisplay(col(row, "Date", "date")),
-      avgHr: colNum(row, "Avg HR", "AvgHR", "avg_hr", "Average HR"),
-      maxHr: colNum(row, "Max HR", "MaxHR", "max_hr"),
-      minHr: colNum(row, "Min HR", "MinHR", "min_hr"),
-      calories: colNum(row, "Calories", "Cal", "calories", "Energy"),
-      trainingLoad: colNum(row, "Training Load", "TrainingLoad", "training_load", "Load"),
-      duration: colNum(row, "Duration", "duration", "Time", "Dur"),
-      distance: colNum(row, "Distance", "distance", "Dist")
-    };
-    STATE.polar.push(entry);
-    insertedRows.push(entry);
-  });
-  _polarImportPending = null;
-  const lmsChangedRows = recomputeAttendanceLmsFromPolar();
-  saveLocal(); render();
-  // Auto-push the new rows. Previously the user had to navigate to PolarFlow
-  // tab and click Push to Sheet manually — exactly the kind of tab-switching
-  // this redesign eliminates.
-  if (STATE.apiUrl && insertedRows.length) {
-    autoSync("PolarFlow", { type: "appendMany", rows: insertedRows });
-    // Push each attendance row whose LMS changed as a granular upsert. (Was a
-    // full-tab replace — but a stale replace conflicts and silently drops the
-    // backfill; per-row upserts merge under OCC and never clobber other edits.)
-    lmsChangedRows.forEach(row => autoSync("Attendance", { type: "upsert", row }));
-  }
-  alert(`Imported ${insertedRows.length} Polar rows${lmsChangedRows.length ? `\nUpdated LMS on ${lmsChangedRows.length} attendance row${lmsChangedRows.length === 1 ? "" : "s"}.` : ""}\n\nSyncing to sheet — check the sidebar indicator for status.`);
-}
 function openConductDetailForm(id) {
   const e = id ? STATE.conductDetail.find(x => x.id === id) : null;
   const dateVal = e ? displayDateToISO(e.date) || todayISO() : todayISO();
@@ -1166,10 +803,10 @@ function openConductDetailForm(id) {
           ${conductPicker({ inputId: "f-conductId", selectedId: e?.conductId || "" })}
         </div>
         <div class="form-group">
-          <label>Program</label>
+          <label>Scope</label>
           <select id="f-program" class="topbar-select" style="width:100%">
-            ${isConductScopeToken(progKey(e || {})) ? `<option value="${escapeAttr(progKey(e))}" selected>${escapeAttr(conductScopeLabel(progKey(e)))}</option>` : ""}
-            ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => `<option value="${escapeAttr(key)}" ${progKey(e || {}) === key ? "selected" : ""}>${escapeAttr(programLabel(key))}</option>`).join("")}
+            ${isConductScopeToken(scopeKey(e || {})) ? `<option value="${escapeAttr(scopeKey(e))}" selected>${escapeAttr(conductScopeLabel(scopeKey(e)))}</option>` : ""}
+            <option value="${SCOPE_COMPANY}" ${scopeKey(e || {}) === SCOPE_COMPANY ? "selected" : ""}>Company</option>
           </select>
         </div>
         <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
@@ -1188,7 +825,7 @@ function submitConductDetail() {
     date: isoToDisplayDate(gv("f-date")),
     time: pad4Time(gv("f-time")),
     conductId,
-    program: gv("f-program") || PROGRAM_COMBINED,
+    program: gv("f-program") || SCOPE_COMPANY,
     d4: gv("f-d4"),
     type: gv("f-type"),
     reason: gv("f-reason")
@@ -1420,14 +1057,14 @@ function clearPresentOverride(d4) {
 }
 
 // In-camp recruits (commanders excluded, anyone already out skipped) matching a
-// book-out scope: "company", "plt:<n>", or "prog:<key>". THE definition of who a
+// book-out scope: "company", "plt:<n>", "grp:<name>" or "comb:<name>". THE
+// definition of who a
 // bulk book-out targets, shared by the picker's live counts and submit.
 function bookOutTargets(scope) {
   const outMap = outOfCampMap(todayISO());
   const inCamp = STATE.roster.filter(r => r.role !== "Commander" && !outMap.has(r.id));
   if (scope === "company") return inCamp;
   if (scope && scope.indexOf("plt:") === 0) { const p = scope.slice(4); return inCamp.filter(r => getPlt(r) === p); }
-  if (scope && scope.indexOf("prog:") === 0) { const k = scope.slice(5); return inCamp.filter(r => programOf(r) === k); }
   if (scope && scope.indexOf("grp:") === 0) { const g = scope.slice(4); return inCamp.filter(r => recruitInGroup(r, g)); }
   if (scope && scope.indexOf("comb:") === 0) { const set = combinedMemberSet(scope.slice(5)); return inCamp.filter(r => set.has(r.id)); }
   return [];
@@ -1479,13 +1116,11 @@ let _bookOutOpts = {};
 function bookOutScopeOptions() {
   const recruits = STATE.roster.filter(r => r.role !== "Commander");
   const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
-  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
   const cnt = s => scopeRecruits(s).length;
   return [
     `<option value="person">One person…</option>`,
     `<option value="company">Whole company (${recruits.length})</option>`,
     ...platoons.map(p => `<option value="plt:${p}">Platoon ${p} (${cnt("plt:" + p)})</option>`),
-    ...progs.map(pr => `<option value="prog:${escapeAttr(pr.key)}">${escapeAttr(pr.name || pr.key)} (${cnt("prog:" + pr.key)})</option>`),
     ...allGroupNames().map(g => `<option value="grp:${escapeAttr(g)}">⦿ ${escapeAttr(g)} (${cnt("grp:" + g)})</option>`),
     ...allCombinedNames().map(n => `<option value="comb:${escapeAttr(n)}">▣ ${escapeAttr(n)} (${cnt("comb:" + n)})</option>`)
   ].join("");
@@ -1497,7 +1132,6 @@ function bookOutScopeLabel(scope) {
     : scope.indexOf("plt:") === 0 ? "Platoon " + scope.slice(4)
     : scope.indexOf("grp:") === 0 ? scope.slice(4)
     : scope.indexOf("comb:") === 0 ? scope.slice(5)
-    : scope.indexOf("prog:") === 0 ? programLabel(scope.slice(5))
     : scope;
 }
 
@@ -1814,13 +1448,12 @@ function submitGroupMembers(name) {
 }
 
 // ── Combined-group builder (tristate chips) ──────────────────
-// The chips a combined group can mix: whole company, each platoon, each program,
-// each plain group. Tap a chip to cycle neutral → include(+) → exclude(−).
+// The chips a combined group can mix: whole company, each platoon, each plain
+// group. Tap a chip to cycle neutral → include(+) → exclude(−).
 let _combBuilder = null;
 function combTokens() {
   const toks = ["company"];
   [...new Set(STATE.roster.filter(r => r.role !== "Commander").map(getPlt).filter(Boolean))].sort().forEach(p => toks.push("plt:" + p));
-  (STATE.programs || []).forEach(pr => toks.push("prog:" + pr.key));
   allGroupNames().forEach(g => toks.push("grp:" + g));
   return toks;
 }
@@ -1852,9 +1485,9 @@ function renderCombinedForm() {
   if (b.autoName) b.name = formula === "∅" ? "" : formula.replace(/⦿ /g, "");
   const chips = combTokens().map(tok => {
     const inc = b.include.has(tok), exc = b.exclude.has(tok);
-    const bg = inc ? "#3FB950" : exc ? "#F85149" : "transparent";
-    const bd = inc ? "#3FB950" : exc ? "#F85149" : "var(--border)";
-    const col = (inc || exc) ? "#0D1117" : "var(--muted)";
+    const bg = inc ? "var(--green)" : exc ? "var(--red)" : "transparent";
+    const bd = inc ? "var(--green)" : exc ? "var(--red)" : "var(--border)";
+    const col = (inc || exc) ? "var(--bg)" : "var(--muted)";
     const sign = inc ? "+ " : exc ? "− " : "";
     return `<button type="button" onclick="combCycle('${escapeAttr(tok)}')" style="padding:6px 11px;border-radius:14px;border:1px solid ${bd};background:${bg};color:${col};font-weight:600;font-size:12px;cursor:pointer">${sign}${escapeAttr(scopeTokenLabel(tok))}</button>`;
   }).join("");
@@ -2758,7 +2391,7 @@ function renderConductPicker() {
   const exactMatch = matches.find(a => (a.time || "") === time);
   const selectedId = exactMatch ? exactMatch.id : (matches[0]?.id || "");
   if (!matches.length) {
-    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px">No conducts logged on ${date || dateIso}. Log one first via the Attendance tab.</div>`;
+    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:6px 10px">No conducts logged on ${date || dateIso}. Log one first via the Attendance tab.</div>`;
     return;
   }
   host.innerHTML = `
@@ -2821,9 +2454,9 @@ function renderDutySection(dateIso, type) {
     const opts = [`<option value="">— not set —</option>`].concat(
       commanders.map(c => `<option value="${escapeAttr(c.id)}" ${duty[role] === c.id ? "selected" : ""}>${escapeAttr([c.rank, c.name].filter(Boolean).join(" "))}</option>`)
     ).join("");
-    return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;padding:2px 0">
-      <span class="mono" style="min-width:52px;color:var(--muted)">${role}</span>
-      <select onchange="setDutyFromPicker('${dateIso}', '${role}', this.value, '${type}')" style="flex:1;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px">${opts}</select>
+    return `<label class="duty-row">
+      <span class="duty-role">${role}</span>
+      <select onchange="setDutyFromPicker('${dateIso}', '${role}', this.value, '${type}')">${opts}</select>
     </label>`;
   }).join("");
   const missing = paradeUnfilledDuty(dateIso);
@@ -2864,7 +2497,7 @@ function renderApptCampSection(dateIso, type) {
       <span>${paradeLineName(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
     </label>`;
   }).join("");
-  section.innerHTML = `<div style="font-size:11px;background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:8px 10px">
+  section.innerHTML = `<div style="font-size:11px;background:rgba(var(--accentRGB),.07);border:1px solid rgba(var(--accentRGB),.27);border-radius:6px;padding:8px 10px">
     <div style="color:var(--accent);font-weight:600;margin-bottom:4px">📅 Outside appointments today (${appts.length}) — tick = booked OUT of camp</div>
     <div style="color:var(--muted);margin-bottom:6px">Tick once the recruit has LEFT camp; untick when they book back in. This updates the live strength board for everyone.</div>
     ${rows}
@@ -2886,7 +2519,7 @@ function renderBorderlineSection(dateIso, type) {
       <span>${paradeLineName(m.d4)} — ${m.status} ended ${endShort}</span>
     </label>`;
   }).join("");
-  section.innerHTML = `<div style="font-size:11px;background:#D2992211;border:1px solid #D2992244;border-radius:6px;padding:8px 10px">
+  section.innerHTML = `<div style="font-size:11px;background:rgba(var(--orangeRGB),.07);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:8px 10px">
     <div style="color:var(--orange);font-weight:600;margin-bottom:4px">⚠ Borderline returnees (${candidates.length}) — MC/Warded ended yesterday</div>
     <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be listed under OTHERS as returning from MC, and counted away.</div>
     ${rows}
@@ -3240,7 +2873,7 @@ function runCompare() {
   const oldText = compareSideText("base");
   const newText = compareSideText("neu");
   if (oldText == null || newText == null) {
-    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px;margin-top:10px">Pick a saved parade state or paste one in first.</div>`;
+    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:6px 10px;margin-top:10px">Pick a saved parade state or paste one in first.</div>`;
     return;
   }
   const oldParsed = parseParadeState(oldText);
@@ -3293,7 +2926,7 @@ function renderCompareResults(diff, oldParsed, newParsed) {
   }
 
   if (!diff.structuredOk) {
-    parts.push(`<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px;margin-top:10px">⚠ Couldn't read enough structure from ${!oldParsed.people.length ? "the BASE text" : "the NEW text"} — showing the raw text diff below.</div>`);
+    parts.push(`<div style="font-size:11px;color:var(--orange);background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:6px 10px;margin-top:10px">⚠ Couldn't read enough structure from ${!oldParsed.people.length ? "the BASE text" : "the NEW text"} — showing the raw text diff below.</div>`);
   } else {
     const secBadge = e => badge(escapeAttr(PC_SECTION_LABELS[e.section] || e.section), CMP_SECTION_BADGE[e.section] || "pink");
     const noChanges = !diff.people.added.length && !diff.people.removed.length && !diff.people.changed.length;
@@ -3377,84 +3010,23 @@ async function copyCompareSummary() {
 }
 
 // ─── FITNESS REPORTS (email to recruits) ────────────────
-// Builds a personalized HTML report per recruit with their Polar trends,
+// Builds a personalized HTML report per recruit with their conduct attendance,
 // conduct attendance, and an auto-picked encouragement line. Charts are
-// rendered to off-screen canvases and base64-embedded so the email is
-// fully self-contained (no external image hosting needed).
-
-// Renders a Chart.js config to a base64 JPEG synchronously by disabling
-// animation. JPEG (not PNG) because MailApp.sendEmail caps the htmlBody
-// at 200KB and base64-encoded PNGs of these charts blow past that with
-// 3+ charts. JPEG at 0.85 quality is ~5× smaller with no visible loss
-// on line/bar charts.
+// Counts how many distinct conducts (date+conductId tuples) the company logged
+// inside [startIso, endIso].
 //
-// Trick: paint the white background AFTER Chart.js renders, using
-// destination-over so the fill sits UNDER the existing chart pixels.
-// Painting before doesn't work — Chart.js clears the canvas on draw.
-function renderChartPNG(chartConfig, width = 500, height = 230) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const chart = new Chart(canvas, {
-    ...chartConfig,
-    options: {
-      ...(chartConfig.options || {}),
-      animation: false,
-      responsive: false,
-      maintainAspectRatio: false
-    }
-  });
-  const ctx = canvas.getContext("2d");
-  ctx.save();
-  ctx.globalCompositeOperation = "destination-over";
-  ctx.fillStyle = "#FFFFFF";
-  ctx.fillRect(0, 0, width, height);
-  ctx.restore();
-  const jpeg = canvas.toDataURL("image/jpeg", 0.85);
-  chart.destroy();
-  return jpeg;
-}
-
-// Compute polar-derived metrics (efficiency, workload) for a list of
-// raw STATE.polar rows. Returns rows enriched + sorted ascending by date.
-function computeFitnessMetrics(rows) {
-  return rows.map(p => {
-    const avg = +p.avgHr || 0, max = +p.maxHr || 0, cal = +p.calories || 0, dur = +p.duration || 0;
-    return {
-      date: p.date, conduct: conductName(p.conductId),
-      iso: displayDateToISO(p.date) || "",
-      avgHr: avg, maxHr: max, calories: cal, duration: dur,
-      efficiency: avg ? +(cal / avg).toFixed(2) : 0,
-      workload: avg * dur
-    };
-  }).filter(p => p.iso).sort((a, b) => a.iso < b.iso ? -1 : 1);
-}
-
-// Counts how many distinct PT conducts (date+conductId tuples) fell inside
-// [startIso, endIso]. A conduct is considered "PT" when at least one recruit
-// has a Polar/LMS entry for it — the Polar class summary photo is the
-// authoritative signal that the session involved actual PT. Lecture-style
-// or admin "conducts" (e.g. lectures, IPPT registration sessions) get
-// attendance rows but no Polar data, so they're excluded from the denominator.
-// This makes "Conducts attended X / Y" reflect the recruit's PT participation
-// rather than every administrative gathering.
+// This used to narrow the denominator to "PT" conducts by requiring at least one
+// Polar entry against the tuple, on the reasoning that a class-summary photo
+// proves the session was real PT while a lecture would have none. With Polar
+// gone there is no such signal, so every logged conduct counts. The effect is a
+// larger denominator that now includes admin gatherings, which makes "conducts
+// attended X / Y" a plain attendance rate rather than a PT participation rate.
 function countCompanyConductsInWindow(startIso, endIso) {
-  // Set of "iso|conductId" keys that have at least one Polar entry in window.
-  const ptKeys = new Set();
-  STATE.polar.forEach(p => {
-    if (!p.conductId) return;
-    const iso = displayDateToISO(p.date);
-    if (iso && iso >= startIso && iso <= endIso) ptKeys.add(`${iso}|${p.conductId}`);
-  });
-  // Intersect with the attendance log so we count only conducts the company
-  // actually logged (avoids counting one-off polar entries that lack a real
-  // attendance row).
   const tuples = new Set();
   STATE.attendance.forEach(a => {
     const iso = displayDateToISO(a.date);
     if (!iso || iso < startIso || iso > endIso || !a.conductId) return;
-    const key = `${iso}|${a.conductId}`;
-    if (ptKeys.has(key)) tuples.add(key);
+    tuples.add(`${iso}|${a.conductId}`);
   });
   return tuples.size;
 }
@@ -3488,12 +3060,6 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
   if (!r) return `<p>Recruit ${d4} not found.</p>`;
 
   // Pull every per-recruit data slice inside the window.
-  const polar = computeFitnessMetrics(
-    STATE.polar.filter(p => p.d4 === d4).filter(p => {
-      const iso = displayDateToISO(p.date);
-      return iso && iso >= startIso && iso <= endIso;
-    })
-  );
   const totalCoyConducts = countCompanyConductsInWindow(startIso, endIso);
 
   // Conducts in this window where this recruit was logged as not
@@ -3512,11 +3078,8 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
     .map(x => `${x.n} ${x.t}`).join(" · ") || "none";
 
   // Conducts attended = total minus those they were absent from.
-  // Polar classes joined = how many of those conducts they wore the watch for.
   const conductsAttended = Math.max(0, totalCoyConducts - missedCount);
   const attendanceRate = totalCoyConducts ? Math.round((conductsAttended / totalCoyConducts) * 100) : 0;
-  const polarJoined = polar.length;
-  const polarRate = totalCoyConducts ? Math.round((polarJoined / totalCoyConducts) * 100) : 0;
   // Report Sick = days the recruit was sent to MO mid-day after a conduct
   // (ReportSick conductDetail entries). Deduped by date because a single
   // recruit can fall out of multiple conducts on the same day (e.g. MC2,
@@ -3538,67 +3101,28 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
       return (+a.attempt || 0) - (+b.attempt || 0);
     });
 
-  // Auto-encouragement: pick strongest positive trend.
+  // Auto-encouragement. The HR-trend variants went with Polar; attendance is
+  // the only per-recruit signal left that can say something specific.
   let encouragement;
-  if (polar.length >= 2) {
-    const first = polar[0], last = polar[polar.length - 1];
-    const avgHrDelta = first.avgHr ? ((last.avgHr - first.avgHr) / first.avgHr) : 0;
-    const effDelta = first.efficiency ? ((last.efficiency - first.efficiency) / first.efficiency) : 0;
-    if (avgHrDelta < -0.05) {
-      const drop = first.avgHr - last.avgHr;
-      encouragement = `Your average HR has dropped <strong>${drop} bpm</strong> since ${first.date} — that's your heart working smarter, not harder. Real fitness gains.`;
-    } else if (effDelta > 0.1) {
-      encouragement = `Your cardio efficiency improved by <strong>${Math.round(effDelta * 100)}%</strong> in this window — every session is paying off.`;
-    } else if (attendanceRate >= 90) {
-      encouragement = `You showed up to <strong>${attendanceRate}%</strong> of conducts in this window. Consistency is the #1 driver of fitness — keep it going.`;
-    }
+  if (totalCoyConducts && attendanceRate >= 90) {
+    encouragement = `You showed up to <strong>${attendanceRate}%</strong> of conducts in this window. Consistency is the #1 driver of fitness — keep it going.`;
   }
   if (!encouragement) {
     encouragement = `Every session counts. Small daily gains add up — keep showing up.`;
   }
 
-  // Charts — each gets a unique cid so the email can use <img src="cid:..">
-  // while the preview iframe uses the equivalent data: URI inline.
-  const labels = polar.map(p => p.date.split(" ").slice(0, 2).join(" "));
+  // COLOUR NOTE: everything below this point is an EMAIL, not the app. It is
+  // deliberately a light document on white and its hexes stay literal —
+  // var(--x) does not resolve in a mail client, so the app's dark-ground
+  // palette would be the wrong palette here even if it could be read.
+  // Re-theming the app must not re-theme the recruit's fitness email.
+
+  // Charts. The three HR plots (heart-rate trend, cardio efficiency, cardiac
+  // workload) went with Polar - all three were charts of watch data. The IPPT
+  // history table below is what the report has left that trends over time.
   const charts = [];
   const inlineImages = {};
-  let cidCounter = 0;
-  const addChart = (entry, config) => {
-    const cid = `chart_${cidCounter++}`;
-    const dataUrl = renderChartPNG(config);
-    inlineImages[cid] = dataUrl.split("base64,")[1] || "";
-    charts.push({ ...entry, cid, dataUrl });
-  };
 
-  if (polar.length) {
-    addChart({
-      emoji: "❤", title: "Heart Rate Trend",
-      caption: "Your average and peak heart rate across each session. As you get fitter, your average HR for the same workload drops — your heart pumps more blood per beat, so it doesn't have to work as hard. A steady downward trend in the blue line over weeks is the clearest signal of improving cardio fitness."
-    }, {
-      type: "line",
-      data: { labels, datasets: [
-        { label: "Avg HR", data: polar.map(p => p.avgHr), borderColor: "#58A6FF", backgroundColor: "#58A6FF22", tension: 0.3, pointRadius: 3 },
-        { label: "Max HR", data: polar.map(p => p.maxHr), borderColor: "#F85149", backgroundColor: "#F8514922", tension: 0.3, pointRadius: 3 }
-      ] },
-      options: { plugins: { legend: { position: "bottom" } }, scales: { y: { title: { display: true, text: "bpm" } } } }
-    });
-    addChart({
-      emoji: "⚡", title: "Cardio Efficiency",
-      caption: "Calories burned per heartbeat (kcal ÷ avg HR). The higher this number, the more useful work your body produces per beat. When this line trends upward, your cardiovascular system is becoming more efficient — that's the kind of fitness gain that translates directly to faster runs, longer endurance, and lower 2.4 km times."
-    }, {
-      type: "line",
-      data: { labels, datasets: [{ label: "Efficiency", data: polar.map(p => p.efficiency), borderColor: "#39D2C0", backgroundColor: "#39D2C033", tension: 0.3, fill: true, pointRadius: 3 }] },
-      options: { plugins: { legend: { display: false } } }
-    });
-    addChart({
-      emoji: "💪", title: "Cardiac Workload per Session",
-      caption: "Total stress on your heart per session (avg HR × duration in minutes). This is the volume of training you're putting in. The shape of the bars matters more than the height — consistent, regular bars build aerobic base. Big spikes followed by long gaps don't. Showing up matters more than going hard."
-    }, {
-      type: "bar",
-      data: { labels, datasets: [{ data: polar.map(p => p.workload), backgroundColor: "#BC8CFF44", borderColor: "#BC8CFF", borderWidth: 1 }] },
-      options: { plugins: { legend: { display: false } } }
-    });
-  }
   // IPPT history table — one row per attempt with per-station score breakdown.
   // Inline HTML <table> (not a chart image) so it renders as text in both
   // email and preview, and so the reader can read the reps/time/points
@@ -3650,7 +3174,7 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
   const recHeader = `REC ${(r.name || "").toUpperCase()} ${bareId}`;
 
   // Two parallel chart blocks — same layout/captions, different image src.
-  const noChartsBlock = `<p style="background:#FFF8E1;border:1px solid #FFE082;padding:12px;border-radius:6px;color:#5D4037;font-size:13px">No Polar sessions logged in this window — we'd love to see you in the next one.</p>`;
+  const noChartsBlock = "";
   const chartsBlockForEmail = charts.length
     ? charts.map(c => `
         <h2 style="font-size:16px;color:#161B22;margin:24px 0 4px">${c.emoji} ${c.title}</h2>
@@ -3685,11 +3209,6 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
           <div style="font-size:11px;color:#6E7681">${attendanceRate}% present</div>
         </td>
         <td style="background:#F6F8FA;border:1px solid #E1E4E8;border-radius:8px;padding:14px;text-align:center;width:25%">
-          <div style="font-size:10px;color:#6E7681;text-transform:uppercase;letter-spacing:.5px">Polar classes joined</div>
-          <div style="font-size:24px;font-weight:700;color:#1F6FEB;margin-top:4px">${polarJoined}/${totalCoyConducts}</div>
-          <div style="font-size:11px;color:#6E7681">${polarRate}% with HR data</div>
-        </td>
-        <td style="background:#F6F8FA;border:1px solid #E1E4E8;border-radius:8px;padding:14px;text-align:center;width:25%">
           <div style="font-size:10px;color:#6E7681;text-transform:uppercase;letter-spacing:.5px">Conducts missed</div>
           <div style="font-size:24px;font-weight:700;color:#F85149;margin-top:4px">${missedCount}</div>
           <div style="font-size:10px;color:#6E7681;line-height:1.4">${missedBreakdown}</div>
@@ -3713,7 +3232,7 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
     </div>
 
     <div style="font-size:10px;color:#8B949E;text-align:center;margin-top:20px;padding-top:14px;border-top:1px solid #E1E4E8">
-      This is an automated fitness report generated from your Polar HR data and conduct attendance records.
+      This is an automated fitness report generated from your conduct attendance records.
     </div>
   </div>
 </body></html>`;
@@ -3745,7 +3264,7 @@ function openFitnessReportModal() {
   openModal("📊 Email Fitness Reports", `
     <div style="display:flex;flex-direction:column;gap:12px">
       <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.55">
-        Sends one personalized report per recruit. Each contains their Polar trends, conduct attendance, and an auto-picked encouragement line. Recruits never see anyone else's data.
+        Sends one personalized report per recruit. Each contains their conduct attendance, IPPT history, and an auto-picked encouragement line. Recruits never see anyone else's data.
       </div>
 
       <div id="sender-info" style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
@@ -3813,8 +3332,8 @@ function openFitnessReportModal() {
       return;
     }
     if (info.quotaError) {
-      el.style.background = "#F8514922";
-      el.style.borderColor = "#F8514944";
+      el.style.background = "rgba(var(--redRGB),.13)";
+      el.style.borderColor = "rgba(var(--redRGB),.27)";
       el.style.color = "var(--text)";
       el.innerHTML = `⚠ <strong style="color:var(--red)">Email permission not granted yet</strong> — Apps Script can't access Gmail.<br><br>
         <strong>One-time setup (1 min):</strong><br>
@@ -3850,6 +3369,7 @@ function previewFitnessReport() {
   const { htmlForPreview } = buildFitnessReportHTML(d4, startIso, endIso);
 
   openModal("Preview — " + displayPersonLabel(d4), `
+    <!-- #fff, not a token: this frames the light-theme email above, not the app. -->
     <iframe id="preview-iframe" style="width:100%;height:600px;border:1px solid var(--border);border-radius:6px;background:#fff"></iframe>
     <div style="font-size:11px;color:var(--muted);margin-top:8px">Sample for ${displayPersonLabel(d4)}${recruit.email ? ` (${recruit.email})` : ""}. Close this to go back.</div>
   `);
@@ -4027,7 +3547,7 @@ function confirmImportFitnessSent() {
 function needsConductMigration() {
   if ((STATE.conducts || []).length > 0) return false;
   const hasLegacy = (arr) => (arr || []).some(r => typeof r?.conduct === "string" && r.conduct.trim());
-  return hasLegacy(STATE.attendance) || hasLegacy(STATE.polar) || hasLegacy(STATE.conductDetail);
+  return hasLegacy(STATE.attendance) || hasLegacy(STATE.conductDetail);
 }
 
 // In-memory working state for the review modal. Each group:
@@ -4052,7 +3572,6 @@ function buildConductRegistryProposal() {
     variants.set(raw, (variants.get(raw) || 0) + 1);
   });
   accumulate(STATE.attendance);
-  accumulate(STATE.polar);
   accumulate(STATE.conductDetail);
 
   const out = [];
@@ -4204,31 +3723,25 @@ async function commitConductMigration() {
     delete r.conduct;
   });
   rewrite(STATE.attendance);
-  rewrite(STATE.polar);
   rewrite(STATE.conductDetail);
 
   STATE.conducts = registry;
-  // Backfill LMS counts now that polar/attendance can finally join on
-  // conductId. Before this migration the LMS column was likely stale on rows
-  // where the conduct string had any drift between the two layers.
-  const lmsChanged = recomputeAttendanceLmsFromPolar().length;
   saveLocal();
   closeModal();
   render();
 
   // The sheet push is part of the atomic migration — not optional. If we
-  // skipped it, future appendRow/appendMany on PolarFlow / Attendance /
-  // ConductDetail would write into the OLD schema (which still has a
-  // `conduct` column, not `conductId`), silently dropping the conductId
-  // values. Push all four tabs via autoSync so the indicator + dirty-
-  // tracking handle any failure — user can retry from the sidebar.
+  // skipped it, future appendRow/appendMany on Attendance / ConductDetail
+  // would write into the OLD schema (which still has a `conduct` column, not
+  // `conductId`), silently dropping the conductId values. Push all three tabs
+  // via autoSync so the indicator + dirty-tracking handle any failure — user
+  // can retry from the sidebar.
   if (STATE.apiUrl) {
     autoSync("Conducts", { type: "replace", data: STATE.conducts });
     autoSync("Attendance", { type: "replace", data: STATE.attendance });
-    autoSync("PolarFlow", { type: "replace", data: STATE.polar });
     autoSync("ConductDetail", { type: "replace", data: STATE.conductDetail });
   }
-  alert(`Migrated ${registry.length} conduct${registry.length === 1 ? "" : "s"} and syncing to the Google Sheet.\n${lmsChanged ? `Backfilled LMS on ${lmsChanged} attendance row${lmsChanged === 1 ? "" : "s"} from Polar data.\n` : ""}\nConducts tab created; Attendance / PolarFlow / ConductDetail now use the conductId column.\n\nWatch the sidebar sync indicator — if any push fails, click "Retry now" to re-send.`);
+  alert(`Migrated ${registry.length} conduct${registry.length === 1 ? "" : "s"} and syncing to the backend.\n\nConducts tab created; Attendance / ConductDetail now use the conductId column.\n\nWatch the sidebar sync indicator — if any push fails, click "Retry now" to re-send.`);
 }
 
 // ─── CONDUCT REGISTRY CRUD ───────────────────────────────
@@ -4334,12 +3847,12 @@ async function mergeConductInto(fromId, toId) {
   let from = STATE.conducts.find(x => x.id === fromId);
   let to = STATE.conducts.find(x => x.id === toId);
   if (!from || !to) return;
-  if (!confirm(`Merge "${from.name}" → "${to.name}"?\n\nAll records currently using "${from.name}" will be repointed to "${to.name}", and "${from.name}" will be removed from the registry.\n\nThis touches every record across Attendance, ConductDetail, and PolarFlow — those tabs will be re-pushed.`)) return;
+  if (!confirm(`Merge "${from.name}" → "${to.name}"?\n\nAll records currently using "${from.name}" will be repointed to "${to.name}", and "${from.name}" will be removed from the registry.\n\nThis touches every record across Attendance and ConductDetail — those tabs will be re-pushed.`)) return;
   // Refresh the tabs this rewrites so the bulk replaces carry a current baseRev
   // (won't be rejected as stale) and repoint the very latest rows.
   if (STATE.apiUrl && STATE.authToken && API.pullTabs) {
     try {
-      const pull = API.pullTabs(["Conducts", "Attendance", "ConductDetail", "PolarFlow"]);
+      const pull = API.pullTabs(["Conducts", "Attendance", "ConductDetail"]);
       if (typeof setPullInFlight === "function") setPullInFlight(pull);
       await pull;
     } catch (e) { /* proceed on local data; the server OCC still guards */ }
@@ -4350,7 +3863,6 @@ async function mergeConductInto(fromId, toId) {
   if (!from || !to) { render(); return; }
   const repoint = (arr) => (arr || []).forEach(r => { if (r.conductId === fromId) r.conductId = toId; });
   repoint(STATE.attendance);
-  repoint(STATE.polar);
   repoint(STATE.conductDetail);
   STATE.conducts = STATE.conducts.filter(x => x.id !== fromId);
   saveLocal();
@@ -4360,7 +3872,6 @@ async function mergeConductInto(fromId, toId) {
   autoSync("Conducts", { type: "delete", id: fromId });
   autoSync("Attendance", { type: "replace", data: STATE.attendance });
   autoSync("ConductDetail", { type: "replace", data: STATE.conductDetail });
-  autoSync("PolarFlow", { type: "replace", data: STATE.polar });
   render();
 }
 
@@ -4381,13 +3892,12 @@ function deleteConduct(id) {
 
 function countConductUsage(id) {
   const attendance = STATE.attendance.filter(r => r.conductId === id).length;
-  const polar = STATE.polar.filter(r => r.conductId === id).length;
   const detail = STATE.conductDetail.filter(r => r.conductId === id).length;
-  return { attendance, polar, detail, total: attendance + polar + detail };
+  return { attendance, detail, total: attendance + detail };
 }
 
 // ─── CONDUCT PICKER (form widget) ────────────────────────
-// Renders the conduct <select> used by attendance / conductDetail / polar
+// Renders the conduct <select> used by attendance / conductDetail
 // staging forms. Selecting "+ New conduct" prompts for a name inline, creates
 // the registry entry, and selects its id. The hidden input mirrors the
 // current id so form submit handlers can read it via gv(inputId).
@@ -4442,126 +3952,6 @@ function handleConductPickerChange(inputId, selectEl) {
   }
 }
 
-// Normalize any date string to ISO ("2026-05-17") so the polar↔attendance
-// join works regardless of which format each side was stored in. The two
-// sides accumulate different formats over time:
-//   - Form-entered attendance:    "17 May 2026" (display, via isoToDisplayDate)
-//   - CSV-imported polar:         "2026-05-17" (raw from CSV, untouched)
-//   - Photo-extracted polar:      "17 May 2026" (display, via isoToDisplayDate)
-//   - Sheet-pulled rows:          either, depending on how the cell was stored
-// Returning ISO from every path means joins compare apples to apples.
-function dateJoinKey(d) {
-  const s = String(d || "").trim();
-  if (!s) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const iso = displayDateToISO(s);
-  if (iso) return iso;
-  const dt = new Date(s);
-  if (!isNaN(dt.getTime())) {
-    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-  }
-  return s;
-}
-
-// Builds the conduct-matching key for a record. Prefers conductId (post-
-// migration source of truth); falls back to a normalized conduct-name key
-// for records that still carry a legacy `conduct` string. Returns "" when
-// neither is present so the caller can skip those rows.
-function conductJoinKey(rec) {
-  if (rec.conductId) return "id:" + rec.conductId;
-  if (typeof rec.conduct === "string" && rec.conduct.trim()) return "name:" + normalizeConductKey(rec.conduct);
-  return "";
-}
-
-// Writes the unique-d4 count from STATE.polar into STATE.attendance[].lms
-// for every matching (date, conduct) pair. The Polar class summary photo
-// IS the LMS roster for that conduct — same screen, same count — so we
-// treat Polar entries as the source of truth for LMS participation. The
-// joiner is tolerant of (a) different date formats on each side, and (b)
-// records that haven't migrated to conductId yet (falls back to normalized
-// conduct-string matching). Returns the number of attendance rows whose
-// lms value actually changed.
-function recomputeAttendanceLmsFromPolar() {
-  const polarByConduct = {};
-  STATE.polar.forEach(p => {
-    const ck = conductJoinKey(p);
-    if (!ck) return;
-    const k = `${dateJoinKey(p.date)}|${ck}`;
-    (polarByConduct[k] = polarByConduct[k] || new Set()).add(padD4(p.d4));
-  });
-  const changedRows = [];
-  STATE.attendance.forEach(a => {
-    if ("polar" in a) delete a.polar;
-    const ck = conductJoinKey(a);
-    if (!ck) return;
-    const count = polarByConduct[`${dateJoinKey(a.date)}|${ck}`]?.size;
-    if (count == null) return;
-    if ((+a.lms || 0) !== count) {
-      a.lms = count;
-      changedRows.push(a);
-    }
-  });
-  if (changedRows.length) saveLocal();
-  // Returns the attendance rows whose LMS changed (truthy .length lets callers
-  // also use it as a count). Pull callers ignore the return; the polar-import
-  // caller upserts these rows individually (merge-safe) rather than a full replace.
-  return changedRows;
-}
-
-// Human label for a polar/attendance key — used in the diagnostic alert
-// so the user can read mismatched entries without decoding "id:c003".
-function describeJoinKey(k) {
-  const [d, ck] = k.split("|");
-  if (ck?.startsWith("id:")) {
-    const id = ck.slice(3);
-    return `${d} — ${conductName(id) || `(unknown id ${id})`}`;
-  }
-  if (ck?.startsWith("name:")) {
-    return `${d} — "${ck.slice(5)}" (unmigrated legacy string)`;
-  }
-  return `${d} — ?`;
-}
-
-// Manual trigger from the Attendance tab header. Surfaces matched/unmatched
-// counts so the user can diagnose why a recompute didn't move some rows.
-function refreshLmsFromPolar() {
-  const polarKeys = new Set();
-  let polarSkipped = 0;
-  STATE.polar.forEach(p => {
-    const ck = conductJoinKey(p);
-    if (!ck) { polarSkipped++; return; }
-    polarKeys.add(`${dateJoinKey(p.date)}|${ck}`);
-  });
-  const attendanceKeys = new Set();
-  let attendanceSkipped = 0;
-  STATE.attendance.forEach(a => {
-    const ck = conductJoinKey(a);
-    if (!ck) { attendanceSkipped++; return; }
-    attendanceKeys.add(`${dateJoinKey(a.date)}|${ck}`);
-  });
-  const unmatched = [...polarKeys].filter(k => !attendanceKeys.has(k));
-  const matched = [...polarKeys].filter(k => attendanceKeys.has(k));
-  const changed = recomputeAttendanceLmsFromPolar().length;
-  render();
-
-  let msg = changed
-    ? `✓ Updated LMS on ${changed} attendance row${changed === 1 ? "" : "s"} from Polar data.`
-    : `No LMS values changed.`;
-  msg += `\n\nDiagnostic:`;
-  msg += `\n  • Polar (date, conduct) pairs: ${polarKeys.size} unique${polarSkipped ? ` (+ ${polarSkipped} polar rows skipped: no conductId or conduct name)` : ""}`;
-  msg += `\n  • Attendance (date, conduct) pairs: ${attendanceKeys.size} unique${attendanceSkipped ? ` (+ ${attendanceSkipped} attendance rows skipped: no conductId or conduct name)` : ""}`;
-  msg += `\n  • Matched: ${matched.length} · Unmatched (polar with no attendance row): ${unmatched.length}`;
-  if (unmatched.length) {
-    const preview = unmatched.slice(0, 8).map(describeJoinKey).join("\n  • ");
-    msg += `\n\nUnmatched Polar entries:\n  • ${preview}${unmatched.length > 8 ? `\n  • …and ${unmatched.length - 8} more` : ""}`;
-  }
-  if (polarSkipped > 0 || attendanceSkipped > 0) {
-    msg += `\n\n⚠️ Skipped rows mean the conduct registry migration hasn't completed for them. Run it from the Conducts tab if needed.`;
-  }
-  if (changed) msg += `\n\n→ Click "Push to Sheet" on the Attendance tab to sync the updated LMS counts back to the Google Sheet.`;
-  alert(msg);
-}
-
 // ─── LOG CONDUCT WIZARD ───────────────────────────────
 // Single-modal wizard that captures one conduct's full attendance + every
 // non-participating row in one shot. Replaces the two-form input flow
@@ -4598,7 +3988,7 @@ let _wizStatusView = { fams: new Set(), part: "all" };
 // one is set, else "Combined". Editing an existing conduct loads the row's own
 // program instead (see openLogConductWizard).
 function defaultWizardProgram() {
-  return STATE.filterProgram || PROGRAM_COMBINED;
+  return SCOPE_COMPANY;
 }
 
 // Open the wizard. Pass an attendance row id to load it in edit mode.
@@ -4610,7 +4000,7 @@ function openLogConductWizard(attendanceId) {
     date: a ? displayDateToISO(a.date) || todayISO() : todayISO(),
     time: a?.time || "",
     conductId: a?.conductId || "",
-    program: a ? progKey(a) : defaultWizardProgram(),
+    program: a ? scopeKey(a) : defaultWizardProgram(),
     totalOverride: a ? a.total : null,
     remarks: a?.remarks || "",
     status: [],
@@ -4628,7 +4018,7 @@ function openLogConductWizard(attendanceId) {
   // handles marking PX rows correctly via the existing-PX lookup.
   if (a) {
     const matchDetails = STATE.conductDetail.filter(d =>
-      d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && progKey(d) === progKey(a)
+      d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && scopeKey(d) === scopeKey(a)
     );
     matchDetails.forEach(d => {
       // RSI is intentionally skipped — the wizard doesn't manage RSI anymore.
@@ -4653,7 +4043,7 @@ function maybeLoadOrphanDetail() {
   if (!w.conductId || !w.date) return;
   const displayDate = isoToDisplayDate(w.date);
   const time = pad4Time(w.time || "");
-  const program = w.program || PROGRAM_COMBINED;
+  const program = w.program || SCOPE_COMPANY;
   const key = `${displayDate}|${time}|${w.conductId}|${program}`;
   if (key === w._orphanKey) return;            // already evaluated this exact tuple
 
@@ -4671,12 +4061,12 @@ function maybeLoadOrphanDetail() {
   // Only recover when there's no attendance summary for this tuple — that's the
   // orphan case. If a summary exists, the user should be editing it instead.
   const hasAttendance = STATE.attendance.some(a =>
-    a.date === displayDate && (a.time || "") === time && a.conductId === w.conductId && progKey(a) === program
+    a.date === displayDate && (a.time || "") === time && a.conductId === w.conductId && scopeKey(a) === program
   );
   if (hasAttendance) return;
 
   STATE.conductDetail
-    .filter(d => d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && progKey(d) === program)
+    .filter(d => d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && scopeKey(d) === program)
     .forEach(d => {
       if (d.type === "RSI") return;            // wizard doesn't manage RSI
       w.originalDetailIds.push(d.id);
@@ -4704,13 +4094,13 @@ function rebuildLogConductStatus() {
   // the current (date, time, conduct). Covers BOTH edit mode AND orphan recovery
   // (detail rows present but no attendance summary row yet), so re-opening shows
   // the correct ticks either way.
-  const program = _logConduct.program || PROGRAM_COMBINED;
+  const program = _logConduct.program || SCOPE_COMPANY;
   let existingPxByD4 = {};
   if (_logConduct.conductId) {
     const dDate = isoToDisplayDate(_logConduct.date);
     const dTime = pad4Time(_logConduct.time || "");
     STATE.conductDetail
-      .filter(d => d.date === dDate && (d.time || "") === dTime && d.conductId === _logConduct.conductId && progKey(d) === program && d.type === "PX")
+      .filter(d => d.date === dDate && (d.time || "") === dTime && d.conductId === _logConduct.conductId && scopeKey(d) === program && d.type === "PX")
       .forEach(d => { existingPxByD4[d.d4] = d.reason || ""; });
   }
   // True when there are existing detail rows backing this wizard (edit mode, or
@@ -4844,19 +4234,16 @@ function conductScopeExtraOptions(selected) {
   ].join("");
 }
 
-// Options for a bulk-section group row. Unlike the wizard scope these are
-// never stored — they expand to per-member rows on save — so programs are
-// safe to offer as "prog:KEY" tokens here.
+// Options for a bulk-section group row. These are never stored — they expand
+// to per-member rows on save.
 function wizGroupRowOptions(selected) {
   const recruits = STATE.roster.filter(r => r.role !== "Commander");
   const platoons = [...new Set(recruits.map(getPlt).filter(Boolean))].sort();
-  const progs = (STATE.programs || []).filter(pr => recruits.some(r => programOf(r) === pr.key));
   const cnt = s => scopeRecruits(s).length;
   const opt = (v, label) => `<option value="${escapeAttr(v)}" ${v === selected ? "selected" : ""}>${label} (${cnt(v)})</option>`;
   return [
     `<option value="">Pick group / scope…</option>`,
     ...platoons.map(p => opt("plt:" + p, `Platoon ${p}`)),
-    ...progs.map(pr => opt("prog:" + pr.key, escapeAttr(pr.name || pr.key))),
     ...allGroupNames().map(g => opt("grp:" + g, "⦿ " + escapeAttr(g))),
     ...allCombinedNames().map(n => opt("comb:" + n, "▣ " + escapeAttr(n)))
   ].join("");
@@ -4883,7 +4270,7 @@ function renderLogConductWizard() {
   const editNotice = w.attendanceId
     ? `<div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px">Editing existing conduct. Saving replaces all child rows for this (date, time, conduct) tuple.</div>`
     : (w._recoveredCount
-      ? `<div style="font-size:11px;color:var(--accent);background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:6px 10px;margin-bottom:4px">↩ Recovered ${w._recoveredCount} existing detail row${w._recoveredCount === 1 ? "" : "s"} for this conduct/date that had no attendance summary. Saving keeps them and adds the missing summary.</div>`
+      ? `<div style="font-size:11px;color:var(--accent);background:rgba(var(--accentRGB),.07);border:1px solid rgba(var(--accentRGB),.27);border-radius:6px;padding:6px 10px;margin-bottom:4px">↩ Recovered ${w._recoveredCount} existing detail row${w._recoveredCount === 1 ? "" : "s"} for this conduct/date that had no attendance summary. Saving keeps them and adds the missing summary.</div>`
       : "");
 
   const sectionList = (key, label, helpText, color) => {
@@ -4940,18 +4327,18 @@ function renderLogConductWizard() {
           </div>
         </div>
         <div class="form-group" style="margin-top:8px;margin-bottom:0">
-          <label>Program / Scope</label>
+          <label>Scope</label>
           <div class="lc-wiz-program" style="display:flex;gap:6px;flex-wrap:wrap">
-            ${[...STATE.programs.map(p => p.key), PROGRAM_COMBINED].map(key => {
-              const active = (w.program || PROGRAM_COMBINED) === key;
-              const col = programColor(key);
-              return `<button type="button" onclick="wizSetProgram('${escapeAttr(key)}')" style="flex:1;min-width:90px;padding:8px 10px;border-radius:6px;border:1px solid ${active ? col : "var(--border)"};background:${active ? col + "22" : "var(--surface)"};color:${active ? col : "var(--muted)"};font-weight:${active ? 700 : 500};font-size:12px;cursor:pointer">${escapeAttr(programLabel(key))}</button>`;
-            }).join("")}
+            ${(() => {
+              const active = !isConductScopeToken(w.program);
+              const col = "var(--accent)";
+              return `<button type="button" onclick="wizSetProgram('${SCOPE_COMPANY}')" style="flex:1;min-width:90px;padding:8px 10px;border-radius:6px;border:1px solid ${active ? col : "var(--border)"};background:${active ? col + "22" : "var(--surface)"};color:${active ? col : "var(--muted)"};font-weight:${active ? 700 : 500};font-size:12px;cursor:pointer">Whole company</button>`;
+            })()}
           </div>
           <select id="wiz-scope-extra" class="topbar-select" style="width:100%;margin-top:6px" onchange="if(this.value) wizSetProgram(this.value)">
             ${conductScopeExtraOptions(isConductScopeToken(w.program) ? w.program : "")}
           </select>
-          <div style="font-size:10px;color:var(--dim);margin-top:4px;line-height:1.45">Who this conduct is for — a training program (PTP/BMT = that program's platoons, Combined = everyone) or a narrower scope from the dropdown. The scope drives the status list + total strength.</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px;line-height:1.45">Who this conduct is for — the whole company, or a narrower scope from the dropdown. The scope drives the status list + total strength.</div>
         </div>
       </div>
 
@@ -5027,7 +4414,7 @@ function wizSetConductId(v) {
 }
 function wizSetProgram(v) {
   // v = a program key OR a "plt:/grp:/comb:" scope token from the dropdown.
-  _logConduct.program = v || PROGRAM_COMBINED;
+  _logConduct.program = v || SCOPE_COMPANY;
   // Different scope → different roster, so the derived Total Str changes.
   // Drop any manual override so it re-derives from the new scope's headcount.
   _logConduct.totalOverride = null;
@@ -5178,7 +4565,7 @@ function updateLogConductOverlapWarning() {
   const overlap = wizSectionD4s("reportSick").map(r => r.d4).filter(d => falloutSet.has(d));
   if (!overlap.length) { el.innerHTML = ""; return; }
   el.innerHTML = `
-    <div style="background:#D2992222;border:1px solid #D2992266;border-radius:6px;padding:10px 12px;font-size:11px;color:var(--orange);line-height:1.55">
+    <div style="background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.4);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--orange);line-height:1.55">
       <strong>⚠ Overlap detected:</strong> the following recruit${overlap.length === 1 ? " is" : "s are"} in BOTH Fallout AND Report Sick:
       <div style="margin-top:4px;color:var(--text);font-weight:600">${overlap.map(d => `${displayId(d)} ${getName(d)}`).join(" · ")}</div>
       <div style="margin-top:4px;color:var(--muted);font-weight:400">Per convention: Report Sick = Fallout → went to MO. They shouldn't both contain the same recruit. You can save anyway — this is just a heads-up.</div>
@@ -5205,7 +4592,7 @@ async function saveLogConductWizard() {
   const displayDate = isoToDisplayDate(w.date);
   const time = pad4Time(w.time || "");
 
-  const program = w.program || PROGRAM_COMBINED;
+  const program = w.program || SCOPE_COMPANY;
 
   // Build the attendance row.
   const attendanceEntry = {
@@ -5216,7 +4603,6 @@ async function saveLogConductWizard() {
     program,
     total: totals.total,
     participating: totals.participating,
-    lms: 0,  // recomputed from polar below
     px: totals.statusCount,
     fallout: totals.falloutCount,
     remarks: w.remarks || ""
@@ -5272,12 +4658,10 @@ async function saveLogConductWizard() {
     STATE.attendance.push(attendanceEntry);
   }
   STATE.conductDetail = STATE.conductDetail.filter(d =>
-    !(d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && progKey(d) === program && d.type !== "RSI")
+    !(d.date === displayDate && (d.time || "") === time && d.conductId === w.conductId && scopeKey(d) === program && d.type !== "RSI")
   );
   STATE.conductDetail.push(...detailRows);
 
-  // LMS sync from polar.
-  recomputeAttendanceLmsFromPolar();
   saveLocal();
 
   const savedId = attendanceEntry.id;
@@ -5336,9 +4720,9 @@ function buildConductChatFormat(attendanceId) {
   const ddmmyy = toDDMMYY(date);
   const time = pad4Time(a.time || "") || "0000";
   const conductLabel = conductName(a.conductId) || "(unknown conduct)";
-  const program = progKey(a);
+  const program = scopeKey(a);
   const details = STATE.conductDetail.filter(d =>
-    d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && progKey(d) === program
+    d.date === a.date && (d.time || "") === (a.time || "") && d.conductId === a.conductId && scopeKey(d) === program
   );
   const byType = {
     PX: details.filter(d => d.type === "PX"),
@@ -5417,251 +4801,6 @@ async function copyConductChatFormat(attendanceId, silent) {
   }
 }
 
-// ─── POLAR PHOTO IMPORT (AI extract) ───────────────────
-// Drop / pick photos of Polar class summary screens — group them by
-// conduct so the conduct + date + time are entered once per conduct,
-// not per photo. Batch-analyze via Claude (proxied through Apps Script).
-// Each photo → many recruit rows appended to STATE.polar + pushed to the
-// sheet via appendMany. No inline review (per user choice).
-
-let _polarStagedGroups = [];  // [{id, conduct, date, time, photos: [{id, dataUrl, base64, mediaType, status, added?, notes?}]}]
-let _polarGroupCounter = 0;
-let _polarPhotoCounter = 0;
-
-// Down-sample an image File to <500KB JPEG via canvas. Anthropic accepts
-// up to 5MB/image but smaller payloads = faster round-trips + cheaper.
-function resizeImageForUpload(file, maxWidth = 1600, quality = 0.85) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => {
-        const ratio = img.width > maxWidth ? maxWidth / img.width : 1;
-        const w = Math.round(img.width * ratio);
-        const h = Math.round(img.height * ratio);
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        // Return both the full data URL (for preview) and the bare base64
-        // (for API payload — backend strips the data: prefix anyway).
-        const dataUrl = canvas.toDataURL("image/jpeg", quality);
-        resolve({ dataUrl, base64: dataUrl.split(",")[1], mediaType: "image/jpeg" });
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-// Add an empty conduct group. Date defaults to today; time auto-fills
-// when the user types/picks a conduct name (via inferTimeForConduct).
-function addPolarGroup() {
-  _polarStagedGroups.push({
-    id: ++_polarGroupCounter,
-    conductId: "",
-    date: todayISO(),
-    time: "",
-    photos: []
-  });
-  render();
-}
-
-function removePolarGroup(id) {
-  _polarStagedGroups = _polarStagedGroups.filter(g => g.id !== id);
-  render();
-}
-
-// Inline edit handler from the group card. When conductId changes, auto-fill
-// both date and time from historical data so the user doesn't have to
-// re-enter them. Date prefers the most-recent attendance/detail entry for
-// the conduct that doesn't yet have polar coverage (i.e. the session the
-// user is probably importing photos for); time uses the most-frequently-
-// logged time across conductDetail + polar. The user can still override
-// either field manually after.
-function updatePolarGroup(id, field, value) {
-  const g = _polarStagedGroups.find(g => g.id === id);
-  if (!g) return;
-  g[field] = value;
-  if (field === "conductId" && value) {
-    let touched = false;
-    const inferredDate = inferDateForConduct(value);
-    if (inferredDate) { g.date = inferredDate; touched = true; }
-    if (!g.time) {
-      const inferredTime = inferTimeForConduct(value);
-      if (inferredTime) { g.time = inferredTime; touched = true; }
-    }
-    if (touched) render();
-  }
-}
-
-// Add photos to a specific group. Resizes each to <500KB JPEG for upload.
-async function addPolarPhotosToGroup(groupId, files) {
-  const g = _polarStagedGroups.find(x => x.id === groupId);
-  if (!g || !files || !files.length) return;
-  for (const file of files) {
-    if (!file.type.startsWith("image/")) continue;
-    try {
-      const { dataUrl, base64, mediaType } = await resizeImageForUpload(file);
-      g.photos.push({
-        id: ++_polarPhotoCounter,
-        dataUrl, base64, mediaType,
-        status: "ready"
-      });
-    } catch (e) {
-      alert("Couldn't read " + file.name + ": " + e.message);
-    }
-  }
-  render();
-}
-
-function removePolarPhotoFromGroup(groupId, photoId) {
-  const g = _polarStagedGroups.find(x => x.id === groupId);
-  if (!g) return;
-  g.photos = g.photos.filter(p => p.id !== photoId);
-  render();
-}
-
-async function analyzeAndPushPolarPhotos() {
-  // Flatten groups into a queue while validating each group has the
-  // required conduct + date set. Empty groups (no photos yet) are silently
-  // skipped — user might be staging an upcoming conduct.
-  const queue = [];
-  _polarStagedGroups.forEach(g => {
-    if (!g.photos.length) return;
-    g.photos.forEach(p => queue.push({ group: g, photo: p }));
-  });
-  if (!queue.length) {
-    alert("Add at least one photo to a conduct group before analyzing.");
-    return;
-  }
-  const missingConduct = _polarStagedGroups.filter(g => g.photos.length && !g.conductId);
-  if (missingConduct.length) {
-    alert(`Pick a conduct on ${missingConduct.length} group(s) before analyzing.`);
-    return;
-  }
-
-  // Pre-build the valid-d4 list once (recruits only — commanders don't
-  // appear in Polar class summary screens).
-  const validD4s = STATE.roster
-    .filter(r => r.role !== "Commander")
-    .map(r => String(r.id).replace(/^C/i, ""));
-
-  const progress = document.getElementById("polar-analyze-progress");
-  if (progress) progress.style.display = "block";
-
-  const newRows = [];
-  const errors = [];
-  let added = 0;
-  const totalPhotos = queue.length;
-
-  for (let i = 0; i < queue.length; i++) {
-    const { group, photo } = queue[i];
-    const groupName = conductName(group.conductId);
-    if (progress) progress.innerHTML = `Analyzing ${i + 1}/${totalPhotos} — <strong>${escapeAttr(groupName)}</strong><br><span style="color:var(--muted)">${added} rows added · ${errors.length} errors</span>`;
-    photo.status = "analyzing";
-    try {
-      const res = await API.analyzePhoto(photo.base64, photo.mediaType, validD4s);
-      if (res.error) {
-        errors.push({ photo: `${groupName} (photo ${i + 1})`, error: res.error });
-        photo.status = "error";
-        continue;
-      }
-      const dateDisplay = isoToDisplayDate(group.date);
-      const time = pad4Time(group.time || "0730");
-      let photoAdded = 0;
-      let unverifiedCount = 0;
-      (res.recruits || []).forEach(r => {
-        const d4 = padD4(String(r.d4 || "").replace(/^C/i, ""));
-        if (!d4) return;
-        if (r.unverified) unverifiedCount++;
-        const entry = {
-          id: nextId(),
-          d4,
-          conductId: group.conductId,
-          date: dateDisplay,
-          time,
-          avgHr: r.avgHR ?? "",
-          maxHr: r.maxHR ?? "",
-          minHr: "",
-          calories: r.calories ?? "",
-          trainingLoad: "",
-          recovery: "",
-          duration: r.duration ?? "",
-          distance: ""
-        };
-        STATE.polar.push(entry);
-        newRows.push(entry);
-        added++;
-        photoAdded++;
-      });
-      photo.status = "done";
-      photo.added = photoAdded;
-      photo.unverified = unverifiedCount;
-      // Truncation warning: when Claude's self-reported rowCount exceeds the
-      // actual extracted recruits, the model dropped rows mid-output (usually
-      // long photos). Surface so the user can re-run or accept partial.
-      if (res.rowCount != null && +res.rowCount > photoAdded) {
-        const missing = +res.rowCount - photoAdded;
-        errors.push({
-          photo: `${groupName} (photo ${i + 1})`,
-          error: `⚠️ Truncated extraction — Claude counted ${res.rowCount} rows in the photo but only extracted ${photoAdded}. ${missing} row${missing === 1 ? "" : "s"} likely missing. Re-run the analysis (Claude may extract differently) or check the photo manually.`
-        });
-      }
-      if (res.notes) photo.notes = res.notes;
-    } catch (e) {
-      errors.push({ photo: `${groupName} (photo ${i + 1})`, error: e.message });
-      photo.status = "error";
-    }
-  }
-
-  recomputeAttendanceLmsFromPolar();
-  saveLocal();
-
-  // Push to sheet in one batch. appendMany only sends new rows — much
-  // cheaper than the full pushTab(PolarFlow, STATE.polar) round-trip.
-  let sheetPushed = false;
-  if (newRows.length && STATE.apiUrl) {
-    try {
-      await API.post({ action: "appendMany", tab: "PolarFlow", rows: newRows });
-      sheetPushed = true;
-    } catch (e) {
-      errors.push({ photo: "(sheet push)", error: e.message });
-    }
-  }
-
-  // Summary modal — shows what happened, plus any per-photo errors.
-  const errorList = errors.length
-    ? `<div style="margin-top:12px"><div style="font-size:11px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Errors (${errors.length})</div>${errors.map(e => `<div style="font-size:11px;padding:4px 8px;background:#F8514922;border-left:2px solid var(--red);border-radius:3px;margin-bottom:3px"><strong>${escapeAttr(e.photo)}:</strong> ${escapeAttr(e.error)}</div>`).join("")}</div>`
-    : "";
-  openModal("📸 Photo analysis complete", `
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <div class="stats-row">
-        <div class="stat"><label>Photos processed</label><div class="val">${totalPhotos}</div></div>
-        <div class="stat"><label>Rows added</label><div class="val" style="color:var(--green)">${added}</div></div>
-        <div class="stat"><label>Errors</label><div class="val" style="color:${errors.length ? 'var(--red)' : 'var(--muted)'}">${errors.length}</div></div>
-      </div>
-      <div style="font-size:12px;color:var(--muted)">
-        ${sheetPushed ? "✓ New rows pushed to the <strong>PolarFlow</strong> sheet." : (newRows.length ? "⚠ Rows added locally but sheet push failed — use <strong>Push All to Sheet</strong> to retry." : "Nothing pushed.")}
-      </div>
-      ${errorList}
-      <button class="btn btn-primary" onclick="closePolarAnalysisModal()">Done</button>
-    </div>
-  `);
-}
-
-// Closes the modal AND clears the staging list (the photos have been
-// processed; user gets a clean drop zone).
-function closePolarAnalysisModal() {
-  _polarStagedGroups = [];
-  closeModal();
-  render();
-}
-
 function importBackup(input) {
   const reader = new FileReader();
   reader.onload = e => { try {
@@ -5670,9 +4809,6 @@ function importBackup(input) {
     if (d.medical) STATE.medical = d.medical;
     if (d.attendance) STATE.attendance = d.attendance;
     if (d.ippt) STATE.ippt = d.ippt;
-    if (d.rm) STATE.rm = d.rm;
-    if (d.soc) STATE.soc = d.soc;
-    if (d.polar) STATE.polar = d.polar;
     if (d.conductDetail) STATE.conductDetail = d.conductDetail;
     if (d.appointments) STATE.appointments = d.appointments;
     if (d.leave) STATE.leave = d.leave;

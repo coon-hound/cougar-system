@@ -461,6 +461,143 @@ async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<st
   return { applied, failed, results };
 }
 
+// ── Usage telemetry (0005_usage.sql) ────────────────────────────────────────
+//
+// Two actions that deliberately DO NOT go through withRev, TABLE, shapeRow or
+// log_audit. usage_daily is not a tab: it is not in REV_TABS, not in readAll,
+// and not in the pull cycle, so nothing written here bumps a revision or wakes
+// another device. See the header of 0005_usage.sql and TELEMETRY-DESIGN.md.
+//
+// The audit log is skipped on purpose too. It exists to answer "who changed
+// this person's record"; a counter increment is not that, and at flush volume
+// it would bury the rows that matter.
+
+const USAGE_KINDS = new Set(["feature", "view", "task"]);
+const MAX_USAGE_ROWS = 500;
+const MAX_COUNTER = 1_000_000;
+
+// Second line of defence on the name, mirroring scrubName + isSafeName in
+// js/telemetry.js, and applied again here because the client is public code and
+// a hand-crafted request is not a hypothetical.
+//
+// Two rules. Any run of two or more digits is stripped, because a 4D is four
+// digits and no handler name in the frontend contains one. Then the result must
+// be a single identifier-shaped token: every legitimate descriptor
+// ("submitBookOut", "nav:roster", "button.btn#pull-btn", "book_out") is one,
+// and prose — which is what a name or a free-text reason looks like — is not.
+// Stripping digits defeats a 4D but not a NAME, so the allow-list is what
+// actually holds the line.
+function scrubUsageName(v: unknown): string {
+  const s = String(v ?? "")
+    .replace(/\d{2,}/g, "")
+    .replace(/[^\w:.#$ /-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48);
+  return /^[\w:.#$/-]+$/.test(s) ? s : "";
+}
+
+const counter = (v: unknown): number => {
+  const n = Math.trunc(Number(v));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_COUNTER) : 0;
+};
+
+type UsageRow = {
+  day: string; device: string; kind: string; name: string;
+  events: number; completed: number; abandoned: number; clicks: number; ms: number;
+};
+
+// Append one batch of counter DELTAS. Additive, so it needs replay protection:
+// the batch id is inserted first and a redelivered batch conflicts there and
+// short-circuits before any counter moves. That matters because the client
+// flushes with navigator.sendBeacon on page-hide, where the response is never
+// seen and a retry is the only safe assumption.
+async function usageAppend(body: Record<string, unknown>) {
+  const device = String(body.device ?? "").trim();
+  const batchId = String(body.batchId ?? "").trim();
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(device)) return json({ error: "Bad device id" });
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(batchId)) return json({ error: "Bad batch id" });
+
+  const raw = Array.isArray(body.rows) ? body.rows as Record<string, unknown>[] : [];
+  if (!raw.length) return json({ ok: true, rows: 0 });
+  if (raw.length > MAX_USAGE_ROWS) return json({ error: `Too many rows (max ${MAX_USAGE_ROWS})` });
+
+  // Fold duplicates inside one batch: `insert ... on conflict do update` cannot
+  // touch the same target row twice in a single statement.
+  const merged = new Map<string, UsageRow>();
+  for (const r of raw) {
+    const day = String(r.day ?? "").slice(0, 10);
+    const kind = String(r.kind ?? "");
+    const name = scrubUsageName(r.name);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !USAGE_KINDS.has(kind) || !name) continue;
+    const key = `${day}|${kind}|${name}`;
+    const cur = merged.get(key) ??
+      { day, device, kind, name, events: 0, completed: 0, abandoned: 0, clicks: 0, ms: 0 };
+    cur.events += counter(r.events);
+    cur.completed += counter(r.completed);
+    cur.abandoned += counter(r.abandoned);
+    cur.clicks += counter(r.clicks);
+    cur.ms += counter(r.ms);
+    merged.set(key, cur);
+  }
+  const rows = [...merged.values()];
+  if (!rows.length) return json({ ok: true, rows: 0 });
+
+  try {
+    const out = await sql.begin(async (tx) => {
+      const claimed = await tx`
+        insert into usage_batches (batch_id, device, rows_count)
+        values (${batchId}, ${device}, ${rows.length})
+        on conflict (batch_id) do nothing
+        returning batch_id`;
+      // Already applied. Answering ok:true lets the client clear its pending
+      // delta instead of retrying forever against a batch that landed.
+      if (!claimed.length) return { ok: true, duplicate: true, rows: 0 };
+
+      await tx`
+        insert into usage_daily ${
+        tx(rows, "day", "device", "kind", "name", "events", "completed", "abandoned", "clicks", "ms")
+      }
+        on conflict (day, device, kind, name) do update set
+          events    = usage_daily.events    + excluded.events,
+          completed = usage_daily.completed + excluded.completed,
+          abandoned = usage_daily.abandoned + excluded.abandoned,
+          clicks    = usage_daily.clicks    + excluded.clicks,
+          ms        = usage_daily.ms        + excluded.ms,
+          updated_at = now()`;
+      return { ok: true, rows: rows.length };
+    }) as Record<string, unknown>;
+    return json(out);
+  } catch (e) {
+    // A failed flush is never the user's problem: the client keeps the delta
+    // and sends it with the next batch.
+    return json({ error: String((e as Error)?.message ?? e) });
+  }
+}
+
+// On-demand read for the insights view. Never called on launch, never part of
+// a pull — only when somebody actually opens the view.
+async function usageRead(body: Record<string, unknown>) {
+  const scope = String(body.scope ?? "company");
+  const device = String(body.device ?? "").trim();
+  const days = Math.min(Math.max(Math.trunc(Number(body.days ?? 14)) || 14, 1), 180);
+  if (scope === "device" && !/^[A-Za-z0-9_-]{1,32}$/.test(device)) {
+    return json({ error: "Bad device id" });
+  }
+  try {
+    // Explicit casts: a bare null parameter carries no type, and the function
+    // signature is what has to resolve it.
+    const rows = await sql`
+      select * from usage_rollup(${days}::int, ${scope === "device" ? device : null}::text)`;
+    const devices = await sql`
+      select count(distinct device)::int as n from usage_daily
+       where day >= current_date - ${days}::int`;
+    return json({ ok: true, scope, days, devices: devices[0]?.n ?? 0, rows });
+  } catch (e) {
+    return json({ error: String((e as Error)?.message ?? e) });
+  }
+}
+
 // ── Apps Script passthrough ─────────────────────────────────────────────────
 
 async function proxyToAppsScript(body: Record<string, unknown>) {
@@ -559,6 +696,12 @@ Deno.serve(async (req) => {
     if (action === "sendEmail" || action === "getEmailInfo" || action === "analyzePhoto") {
       return await proxyToAppsScript(body);
     }
+
+    // Usage telemetry carries no `tab`, so it must be dispatched BEFORE the
+    // tab lookup below (which would answer "Tab '' not found"). Neither action
+    // touches revs, the write queue, or the audit log — see the section above.
+    if (action === "usageAppend") return await usageAppend(body);
+    if (action === "usageRead") return await usageRead(body);
 
     const tab = String(body.tab ?? "");
     const table = TABLE[tab];

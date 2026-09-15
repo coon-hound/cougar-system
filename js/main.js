@@ -40,20 +40,11 @@ document.getElementById("search-input").addEventListener("input", e => {
 function refreshFilterUI() {
   const pltSel = document.getElementById("filter-plt");
   const sectSel = document.getElementById("filter-sect");
-  const progSel = document.getElementById("filter-program");
   const clearBtn = document.getElementById("filter-clear");
   if (!pltSel || !sectSel) return;
 
   const platoons = [...new Set(STATE.roster.map(getPlt).filter(v => v !== ""))].sort();
   pltSel.innerHTML = `<option value="">All plts</option>` + platoons.map(p => `<option value="${p}" ${p === String(STATE.filterPlt) ? "selected" : ""}>P${p}</option>`).join("");
-
-  // Training-program scope — programs from STATE.programs plus the implicit
-  // "Combined" (both programs together).
-  if (progSel) {
-    const opts = [...STATE.programs.map(p => p.key), PROGRAM_COMBINED];
-    progSel.innerHTML = `<option value="">All programs</option>` + opts.map(k => `<option value="${escapeAttr(k)}" ${k === STATE.filterProgram ? "selected" : ""}>${escapeAttr(programLabel(k))}</option>`).join("");
-    progSel.classList.toggle("active", !!STATE.filterProgram);
-  }
 
   // Recruit-group scope — plain groups (value = name) + combined groups (value =
   // "c:<name>"), both derived from the roster/config. Hidden until at least one
@@ -106,7 +97,6 @@ function refreshFilterUI() {
 function initFilterControls() {
   const pltSel = document.getElementById("filter-plt");
   const sectSel = document.getElementById("filter-sect");
-  const progSel = document.getElementById("filter-program");
   const clearBtn = document.getElementById("filter-clear");
   const panel = document.getElementById("topbar-filters");
   const toggleBtn = document.getElementById("mobile-filter-toggle");
@@ -132,13 +122,6 @@ function initFilterControls() {
     panel?.classList.remove("open");
   });
 
-  progSel?.addEventListener("change", () => {
-    STATE.filterProgram = progSel.value;
-    saveFilter();
-    render();
-    panel?.classList.remove("open");
-  });
-
   document.getElementById("filter-group")?.addEventListener("change", e => {
     STATE.filterGroup = e.target.value;
     saveFilter();
@@ -150,7 +133,6 @@ function initFilterControls() {
     STATE.filterPlt = "";
     STATE.filterSect = "";
     STATE.filterRole = "";
-    STATE.filterProgram = "";
     STATE.filterGroup = "";
     saveFilter();
     render();
@@ -299,3 +281,20 @@ function maybeRestoreDirty() {
   }
   if (typeof refreshSyncIndicator === "function") refreshSyncIndicator();
 }
+
+// ── Usage insights: a development tool, not a user-facing view ──────────
+// The usage record exists to tell whoever is building this app what people
+// actually reach for and what it costs them in taps. That is a question for
+// development, not something a section commander needs in their sidebar, so
+// the view has no nav button. Collection still runs for everyone - that is
+// the whole point of measuring real use rather than guessing.
+//
+// Reach it with #usage in the URL, or call showUsage() from the console.
+function showUsage() {
+  STATE.nav = "usage";
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  render();
+  closeMobileSidebar();
+}
+if (location.hash === "#usage") showUsage();
+window.addEventListener("hashchange", () => { if (location.hash === "#usage") showUsage(); });
