@@ -37,7 +37,18 @@ async function seedAndGoto(page, url = "/index.html") {
   await page.goto(url);
   // The bootstrap runs loadLocal() + render() synchronously on DOMContentLoaded;
   // wait for STATE to be populated so assertions don't race the first paint.
-  await page.waitForFunction(() => typeof STATE !== "undefined" && Array.isArray(STATE.roster));
+  //
+  // Explicit, generous timeout: this is a BOOT wait, not an assertion about the
+  // feature under test, and it is the single point every spec passes through.
+  // The page pulls 13 script tags through one static server with every worker
+  // competing for it, so on a loaded machine the default turns ordinary
+  // slowness into a failure in whichever specs happened to run last - which
+  // reads as a flaky suite rather than as "the box was busy".
+  await page.waitForFunction(
+    () => typeof STATE !== "undefined" && Array.isArray(STATE.roster),
+    undefined,
+    { timeout: 60_000 },
+  );
   // Dismiss any launch modal so its full-screen overlay can't intercept clicks.
   // The seed also pre-stamps "cougar-seen-version" to suppress the "What's New"
   // patch-notes popup, but this keeps specs robust against any future launch modal.

@@ -28,7 +28,7 @@ function openPerson(d4) {
   // present-override active → Undo book-in.
   const campInfo = outOfCampMap(todayISO()).get(d4);
   const forcedInHere = !campInfo && isForcedIn(p, todayISO()) && derivedCampOut(d4, todayISO());
-  const pill = (txt, bg) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:${bg}22;color:${bg}">${txt}</span>`;
+  const pill = (txt, tok) => `<span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(var(${tok}RGB),.13);color:var(${tok})">${txt}</span>`;
   const campBtn = campInfo
     ? (campInfo.kind === "bookedout"
       ? `<button class="btn btn-success" style="font-size:11px;padding:4px 10px" onclick="undoBookOut('${d4}'); openPerson('${d4}')" title="Removes today's book-out">↩ Book in</button>`
@@ -37,7 +37,7 @@ function openPerson(d4) {
       ? `<button class="btn" style="font-size:11px;padding:4px 10px" onclick="clearPresentOverride('${d4}'); openPerson('${d4}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
       : `<button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm({ d4: '${d4}', after: () => openPerson('${d4}') })" title="Book out for today or a date range">🚪 Book out</button>`;
   html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-    ${campInfo ? pill("OUT OF CAMP", "#F85149") : forcedInHere ? pill("IN CAMP (MANUAL)", "#39D2C0") : pill("IN CAMP", "#3FB950")}
+    ${campInfo ? pill("OUT OF CAMP", "--red") : forcedInHere ? pill("IN CAMP (MANUAL)", "--teal") : pill("IN CAMP", "--green")}
     ${campInfo ? `<span style="font-size:11px;color:var(--muted)">${escapeAttr(campInfo.reason || "")}</span>` : ""}
     ${campInfo && campInfo.kind !== "bookedout"
       ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
@@ -71,9 +71,9 @@ function openPerson(d4) {
     </div>
   </div>`;
 
-  if (p.allergies) html += `<div style="background:#E3B34122;border:1px solid #E3B34144;border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:var(--yellow)"><strong>Allergies:</strong> ${p.allergies}</div>`;
-  if (p.msk) html += `<div style="background:#F8514922;border:1px solid #F8514944;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--red)"><strong>MSK history:</strong> ${p.msk}</div>`;
-  if (p.otherMedical) html += `<div style="background:#E3B34122;border:1px solid #E3B34144;border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--yellow)"><strong>Other medical:</strong> ${p.otherMedical}</div>`;
+  if (p.allergies) html += `<div style="background:rgba(var(--yellowRGB),.13);border:1px solid rgba(var(--yellowRGB),.27);border-radius:6px;padding:8px;margin-bottom:8px;font-size:12px;color:var(--yellow)"><strong>Allergies:</strong> ${p.allergies}</div>`;
+  if (p.msk) html += `<div style="background:rgba(var(--redRGB),.13);border:1px solid rgba(var(--redRGB),.27);border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--red)"><strong>MSK history:</strong> ${p.msk}</div>`;
+  if (p.otherMedical) html += `<div style="background:rgba(var(--yellowRGB),.13);border:1px solid rgba(var(--yellowRGB),.27);border-radius:6px;padding:8px;margin-bottom:12px;font-size:12px;color:var(--yellow)"><strong>Other medical:</strong> ${p.otherMedical}</div>`;
 
   // ── Personal details (enlistment form) ────────────────
   // Only rendered when at least one field is present — hides the whole card for
@@ -214,12 +214,23 @@ function openPerson(d4) {
 
   // Charts need to be created after modal contents are in the DOM.
   setTimeout(() => {
+    // Canvas cannot read `var(--x)` — resolve the tokens once for every chart
+    // built in this modal.
+    const PC = {
+      orange: cssColor("--orange"), orangeWash: cssColorA("--orange", ".2"),
+      accent: cssColor("--accent"), accentWash: cssColorA("--accent", ".13"),
+      red: cssColor("--red"), redWash: cssColorA("--red", ".13"),
+      teal: cssColor("--teal"), tealWash: cssColorA("--teal", ".2"),
+      yellow: cssColor("--yellow"), yellowWash: cssColorA("--yellow", ".2"),
+      purple: cssColor("--purple"), purpleWash: cssColorA("--purple", ".27"),
+      muted: cssColor("--muted"), border: cssColor("--border")
+    };
     const ipptCanvas = document.getElementById("person-ippt-chart");
     if (ipptCanvas && ippts.length) {
       new Chart(ipptCanvas, {
         type: "line",
-        data: { labels: ippts.map(i => "#" + i.attempt), datasets: [{ data: ippts.map(i => +i.score), borderColor: "#D29922", backgroundColor: "#D2992233", fill: true, tension: .3, pointRadius: 5 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: "#30363D" } }, x: { grid: { color: "#30363D" } } } }
+        data: { labels: ippts.map(i => "#" + i.attempt), datasets: [{ data: ippts.map(i => +i.score), borderColor: PC.orange, backgroundColor: PC.orangeWash, fill: true, tension: .3, pointRadius: 5 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: PC.border } }, x: { grid: { color: PC.border } } } }
       });
     }
 
@@ -281,11 +292,18 @@ function toggleReportSickPatterns(d4) {
     .filter(p => p.iso)
     .sort((a, b) => a.iso < b.iso ? -1 : 1);
 
+  // Painted on a canvas, so these are resolved token values, not `var(--x)`.
+  // "NIL" was a brighter green than --green and "—" a grey between muted and
+  // dim; both now read off the palette so a re-theme carries them along.
+  const TC = {
+    red: cssColor("--red"), orange: cssColor("--orange"), yellow: cssColor("--yellow"),
+    muted: cssColor("--muted"), green: cssColor("--green"), dim: cssColor("--dim")
+  };
   const statusColor = {
-    "MC": "#F85149", "Warded": "#F85149",
-    "LD": "#D29922", "RMJ": "#D29922",
-    "Excuse Heavy Load": "#E3B341", "Excuse Kneeling": "#E3B341", "Excuse Squatting": "#E3B341", "Excuse Uniform": "#E3B341", "Excuse RMJ": "#E3B341", "Excuse Swimming": "#E3B341", "Excuse Prolonged Standing": "#E3B341", "Excuse Upper Limb": "#E3B341", "Excuse Lower Limb": "#E3B341",
-    "Pending": "#8B949E", "NIL": "#39D353", "—": "#6E7681"
+    "MC": TC.red, "Warded": TC.red,
+    "LD": TC.orange, "RMJ": TC.orange,
+    "Excuse Heavy Load": TC.yellow, "Excuse Kneeling": TC.yellow, "Excuse Squatting": TC.yellow, "Excuse Uniform": TC.yellow, "Excuse RMJ": TC.yellow, "Excuse Swimming": TC.yellow, "Excuse Prolonged Standing": TC.yellow, "Excuse Upper Limb": TC.yellow, "Excuse Lower Limb": TC.yellow,
+    "Pending": TC.muted, "NIL": TC.green, "—": TC.dim
   };
 
   const dowBars = dow.map((c, i) => {
@@ -355,8 +373,8 @@ function toggleReportSickPatterns(d4) {
       type: "scatter",
       data: { datasets: [{
         data: tlPoints.map(p => ({ x: new Date(p.iso).getTime(), y: 0, _status: p.status, _reason: p.reason, _iso: p.iso })),
-        backgroundColor: tlPoints.map(p => statusColor[p.status] || "#6E7681"),
-        borderColor: tlPoints.map(p => statusColor[p.status] || "#6E7681"),
+        backgroundColor: tlPoints.map(p => statusColor[p.status] || TC.dim),
+        borderColor: tlPoints.map(p => statusColor[p.status] || TC.dim),
         pointRadius: 7, pointHoverRadius: 9
       }] },
       options: {
@@ -367,7 +385,7 @@ function toggleReportSickPatterns(d4) {
         },
         scales: {
           y: { display: false, min: -1, max: 1 },
-          x: { type: "linear", grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 9 }, callback: v => { const d = new Date(v); return `${d.getDate()}/${d.getMonth() + 1}`; } } }
+          x: { type: "linear", grid: { color: cssColor("--border") }, ticks: { color: TC.muted, font: { size: 9 }, callback: v => { const d = new Date(v); return `${d.getDate()}/${d.getMonth() + 1}`; } } }
         }
       }
     });
@@ -1467,9 +1485,9 @@ function renderCombinedForm() {
   if (b.autoName) b.name = formula === "∅" ? "" : formula.replace(/⦿ /g, "");
   const chips = combTokens().map(tok => {
     const inc = b.include.has(tok), exc = b.exclude.has(tok);
-    const bg = inc ? "#3FB950" : exc ? "#F85149" : "transparent";
-    const bd = inc ? "#3FB950" : exc ? "#F85149" : "var(--border)";
-    const col = (inc || exc) ? "#0D1117" : "var(--muted)";
+    const bg = inc ? "var(--green)" : exc ? "var(--red)" : "transparent";
+    const bd = inc ? "var(--green)" : exc ? "var(--red)" : "var(--border)";
+    const col = (inc || exc) ? "var(--bg)" : "var(--muted)";
     const sign = inc ? "+ " : exc ? "− " : "";
     return `<button type="button" onclick="combCycle('${escapeAttr(tok)}')" style="padding:6px 11px;border-radius:14px;border:1px solid ${bd};background:${bg};color:${col};font-weight:600;font-size:12px;cursor:pointer">${sign}${escapeAttr(scopeTokenLabel(tok))}</button>`;
   }).join("");
@@ -2141,7 +2159,7 @@ function renderConductPicker() {
   const exactMatch = matches.find(a => (a.time || "") === time);
   const selectedId = exactMatch ? exactMatch.id : (matches[0]?.id || "");
   if (!matches.length) {
-    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px">No conducts logged on ${date || dateIso}. Log one first via the Attendance tab.</div>`;
+    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:6px 10px">No conducts logged on ${date || dateIso}. Log one first via the Attendance tab.</div>`;
     return;
   }
   host.innerHTML = `
@@ -2197,7 +2215,7 @@ function renderApptCampSection(dateIso, type) {
       <span>${paradeRN(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
     </label>`;
   }).join("");
-  section.innerHTML = `<div style="font-size:11px;background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:8px 10px">
+  section.innerHTML = `<div style="font-size:11px;background:rgba(var(--accentRGB),.07);border:1px solid rgba(var(--accentRGB),.27);border-radius:6px;padding:8px 10px">
     <div style="color:var(--accent);font-weight:600;margin-bottom:4px">📅 Outside appointments today (${appts.length}) — tick = booked OUT of camp</div>
     <div style="color:var(--muted);margin-bottom:6px">Tick once the recruit has LEFT camp; untick when they book back in. This updates the live strength board for everyone.</div>
     ${rows}
@@ -2219,7 +2237,7 @@ function renderBorderlineSection(dateIso, type) {
       <span>${paradeRN(m.d4)} — ${m.status} ended ${endShort}</span>
     </label>`;
   }).join("");
-  section.innerHTML = `<div style="font-size:11px;background:#D2992211;border:1px solid #D2992244;border-radius:6px;padding:8px 10px">
+  section.innerHTML = `<div style="font-size:11px;background:rgba(var(--orangeRGB),.07);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:8px 10px">
     <div style="color:var(--orange);font-weight:600;margin-bottom:4px">⚠ Borderline returnees (${candidates.length}) — MC/Warded ended yesterday</div>
     <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be added to ATTC.</div>
     ${rows}
@@ -2573,7 +2591,7 @@ function runCompare() {
   const oldText = compareSideText("base");
   const newText = compareSideText("neu");
   if (oldText == null || newText == null) {
-    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px;margin-top:10px">Pick a saved parade state or paste one in first.</div>`;
+    host.innerHTML = `<div style="font-size:11px;color:var(--orange);background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:6px 10px;margin-top:10px">Pick a saved parade state or paste one in first.</div>`;
     return;
   }
   const oldParsed = parseParadeState(oldText);
@@ -2626,7 +2644,7 @@ function renderCompareResults(diff, oldParsed, newParsed) {
   }
 
   if (!diff.structuredOk) {
-    parts.push(`<div style="font-size:11px;color:var(--orange);background:#D2992222;border:1px solid #D2992244;border-radius:6px;padding:6px 10px;margin-top:10px">⚠ Couldn't read enough structure from ${!oldParsed.people.length ? "the BASE text" : "the NEW text"} — showing the raw text diff below.</div>`);
+    parts.push(`<div style="font-size:11px;color:var(--orange);background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:6px 10px;margin-top:10px">⚠ Couldn't read enough structure from ${!oldParsed.people.length ? "the BASE text" : "the NEW text"} — showing the raw text diff below.</div>`);
   } else {
     const secBadge = e => badge(escapeAttr(PC_SECTION_LABELS[e.section] || e.section), CMP_SECTION_BADGE[e.section] || "pink");
     const noChanges = !diff.people.added.length && !diff.people.removed.length && !diff.people.changed.length;
@@ -2810,6 +2828,12 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
   if (!encouragement) {
     encouragement = `Every session counts. Small daily gains add up — keep showing up.`;
   }
+
+  // COLOUR NOTE: everything below this point is an EMAIL, not the app. It is
+  // deliberately a light document on white and its hexes stay literal —
+  // var(--x) does not resolve in a mail client, so the app's dark-ground
+  // palette would be the wrong palette here even if it could be read.
+  // Re-theming the app must not re-theme the recruit's fitness email.
 
   // Charts. The three HR plots (heart-rate trend, cardio efficiency, cardiac
   // workload) went with Polar - all three were charts of watch data. The IPPT
@@ -3026,8 +3050,8 @@ function openFitnessReportModal() {
       return;
     }
     if (info.quotaError) {
-      el.style.background = "#F8514922";
-      el.style.borderColor = "#F8514944";
+      el.style.background = "rgba(var(--redRGB),.13)";
+      el.style.borderColor = "rgba(var(--redRGB),.27)";
       el.style.color = "var(--text)";
       el.innerHTML = `⚠ <strong style="color:var(--red)">Email permission not granted yet</strong> — Apps Script can't access Gmail.<br><br>
         <strong>One-time setup (1 min):</strong><br>
@@ -3063,6 +3087,7 @@ function previewFitnessReport() {
   const { htmlForPreview } = buildFitnessReportHTML(d4, startIso, endIso);
 
   openModal("Preview — " + displayPersonLabel(d4), `
+    <!-- #fff, not a token: this frames the light-theme email above, not the app. -->
     <iframe id="preview-iframe" style="width:100%;height:600px;border:1px solid var(--border);border-radius:6px;background:#fff"></iframe>
     <div style="font-size:11px;color:var(--muted);margin-top:8px">Sample for ${displayPersonLabel(d4)}${recruit.email ? ` (${recruit.email})` : ""}. Close this to go back.</div>
   `);
@@ -3963,7 +3988,7 @@ function renderLogConductWizard() {
   const editNotice = w.attendanceId
     ? `<div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:4px">Editing existing conduct. Saving replaces all child rows for this (date, time, conduct) tuple.</div>`
     : (w._recoveredCount
-      ? `<div style="font-size:11px;color:var(--accent);background:#58A6FF11;border:1px solid #58A6FF44;border-radius:6px;padding:6px 10px;margin-bottom:4px">↩ Recovered ${w._recoveredCount} existing detail row${w._recoveredCount === 1 ? "" : "s"} for this conduct/date that had no attendance summary. Saving keeps them and adds the missing summary.</div>`
+      ? `<div style="font-size:11px;color:var(--accent);background:rgba(var(--accentRGB),.07);border:1px solid rgba(var(--accentRGB),.27);border-radius:6px;padding:6px 10px;margin-bottom:4px">↩ Recovered ${w._recoveredCount} existing detail row${w._recoveredCount === 1 ? "" : "s"} for this conduct/date that had no attendance summary. Saving keeps them and adds the missing summary.</div>`
       : "");
 
   const sectionList = (key, label, helpText, color) => {
@@ -4258,7 +4283,7 @@ function updateLogConductOverlapWarning() {
   const overlap = wizSectionD4s("reportSick").map(r => r.d4).filter(d => falloutSet.has(d));
   if (!overlap.length) { el.innerHTML = ""; return; }
   el.innerHTML = `
-    <div style="background:#D2992222;border:1px solid #D2992266;border-radius:6px;padding:10px 12px;font-size:11px;color:var(--orange);line-height:1.55">
+    <div style="background:rgba(var(--orangeRGB),.13);border:1px solid rgba(var(--orangeRGB),.4);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--orange);line-height:1.55">
       <strong>⚠ Overlap detected:</strong> the following recruit${overlap.length === 1 ? " is" : "s are"} in BOTH Fallout AND Report Sick:
       <div style="margin-top:4px;color:var(--text);font-weight:600">${overlap.map(d => `${displayId(d)} ${getName(d)}`).join(" · ")}</div>
       <div style="margin-top:4px;color:var(--muted);font-weight:400">Per convention: Report Sick = Fallout → went to MO. They shouldn't both contain the same recruit. You can save anyway — this is just a heads-up.</div>
