@@ -2,13 +2,26 @@
 // Each tab function may also (re)create charts; old chart instances are
 // destroyed at the top of render() to avoid Chart.js canvas reuse errors.
 
+// Last "what am I looking at" key, used to decide whether a render should
+// reset the scroll position (see render()).
+let _lastRenderCtx = null;
+
 function render() {
   Object.values(STATE.charts).forEach(c => c.destroy());
   STATE.charts = {};
 
-  // Reset scroll on tab switches so a long previous tab doesn't leave the
-  // next one looking pre-scrolled (and on mobile hiding the topbar).
-  document.getElementById("content")?.scrollTo(0, 0);
+  // Reset scroll when the CONTEXT changes — the tab, or the topbar scope
+  // filter. Both mean "you are looking at something new", so a long previous
+  // view must not leave the next one pre-scrolled (on mobile that also hides
+  // the topbar). A same-context re-render (an inline action, a dashboard
+  // section being expanded) keeps the scroll position: collapsing a section
+  // under your thumb and being thrown back to the top is the single most
+  // disorienting thing a phone UI can do.
+  const renderCtx = `${STATE.nav}|${isFilterActive() ? filterLabel() : ""}`;
+  if (renderCtx !== _lastRenderCtx) {
+    document.getElementById("content")?.scrollTo(0, 0);
+    _lastRenderCtx = renderCtx;
+  }
 
   // Keep filter dropdown options in sync with the current roster — cheap to
   // rebuild a few <option>s and means we don't have to remember to call this
@@ -34,9 +47,92 @@ function render() {
     case "leave": renderLeave(el); break;
     case "mskAnalytics": renderMSKAnalytics(el); break;
     case "conducts": renderConducts(el); break;
+    case "usage": renderUsage(el); break;
     case "sync": renderSync(el); break;
     default: el.innerHTML = "";
   }
+}
+
+// ── Dashboard sections ───────────────────────────────────
+// Every block below the stat tiles is one collapsible card whose HEADER IS
+// THE SUMMARY: title, a count pill, and a one-line note. Closed, a section
+// still answers "is there anything here for me today?", which is the only
+// question a commander asks while walking. Open, it is the full table.
+//
+// Defaults are computed per render (a section with nothing in it opens
+// closed), and only an explicit tap is remembered — so a quiet Tuesday can
+// never permanently collapse a section that matters on Wednesday.
+const DASH_OPEN_KEY = "cougar-dash-open";
+let _dashOpen = (() => {
+  // Must be a plain object: a corrupt or primitive value here would make
+  // every toggle a silent no-op (property writes on primitives don't stick).
+  try {
+    const v = JSON.parse(localStorage.getItem(DASH_OPEN_KEY));
+    return (v && typeof v === "object" && !Array.isArray(v)) ? v : {};
+  } catch (e) { return {}; }
+})();
+// Defaults recorded at render time so toggleDashSection knows what it is
+// flipping away from on the very first tap.
+const _dashDefaults = {};
+
+function dashSectionOpen(key, def) {
+  return Object.prototype.hasOwnProperty.call(_dashOpen, key) ? !!_dashOpen[key] : !!def;
+}
+
+function toggleDashSection(key) {
+  _dashOpen[key] = !dashSectionOpen(key, _dashDefaults[key]);
+  try { localStorage.setItem(DASH_OPEN_KEY, JSON.stringify(_dashOpen)); } catch (e) {}
+  render();
+}
+
+// Compact, quiet empty state. The full-air .empty-state is an invitation and
+// belongs on a whole blank screen; inside a section it is just a fact, so it
+// gets one line at body text size and nothing more.
+function dashEmpty(text) {
+  return `<div style="padding:11px 14px;font-size:11.5px;color:var(--dim)">${text}</div>`;
+}
+
+// Count pill for a section header. `token` is a CSS custom property NAME so
+// both the ink and its wash derive from one palette entry.
+function dashPill(n, token) {
+  const c = `var(${token})`;
+  return `<span class="mono" style="font-size:11px;font-weight:700;line-height:1.5;padding:1px 8px;border-radius:var(--rp);background:color-mix(in srgb, ${c} 15%, transparent);color:${c}">${n}</span>`;
+}
+
+// One section card. `body` is a FUNCTION so a closed section never pays to
+// build HTML nobody sees. `action` is a SIBLING of the toggle button, never
+// nested inside it, so "+ Book Out" can't also expand the section.
+// `flush` runs a table edge-to-edge instead of insetting it in body padding.
+function dashSection(o) {
+  const open = dashSectionOpen(o.key, o.defaultOpen);
+  _dashDefaults[o.key] = !!o.defaultOpen;
+  const pill = o.count == null ? "" : dashPill(o.count, o.count ? (o.token || "--accent") : "--dim");
+  return `<div class="card dash-sec" id="dash-${o.key}">
+    <div class="dash-sec-head${open ? " open" : ""}">
+      <button class="btn btn-ghost dash-sec-toggle" type="button" aria-expanded="${open}" aria-controls="dash-${o.key}-body" onclick="toggleDashSection('${o.key}')">
+        <span aria-hidden="true" style="flex:0 0 9px;color:var(--dim);font-size:9px">${open ? "▼" : "▶"}</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text)">${o.icon} ${o.title}</span>
+        ${pill}
+        ${o.note ? `<span class="dash-sec-note">${o.note}</span>` : ""}
+      </button>
+      ${o.action || ""}
+    </div>
+    ${open ? `<div id="dash-${o.key}-body" class="dash-sec-body${o.flush ? " flush" : ""}">${o.body()}</div>` : ""}
+  </div>`;
+}
+
+// A table that sits flush inside a section card: the card already draws the
+// border and the surface, so the wrap only keeps its scrolling.
+function dashTable(head, rows) {
+  return `<div class="table-wrap flush">
+    <table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// Small header action (+ Book Out / + Book / + Log). Sits outside the toggle
+// button so it is never swallowed by it. Height is deliberately left to .btn
+// so it picks up the 40px thumb target from the mobile media query.
+function dashAction(label, onclick, title) {
+  return `<button class="btn btn-primary" type="button" title="${title}" onclick="${onclick}" style="flex:0 0 auto;font-size:11px">${label}</button>`;
 }
 
 function renderDashboard(el) {
@@ -101,91 +197,111 @@ function renderDashboard(el) {
   const cmdAway = outScoped.filter(r => r.role === "Commander").length;
   const recInCamp = recRows.length - recAway;
   const cmdInCamp = cmdRows.length - cmdAway;
-  // Inline "total/recruits/commanders" — the /R/C portion renders smaller
-  // and dimmer so the headline number stays pronounced. Hidden when scope
-  // is already narrowed to one role.
-  const inlineBreakdown = (rec, cmd) => isAll
-    ? `<span style="font-size:55%;color:var(--muted);font-weight:400;margin-left:1px">/${rec}/${cmd}</span>`
-    : "";
+  // "R n · C n" under the headline number. The big number is what a commander
+  // reads at a glance; the breakdown is a footnote, so it lives in .stat .sub
+  // at footnote size. Rendered as a blank line when scope is already narrowed
+  // to one role, so tiles in a row keep a common height.
+  const rcSub = (rec, cmd) => isAll ? `R ${rec} · C ${cmd}` : "&nbsp;";
+  // A tile's colour is a signal, and a zero has nothing to signal. "Non-Active
+  // 0" in alarm red says a problem where there is none, and six saturated
+  // numerals compete with each other so none of them reads first. A zero goes
+  // quiet; the colour returns the moment there is something to look at.
+  const statInk = (n, token) => `color:var(${n ? token : "--dim"})`;
+
+  // Today's date in the header: a parade state is always "as at" a date, and
+  // this screen is read standing up with no other clock in view.
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dObj = new Date(today + "T00:00:00");
+  const dateLabel = `${DOW[dObj.getDay()] || ""} · ${isoToDisplayDate(today)}`;
+
+  // Order is operational, not structural: who is not here, why they are not
+  // here, what is coming, then context. The charts are context and sit below
+  // the tables. MSK returns null when the scope has no MSK rows at all (the
+  // old dashboard hid the whole section in that case, and still does).
+  const sections = [
+    dashSecOutOfCamp(scoped, outMap),
+    dashSecMedical(liveRows, recoveringRows, allByD4, today),
+    dashSecAppointments(visible, today),
+    dashSecLeaveOut(visible, today),
+    dashSecMSK(visible),
+    dashSecTrends(avgPart),
+    dashSecProfile(scoped),
+  ].filter(Boolean).map(dashSection).join("");
 
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-      <h2 style="font-size:18px;font-weight:700">Company Strength Board</h2>
-      <div class="dropdown-wrapper">
-        <button class="btn btn-primary" onclick="toggleReportMenu(event)">📋 Generate Report ▾</button>
-        <div id="report-menu" class="dropdown-menu hidden">
-          <button type="button" onclick="openReportModal('FP'); closeReportMenu()">📋 First Parade State</button>
-          <button type="button" onclick="openReportModal('LP'); closeReportMenu()">📋 Last Parade State</button>
-          <button type="button" onclick="openReportModal('MED'); closeReportMenu()">🏥 Medical Status List</button>
-          <button type="button" onclick="openReportModal('MSK'); closeReportMenu()">🦵 MSK Report</button>
-          <button type="button" onclick="openReportModal('CONDUCT'); closeReportMenu()">📊 Per-Conduct Chat Format</button>
-          <button type="button" onclick="openCompareModal(); closeReportMenu()">🔀 Compare Parade States</button>
+    <div style="margin-bottom:14px">
+      <!-- Deliberately NOT flex-wrap: the report menu is anchored right:0 to
+           its wrapper, so the moment this row wraps on a phone the wrapper
+           lands at the left edge and a 210px menu opens half off-screen. The
+           title wraps to two lines instead; the button stays at the right. -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="min-width:0">
+          <h2 style="font-size:18px;font-weight:700">Company Strength Board</h2>
+          <div style="font-size:11px;color:var(--dim);margin-top:2px">${dateLabel}${isFilterActive() ? ` · <span style="color:var(--accent);font-weight:600">${filterLabel()}</span>` : ""}</div>
+        </div>
+        <div class="dropdown-wrapper" style="flex:0 0 auto">
+          <button class="btn btn-primary" onclick="toggleReportMenu(event)">📋 Generate Report ▾</button>
+          <div id="report-menu" class="dropdown-menu hidden">
+            <button type="button" onclick="openReportModal('FP'); closeReportMenu()">📋 First Parade State</button>
+            <button type="button" onclick="openReportModal('LP'); closeReportMenu()">📋 Last Parade State</button>
+            <button type="button" onclick="openReportModal('MED'); closeReportMenu()">🏥 Medical Status List</button>
+            <button type="button" onclick="openReportModal('MSK'); closeReportMenu()">🦵 MSK Report</button>
+            <button type="button" onclick="openReportModal('CONDUCT'); closeReportMenu()">📊 Per-Conduct Chat Format</button>
+            <button type="button" onclick="openCompareModal(); closeReportMenu()">🔀 Compare Parade States</button>
+          </div>
         </div>
       </div>
+      ${scopeBanner}
     </div>
-    ${scopeBanner}
-    <div class="stats-row" style="margin-top:12px">
-      <div class="stat"><label>Total Str</label><div class="val">${scoped.length}${inlineBreakdown(recRows.length, cmdRows.length)}</div></div>
-      <div class="stat"><label>Active today</label><div class="val" style="color:var(--green)">${active}${inlineBreakdown(recActive, cmdActive)}</div></div>
-      <div class="stat"><label>Non-Active</label><div class="val" style="color:var(--red)">${liveRows.length}${inlineBreakdown(recLive.length, cmdLive.length)}</div></div>
-      <div class="stat"><label>In Camp</label><div class="val" style="color:var(--teal)">${inCamp}${inlineBreakdown(recInCamp, cmdInCamp)}</div></div>
-      <div class="stat"><label>Out of Camp</label><div class="val" style="color:var(--orange)">${awayFromCamp}${inlineBreakdown(recAway, cmdAway)}</div></div>
-      <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div></div>
+    <div class="stats-row">
+      <div class="stat"><label>Total Str</label><div class="val">${scoped.length}</div><div class="sub">${rcSub(recRows.length, cmdRows.length)}</div></div>
+      <div class="stat"><label>In Camp</label><div class="val" style="${statInk(inCamp, "--teal")}">${inCamp}</div><div class="sub">${rcSub(recInCamp, cmdInCamp)}</div></div>
+      <div class="stat"><label>Out of Camp</label><div class="val" style="${statInk(awayFromCamp, "--orange")}">${awayFromCamp}</div><div class="sub">${rcSub(recAway, cmdAway)}</div></div>
+      <div class="stat"><label>Active today</label><div class="val" style="${statInk(active, "--green")}">${active}</div><div class="sub">${rcSub(recActive, cmdActive)}</div></div>
+      <div class="stat"><label>Non-Active</label><div class="val" style="${statInk(liveRows.length, "--red")}">${liveRows.length}</div><div class="sub">${rcSub(recLive.length, cmdLive.length)}</div></div>
+      <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div><div class="sub">${STATE.attendance.length ? `${STATE.attendance.length} conduct${STATE.attendance.length === 1 ? "" : "s"}` : "no conducts yet"}</div></div>
     </div>
-    ${renderDashOutOfCamp(scoped, outMap)}
-    ${renderDashAppointments(visible, today)}
-    <div class="grid-2">
-      <div class="card"><h3>Status Breakdown (today)</h3><canvas id="chart-status" height="200"></canvas></div>
-      <div class="card"><h3>Participation Trend</h3><canvas id="chart-participation" height="200"></canvas></div>
-    </div>
-    ${renderDashProfileCards(scoped)}
-    <h3 style="font-size:13px;color:var(--muted);margin-bottom:8px">Non-Active Personnel <span style="color:var(--dim);font-weight:400">(live medical status on ${today})</span></h3>
-    ${liveRows.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Status today</th><th style="text-align:left">Reason</th><th style="text-align:left">Duration</th></tr></thead><tbody>
-    ${liveRows.map(r => {
-      const entry = allByD4[r.id];
-      const multi = entry.statuses.length > 1;
-      // Stack badges, reasons, and durations vertically so each cell aligns
-      // row-by-row across the three columns when a recruit has 2+ statuses.
-      const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
-      const reasonsCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.reason || '<span style="color:var(--dim)">—</span>'}</div>`).join("");
-      // Durations span the whole run (medStatusRun), so an MC extended by a
-      // second record shows the date they're actually back — not the first
-      // record's end, which reads as an earlier return.
-      const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record, medStatusRun(s.record))}</div>`).join("");
-      const multiHint = multi ? ` <span style="font-size:9px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px">×${entry.statuses.length}</span>` : "";
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}${multiHint}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;vertical-align:top">${reasonsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${durationsCell}</td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : `<div class="empty-state" style="padding:16px;font-size:12px">All scoped personnel are Active today.</div>`}
-    ${recoveringRows.length ? `<h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px">Recovering <span style="color:var(--dim);font-weight:400">(post-MC/LD ghost tag — back to training but monitor)</span></h3>
-    <div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Tag</th><th style="text-align:left">Original</th><th style="text-align:left">Cleared</th></tr></thead><tbody>
-    ${recoveringRows.map(r => {
-      const entry = allByD4[r.id];
-      const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
-      const originalCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.status} · ${s.record.reason || ''}</div>`).join("");
-      const clearedCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.endDate || ''}</div>`).join("");
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${originalCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${clearedCell}</td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : ""}
-    ${renderDashMSKCases(visible)}
-    ${renderDashLeaveOut(visible, today)}`;
+    ${sections}`;
+
+  // Charts exist only while the Trends section is open, and only when Chart.js
+  // actually loaded (it comes off a CDN, so a phone with no signal — or an
+  // offline test run — must not take an exception here).
+  if (!dashSectionOpen("trends", true) || typeof Chart === "undefined") return;
+  if (!document.getElementById("chart-status")) return;
 
   // Status Breakdown chart: tally every active status (a recruit on MC +
   // Excuse contributes once to each slice). The "Active" slice is per-recruit
   // so it adds up to roster size only when nobody has stacked statuses.
   const statusCounts = { Active: active };
   effectiveAll.forEach(e => e.statuses.forEach(s => { statusCounts[s.tag] = (statusCounts[s.tag] || 0) + 1; }));
+  // Canvas needs real colour strings, so resolve the tokens once here rather
+  // than once per slice.
+  const CK = {
+    green: cssColor("--green"), red: cssColor("--red"), orange: cssColor("--orange"),
+    yellow: cssColor("--yellow"), accent: cssColor("--accent"), muted: cssColor("--muted"),
+    border: cssColor("--border"), surface: cssColor("--surface")
+  };
   const chartColor = label => {
-    if (label === "Active") return "#3FB950";
-    if (label === "MC" || label === "Warded") return "#F85149";
-    if (label === "LD" || label === "MC+1") return "#D29922";
-    if (label === "LD+1" || label === "MC+2") return "#E3B341";
-    if (label === "RMJ" || (typeof label === "string" && label.startsWith("Excuse"))) return "#58A6FF";
-    return "#8B949E";
+    if (label === "Active") return CK.green;
+    if (label === "MC" || label === "Warded") return CK.red;
+    if (label === "LD" || label === "MC+1") return CK.orange;
+    if (label === "LD+1" || label === "MC+2") return CK.yellow;
+    if (label === "RMJ" || (typeof label === "string" && label.startsWith("Excuse"))) return CK.accent;
+    return CK.muted;
   };
   STATE.charts.status = new Chart(document.getElementById("chart-status"), {
     type: "doughnut",
-    data: { labels: Object.keys(statusCounts), datasets: [{ data: Object.values(statusCounts), backgroundColor: Object.keys(statusCounts).map(chartColor) }] },
-    options: { plugins: { legend: { position: "right", labels: { color: "#8B949E", font: { size: 11 } } } } }
+    // borderColor must be set explicitly: Chart.js defaults a doughnut's
+    // segment border to white, which draws a bright ring on a dark card.
+    data: { labels: Object.keys(statusCounts), datasets: [{ data: Object.values(statusCounts), backgroundColor: Object.keys(statusCounts).map(chartColor), borderColor: CK.surface, borderWidth: 3 }] },
+    // maintainAspectRatio:false → fill the .chart-box wrapper's fixed height
+    // instead of deriving a height from the canvas width, which is what used
+    // to grow this doughnut to ~500px on a desktop card.
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: "58%",
+      plugins: { legend: { position: "right", labels: { color: CK.muted, font: { size: 10 }, boxWidth: 9, boxHeight: 9, padding: 7 } } }
+    }
   });
 
   // Participation trend — a smooth line whose color ENCODES participation
@@ -201,13 +317,13 @@ function renderDashboard(el) {
     return (a.time || "") < (b.time || "") ? -1 : 1;
   });
   const partData = partRows.map(a => pct(a.participating, a.total));
-  const rateColorHex = r => r >= 95 ? "#3FB950" : r >= 70 ? "#D29922" : "#F85149";
+  const rateColorHex = r => r >= 95 ? CK.green : r >= 70 ? CK.orange : CK.red;
   const partColors = partData.map(rateColorHex);
   STATE.charts.participation = new Chart(document.getElementById("chart-participation"), {
     type: "line",
     data: { labels: partRows.map(a => conductName(a.conductId).slice(0, 12)), datasets: [{
       data: partData,
-      borderColor: "#8B949E",
+      borderColor: CK.muted,
       borderWidth: 2,
       tension: 0.35,
       fill: false,
@@ -221,18 +337,149 @@ function renderDashboard(el) {
     }] },
     // No fixed min/max — let the axis auto-scale around the data so dips below
     // 80% are visible instead of being clipped off the bottom.
-    options: { plugins: { legend: { display: false } }, scales: { y: { grace: "10%", grid: { color: "#30363D" }, ticks: { color: "#8B949E" } }, x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 9 } } } } }
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { grace: "10%", grid: { color: CK.border }, ticks: { color: CK.muted, font: { size: 9 }, maxTicksLimit: 5 } }, x: { grid: { display: false }, ticks: { color: CK.muted, font: { size: 9 }, maxRotation: 0, autoSkipPadding: 8 } } }
+    }
   });
+}
+
+// "Non-Active" section — live medical statuses today, plus the post-status
+// Recovering (ghost tag) list. The closed header already answers "how many,
+// and of what", which is the whole reason a commander opens this screen.
+function dashSecMedical(liveRows, recoveringRows, allByD4, today) {
+  const tagCounts = {};
+  liveRows.forEach(r => { const t = allByD4[r.id].statuses[0].tag; tagCounts[t] = (tagCounts[t] || 0) + 1; });
+  const tagNote = Object.entries(tagCounts).map(([t, n]) => `${n} ${t}`).join(" · ");
+  const note = liveRows.length
+    ? tagNote + (recoveringRows.length ? ` · ${recoveringRows.length} recovering` : "")
+    : (recoveringRows.length ? `all Active · ${recoveringRows.length} recovering` : "everyone Active today");
+
+  const body = () => {
+    const live = liveRows.length
+      ? `<div style="padding:9px 14px 0;font-size:10px;color:var(--dim)">Live medical status on ${isoToDisplayDate(today)}</div>` + dashTable(
+          `<th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Status today</th><th style="text-align:left">Reason</th><th style="text-align:left">Duration</th>`,
+          liveRows.map(r => {
+            const entry = allByD4[r.id];
+            const multi = entry.statuses.length > 1;
+            // Stack badges, reasons, and durations vertically so each cell aligns
+            // row-by-row across the three columns when a recruit has 2+ statuses.
+            const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
+            const reasonsCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.reason || '<span style="color:var(--dim)">—</span>'}</div>`).join("");
+            // Durations span the whole run (medStatusRun), so an MC extended by a
+            // second record shows the date they're actually back — not the first
+            // record's end, which reads as an earlier return.
+            const durationsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medDurationLabel(s.record, medStatusRun(s.record))}</div>`).join("");
+            const multiHint = multi ? ` <span style="font-size:9px;color:var(--accent);font-weight:700;text-transform:uppercase;letter-spacing:.5px">×${entry.statuses.length}</span>` : "";
+            return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}${multiHint}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;vertical-align:top">${reasonsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${durationsCell}</td></tr>`;
+          }).join(""))
+      : dashEmpty("All scoped personnel are Active today.");
+
+    const recovering = recoveringRows.length
+      ? `<div style="padding:11px 14px 6px;border-top:1px solid var(--border);font-size:11px;font-weight:600;color:var(--muted)">Recovering <span style="color:var(--dim);font-weight:400">— post-MC/LD ghost tag, back to training but monitor</span></div>` + dashTable(
+          `<th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Tag</th><th style="text-align:left">Original</th><th style="text-align:left">Cleared</th>`,
+          recoveringRows.map(r => {
+            const entry = allByD4[r.id];
+            const tagsCell = entry.statuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("");
+            const originalCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.status} · ${s.record.reason || ''}</div>`).join("");
+            const clearedCell = entry.statuses.map(s => `<div style="padding:2px 0">${s.record.endDate || ''}</div>`).join("");
+            return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent);vertical-align:top">${displayId(r.id)}</td><td style="text-align:left;vertical-align:top">${displayPersonLabel(r.id)}</td><td style="text-align:left;vertical-align:top">${tagsCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${originalCell}</td><td style="text-align:left;font-size:11px;color:var(--muted);vertical-align:top">${clearedCell}</td></tr>`;
+          }).join(""))
+      : "";
+
+    return live + recovering;
+  };
+
+  return {
+    key: "medical", icon: "🏥", title: "Non-Active",
+    count: liveRows.length, token: "--red", note,
+    defaultOpen: !!(liveRows.length || recoveringRows.length),
+    flush: true, body,
+  };
+}
+
+// "Trends" — the two charts. They are context, not the answer, so they sit
+// below every table and inside a fixed-height .chart-box: Chart.js's
+// responsive default derives height from width, which is what used to grow
+// the doughnut to half a desktop screen.
+function dashSecTrends(avgPart) {
+  const note = STATE.attendance.length
+    ? `${avgPart}% average participation${isFilterActive() ? " · company-wide, not scoped" : ""}`
+    : "no conducts logged yet";
+  const body = () => `<div class="grid-2">
+    <div>
+      <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:7px">Status breakdown (today)</div>
+      <div class="chart-box tall"><canvas id="chart-status"></canvas></div>
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:7px">Participation trend</div>
+      <div class="chart-box tall"><canvas id="chart-participation"></canvas></div>
+    </div>
+  </div>`;
+  return { key: "trends", icon: "📈", title: "Trends", note, defaultOpen: true, body };
+}
+
+// Ration + allergy profile. Reference data rather than a daily answer, so it
+// is the one section that opens closed — the header still carries the counts.
+function dashSecProfile(scoped) {
+  // Ration: count distinct values. Unknowns get grouped under "Unspecified"
+  // so they show up but don't disappear silently.
+  const rationCounts = {};
+  scoped.forEach(r => { const k = (r.ration || "").trim() || "Unspecified"; rationCounts[k] = (rationCounts[k] || 0) + 1; });
+  const rationRows = Object.entries(rationCounts).sort((a, b) => b[1] - a[1]);
+  const rationColor = k => k === "Muslim" ? "var(--green)" : k === "Non-Muslim" ? "var(--accent)" : "var(--muted)";
+
+  // Allergies: each recruit's `allergies` is free text — split on comma so a
+  // single "Peanuts, Dairy" entry counts toward two distinct allergens.
+  const allergenCounts = {};
+  const allergic = [];
+  scoped.forEach(r => {
+    const raw = (r.allergies || "").trim();
+    if (!raw) return;
+    allergic.push(r);
+    raw.split(/[,;]/).map(s => s.trim()).filter(Boolean).forEach(a => {
+      const key = a.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+      allergenCounts[key] = (allergenCounts[key] || 0) + 1;
+    });
+  });
+  const allergenRows = Object.entries(allergenCounts).sort((a, b) => b[1] - a[1]);
+  const muslim = rationCounts["Muslim"] || 0;
+
+  const body = () => `<div class="grid-2">
+    <div>
+      <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:7px">Ration breakdown</div>
+      ${rationRows.length ? `<div style="display:flex;flex-direction:column;gap:6px">
+        ${rationRows.map(([k, n]) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:${rationColor(k)};font-weight:600">${k}</span><span class="mono" style="color:var(--muted)">${n} (${pct(n, scoped.length)}%)</span></div>`).join("")}
+      </div>` : dashEmpty("No ration data.")}
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:7px">Allergies <span style="color:var(--dim);font-weight:400">(${allergic.length} recruit${allergic.length === 1 ? '' : 's'})</span></div>
+      ${allergic.length ? `
+        ${allergenRows.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${allergenRows.map(([a, n]) => `<span class="badge badge-yellow">${a} · ${n}</span>`).join("")}</div>` : ""}
+        <div style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto">
+          ${allergic.map(r => `<div onclick="openPerson('${r.id}')" style="cursor:pointer;font-size:11px;padding:4px 6px;border-radius:var(--r1);background:var(--surface2);display:flex;justify-content:space-between;gap:8px"><span><span class="mono" style="color:var(--accent);font-weight:700">${displayId(r.id)}</span> ${r.name}</span><span style="color:var(--yellow);text-align:right">${r.allergies}</span></div>`).join("")}
+        </div>
+      ` : dashEmpty("No recruits with allergies recorded.")}
+    </div>
+  </div>`;
+
+  return {
+    key: "profile", icon: "🍽️", title: "Ration & allergies",
+    note: `${muslim} Muslim ration · ${allergic.length} with allergies`,
+    defaultOpen: false, body,
+  };
 }
 
 // Active MSK Cases — recruits who self-reported an injury via the Google
 // Form ("Cougar MSK / Physio Log"). One card per recruit, aggregating
 // their initial injury text, any physio appointment we have on file, and
 // the timeline of exercises they've logged. Cleared cases are hidden by
-// default behind a toggle.
-function renderDashMSKCases(visible) {
+// default behind a toggle. Returns null — so the section vanishes entirely —
+// when the scope has no MSK rows at all, exactly as the old dashboard did.
+function dashSecMSK(visible) {
   const scoped = STATE.msk.filter(m => passesFilter(m.d4, visible));
-  if (!scoped.length) return "";
+  if (!scoped.length) return null;
 
   // Group by d4. Per-d4: active if ANY row is not cleared. Cleared if all
   // are cleared.
@@ -270,7 +517,7 @@ function renderDashMSKCases(visible) {
     const regions = c.latestInjury ? getMSKRegionsForRecruit(c.d4) : [];
     const regionsLine = c.latestInjury ? `<div style="margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">
       ${regions.map(reg => `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}22;color:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}">${reg}</span>`).join("")}
-      <button class="btn btn-icon" onclick="event.stopPropagation(); openMSKRegionMenu('${c.d4}')" title="Re-tag body regions" style="font-size:9px;padding:1px 6px">✎ tag</button>
+      <button class="btn btn-icon" onclick="event.stopPropagation(); openMSKRegionMenu('${c.d4}')" title="Re-tag body regions" style="font-size:10px">✎ tag</button>
     </div>` : "";
 
     const exercises = c.orderedExercises.length
@@ -281,12 +528,12 @@ function renderDashMSKCases(visible) {
         }).join("")}</div>`
       : `<div style="font-size:11px;color:var(--dim);margin-top:6px">No physio visits logged yet.</div>`;
 
-    return `<div class="card" style="padding:12px;${faded ? 'opacity:.55;' : ''}">
+    return `<div class="card" style="padding:12px;margin:0;background:var(--surface2);${faded ? 'opacity:.55;' : ''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
         <div onclick="openPerson('${c.d4}')" style="cursor:pointer;font-weight:700">${displayId(c.d4) ? `<span class="mono" style="color:var(--accent);margin-right:6px">${displayId(c.d4)}</span>` : ""}${displayPersonLabel(c.d4)} <span class="badge badge-pink" style="font-size:9px;margin-left:4px">🦵 MSK</span></div>
         <div style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn" style="font-size:10px;padding:3px 8px" onclick="openAppointmentForm(null, {d4:'${c.d4}', reason:'Physio review', location:'Physio Centre'})" title="Book a physio appointment for this recruit">📅 Book</button>
-          <button class="btn ${c.allCleared ? 'btn-success' : ''}" style="font-size:10px;padding:3px 8px" onclick="toggleMSKCleared('${c.d4}')" title="${c.allCleared ? 'Reopen this case' : 'Mark this case cleared (hides from active list)'}">${c.allCleared ? '↺ Reopen' : '✓ Mark Cleared'}</button>
+          <button class="btn" style="font-size:11px" onclick="openAppointmentForm(null, {d4:'${c.d4}', reason:'Physio review', location:'Physio Centre'})" title="Book a physio appointment for this recruit">📅 Book</button>
+          <button class="btn ${c.allCleared ? 'btn-success' : ''}" style="font-size:11px" onclick="toggleMSKCleared('${c.d4}')" title="${c.allCleared ? 'Reopen this case' : 'Mark this case cleared (hides from active list)'}">${c.allCleared ? '↺ Reopen' : '✓ Mark Cleared'}</button>
         </div>
       </div>
       ${injuryLine}
@@ -299,17 +546,26 @@ function renderDashMSKCases(visible) {
   // Scrollable container — caps height so the MSK section doesn't push
   // the rest of the dashboard off-screen as cases accumulate. About 3
   // cards visible at a time; scroll for more.
+  // The list caps at roughly three cards and scrolls inside itself; on a phone
+  // that scrollbar is invisible, so say so when there is more than fits.
+  const scrollHint = active.length > 3
+    ? `<div style="font-size:10px;color:var(--dim);margin-bottom:5px">${active.length} cases — the list scrolls</div>`
+    : "";
   const activeCards = active.length
-    ? `<div style="max-height:560px;overflow-y:auto;padding-right:6px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${active.map(c => renderCard(c, false)).join("")}</div></div>`
-    : `<div class="empty-state" style="padding:12px;font-size:11px">No active MSK cases.</div>`;
+    ? `${scrollHint}<div style="max-height:520px;overflow-y:auto"><div style="display:flex;flex-direction:column;gap:10px">${active.map(c => renderCard(c, false)).join("")}</div></div>`
+    : dashEmpty("No active MSK cases.");
 
   const clearedSection = cleared.length
-    ? `<div style="margin-top:12px"><button class="btn" style="font-size:11px" onclick="toggleMSKShowCleared()">${_mskShowCleared ? "▾ Hide" : "▸ Show"} cleared (${cleared.length})</button>${_mskShowCleared ? `<div style="max-height:400px;overflow-y:auto;padding-right:6px;margin-top:8px;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="display:flex;flex-direction:column;gap:10px;padding:10px">${cleared.map(c => renderCard(c, true)).join("")}</div></div>` : ""}</div>`
+    ? `<div style="margin-top:12px"><button class="btn" style="font-size:11px" onclick="toggleMSKShowCleared()">${_mskShowCleared ? "▾ Hide" : "▸ Show"} cleared (${cleared.length})</button>${_mskShowCleared ? `<div style="max-height:400px;overflow-y:auto;margin-top:10px"><div style="display:flex;flex-direction:column;gap:10px">${cleared.map(c => renderCard(c, true)).join("")}</div></div>` : ""}</div>`
     : "";
 
-  return `<h3 style="font-size:13px;color:var(--muted);margin:16px 0 8px">🦵 Active MSK Cases <span style="color:var(--dim);font-weight:400">(${active.length}${cleared.length ? ` active · ${cleared.length} cleared` : ""}) <span style="font-size:10px;font-style:italic;color:var(--dim)">— scroll to see all</span></span></h3>
-    ${activeCards}
-    ${clearedSection}`;
+  return {
+    key: "msk", icon: "🦵", title: "MSK cases",
+    count: active.length, token: "--pink",
+    note: cleared.length ? `${cleared.length} cleared` : (active.length ? "" : "nothing open"),
+    defaultOpen: !!active.length,
+    body: () => activeCards + clearedSection,
+  };
 }
 
 // ── MSK ANALYTICS PAGE ───────────────────────────────────
@@ -364,8 +620,8 @@ function viewMSKRegion(region) {
     const cdRows = STATE.conductDetail.filter(c => c.d4 === d4 && isMSKReason(c.reason));
     const hasManual = reports.some(r => r.manualRegions && String(r.manualRegions).trim());
     const sources = [
-      ...reports.map(r => ({ kind: "Form report", text: r.description || "—", color: "#E97BC2" })),
-      ...cdRows.map(c => ({ kind: c.type, text: c.reason || "—", color: c.type === "PX" ? "#5B8DEF" : c.type === "Fallout" ? "#E8573A" : "#F2A93B" }))
+      ...reports.map(r => ({ kind: "Form report", text: r.description || "—", color: "var(--pink)" })),
+      ...cdRows.map(c => ({ kind: c.type, text: c.reason || "—", color: c.type === "PX" ? "var(--accent)" : c.type === "Fallout" ? "var(--red)" : "var(--orange)" }))
     ];
     const allRegions = getMSKRegionsForRecruit(d4);
     return { d4, sources, allRegions, hasManual };
@@ -516,9 +772,9 @@ function renderMSKAnalytics(el) {
       <h3>Daily MSK Impact</h3>
       <div style="font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.55">
         Unique personnel affected per day, MSK cases only. Stacked by category:<br>
-        <span style="color:#5B8DEF;font-weight:600">■ Status</span> = pre-existing medical/excuse status before the conduct ·
-        <span style="color:#E8573A;font-weight:600">■ Fallout</span> = dropped out during the conduct ·
-        <span style="color:#F2A93B;font-weight:600">■ RSI</span> = reported sick at first parade
+        <span style="color:var(--accent);font-weight:600">■ Status</span> = pre-existing medical/excuse status before the conduct ·
+        <span style="color:var(--red);font-weight:600">■ Fallout</span> = dropped out during the conduct ·
+        <span style="color:var(--orange);font-weight:600">■ RSI</span> = reported sick at first parade
       </div>
       <div class="chart-box tall"><canvas id="msk-daily-bar"></canvas></div>
     </div>
@@ -590,17 +846,26 @@ function renderMSKAnalytics(el) {
   setTimeout(() => {
     Object.values(_mskAnalyticsCharts).forEach(c => { try { c.destroy(); } catch (e) {} });
 
+    // Canvas cannot read `var(--x)`, so the palette is resolved once here and
+    // shared by every chart in this block.
+    const MK = {
+      muted: cssColor("--muted"), text: cssColor("--text"), surface: cssColor("--surface"),
+      border: cssColor("--border"), gridSoft: cssColorA("--border", ".33"),
+      accent: cssColor("--accent"), red: cssColor("--red"), orange: cssColor("--orange"),
+      teal: cssColor("--teal"), tealWash: cssColorA("--teal", ".2"), bg: cssColor("--bg")
+    };
+
     // Shared axis styling — softer grid, no borders, integer ticks.
     const axisBase = {
       responsive: true, maintainAspectRatio: false,
       layout: { padding: { top: 6, right: 4, bottom: 0, left: 0 } },
       plugins: {
-        legend: { labels: { color: "#8B949E", font: { size: 11 }, padding: 12, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-        tooltip: { backgroundColor: "#161B22", borderColor: "#30363D", borderWidth: 1, padding: 10, titleColor: "#E6EDF3", bodyColor: "#E6EDF3", cornerRadius: 6, displayColors: true }
+        legend: { labels: { color: MK.muted, font: { size: 11 }, padding: 12, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
+        tooltip: { backgroundColor: MK.surface, borderColor: MK.border, borderWidth: 1, padding: 10, titleColor: MK.text, bodyColor: MK.text, cornerRadius: 6, displayColors: true }
       },
       scales: {
-        y: { beginAtZero: true, ticks: { color: "#8B949E", font: { size: 10 }, precision: 0, padding: 6 }, grid: { color: "#30363D55", drawTicks: false }, border: { display: false } },
-        x: { ticks: { color: "#8B949E", font: { size: 10 }, maxRotation: 0, autoSkip: true, padding: 4 }, grid: { display: false }, border: { display: false } }
+        y: { beginAtZero: true, ticks: { color: MK.muted, font: { size: 10 }, precision: 0, padding: 6 }, grid: { color: MK.gridSoft, drawTicks: false }, border: { display: false } },
+        x: { ticks: { color: MK.muted, font: { size: 10 }, maxRotation: 0, autoSkip: true, padding: 4 }, grid: { display: false }, border: { display: false } }
       }
     };
 
@@ -609,9 +874,9 @@ function renderMSKAnalytics(el) {
     _mskAnalyticsCharts.daily = new Chart(document.getElementById("msk-daily-bar"), {
       type: "bar",
       data: { labels: dateLabels, datasets: [
-        { label: "Status",        data: daily.map(d => d.px),  backgroundColor: "#5B8DEF", stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 },
-        { label: "Fallout",       data: daily.map(d => d.fo),  backgroundColor: "#E8573A", stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 },
-        { label: "RSI",           data: daily.map(d => d.rsi), backgroundColor: "#F2A93B", stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 }
+        { label: "Status",        data: daily.map(d => d.px),  backgroundColor: MK.accent, stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 },
+        { label: "Fallout",       data: daily.map(d => d.fo),  backgroundColor: MK.red, stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 },
+        { label: "RSI",           data: daily.map(d => d.rsi), backgroundColor: MK.orange, stack: "a", borderWidth: 0, borderRadius: 4, borderSkipped: false, categoryPercentage: 0.7, barPercentage: 0.85 }
       ] },
       options: {
         ...axisBase,
@@ -634,7 +899,7 @@ function renderMSKAnalytics(el) {
 
     _mskAnalyticsCharts.trend = new Chart(document.getElementById("msk-trend-line"), {
       type: "line",
-      data: { labels: dateLabels, datasets: [{ label: "Total affected", data: daily.map(d => d.total), borderColor: "#43C59E", backgroundColor: "#43C59E33", tension: 0.35, fill: true, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: "#43C59E", pointBorderColor: "#0D1117", pointBorderWidth: 2, borderWidth: 2.5 }] },
+      data: { labels: dateLabels, datasets: [{ label: "Total affected", data: daily.map(d => d.total), borderColor: MK.teal, backgroundColor: MK.tealWash, tension: 0.35, fill: true, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: MK.teal, pointBorderColor: MK.bg, pointBorderWidth: 2, borderWidth: 2.5 }] },
       options: { ...axisBase, plugins: { ...axisBase.plugins, legend: { display: false } } }
     });
 
@@ -653,14 +918,14 @@ function renderMSKAnalytics(el) {
       const isMobile = window.innerWidth <= 768;
       _mskAnalyticsCharts.donut = new Chart(document.getElementById("msk-region-donut"), {
         type: "doughnut",
-        data: { labels: regionCounts.map(r => r.region), datasets: [{ data: regionCounts.map(r => r.count), backgroundColor: regionCounts.map(r => MSK_REGION_COLORS[r.region] || MSK_REGION_COLORS.Other), borderWidth: 3, borderColor: "#161B22", hoverOffset: 8 }] },
+        data: { labels: regionCounts.map(r => r.region), datasets: [{ data: regionCounts.map(r => r.count), backgroundColor: regionCounts.map(r => mskRegionColor(r.region)), borderWidth: 3, borderColor: MK.surface, hoverOffset: 8 }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           cutout: "62%",
           onClick: drillOnClick, onHover: cursorOnHover,
           plugins: {
-            legend: { position: isMobile ? "bottom" : "right", labels: { color: "#E6EDF3", font: { size: 11 }, padding: 10, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
-            tooltip: { backgroundColor: "#161B22", borderColor: "#30363D", borderWidth: 1, padding: 10, cornerRadius: 6, callbacks: { label: c => `${c.label}: ${c.parsed} recruit${c.parsed === 1 ? "" : "s"} (click to drill in)` } }
+            legend: { position: isMobile ? "bottom" : "right", labels: { color: MK.text, font: { size: 11 }, padding: 10, boxWidth: 12, boxHeight: 12, usePointStyle: true } },
+            tooltip: { backgroundColor: MK.surface, borderColor: MK.border, borderWidth: 1, padding: 10, cornerRadius: 6, callbacks: { label: c => `${c.label}: ${c.parsed} recruit${c.parsed === 1 ? "" : "s"} (click to drill in)` } }
           }
         }
       });
@@ -668,18 +933,18 @@ function renderMSKAnalytics(el) {
       // Horizontal bar — rounded right side, bigger bars, value labels via tooltip.
       _mskAnalyticsCharts.regionBar = new Chart(document.getElementById("msk-region-bar"), {
         type: "bar",
-        data: { labels: regionCounts.map(r => r.region), datasets: [{ data: regionCounts.map(r => r.count), backgroundColor: regionCounts.map(r => MSK_REGION_COLORS[r.region] || MSK_REGION_COLORS.Other), borderWidth: 0, borderRadius: 6, borderSkipped: false, barPercentage: 0.7 }] },
+        data: { labels: regionCounts.map(r => r.region), datasets: [{ data: regionCounts.map(r => r.count), backgroundColor: regionCounts.map(r => mskRegionColor(r.region)), borderWidth: 0, borderRadius: 6, borderSkipped: false, barPercentage: 0.7 }] },
         options: {
           responsive: true, maintainAspectRatio: false, indexAxis: "y",
           layout: { padding: { top: 4, right: 16, bottom: 0, left: 0 } },
           onClick: drillOnClick, onHover: cursorOnHover,
           plugins: {
             legend: { display: false },
-            tooltip: { backgroundColor: "#161B22", borderColor: "#30363D", borderWidth: 1, padding: 10, cornerRadius: 6, displayColors: false, callbacks: { label: c => `${c.parsed.x} recruit${c.parsed.x === 1 ? "" : "s"} (click to drill in)` } }
+            tooltip: { backgroundColor: MK.surface, borderColor: MK.border, borderWidth: 1, padding: 10, cornerRadius: 6, displayColors: false, callbacks: { label: c => `${c.parsed.x} recruit${c.parsed.x === 1 ? "" : "s"} (click to drill in)` } }
           },
           scales: {
-            x: { beginAtZero: true, ticks: { color: "#8B949E", font: { size: 10 }, precision: 0, padding: 4 }, grid: { color: "#30363D55", drawTicks: false }, border: { display: false } },
-            y: { ticks: { color: "#E6EDF3", font: { size: 11, weight: "600" }, padding: 6 }, grid: { display: false }, border: { display: false } }
+            x: { beginAtZero: true, ticks: { color: MK.muted, font: { size: 10 }, precision: 0, padding: 4 }, grid: { color: MK.gridSoft, drawTicks: false }, border: { display: false } },
+            y: { ticks: { color: MK.text, font: { size: 11, weight: "600" }, padding: 6 }, grid: { display: false }, border: { display: false } }
           }
         }
       });
@@ -697,7 +962,7 @@ function renderMSKAnalytics(el) {
 // Out today / This week widget — the dashboard equivalent of the WhatsApp
 // parade-state OTHERS block. Anyone currently inside a leave/out date range
 // shows up here; near-future entries are grouped under "This week".
-function renderDashLeaveOut(visible, todayIso) {
+function dashSecLeaveOut(visible, todayIso) {
   const sevenDaysOut = (() => {
     const d = new Date(todayIso); d.setDate(d.getDate() + 7);
     return d.toISOString().slice(0, 10);
@@ -719,13 +984,17 @@ function renderDashLeaveOut(visible, todayIso) {
 
   const typeColor = t => t === "Off-in-Lieu" ? "accent" : t === "Annual Leave" ? "teal" : t === "Compassionate" ? "red" : t === "Weekend" ? "green" : t === "Night's Out" ? "pink" : t === "Course" ? "purple" : t === "Guard Duty" ? "orange" : t === "NDP" ? "yellow" : "muted";
 
-  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
-    <h3 style="font-size:13px;color:var(--muted);margin:0">🪖 Out today / This week <span style="color:var(--dim);font-weight:400">(${onToday.length} now · ${upcoming.length} upcoming)</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm()">+ Log</button>
-  </div>`;
+  const section = body => ({
+    key: "leaveout", icon: "🪖", title: "Out today / this week",
+    count: onToday.length, token: "--purple",
+    note: upcoming.length ? `${upcoming.length} upcoming` : (onToday.length ? "" : "nobody this week"),
+    defaultOpen: !!(onToday.length || upcoming.length),
+    action: dashAction("+ Log", "openBookOutForm()", "Log leave or a book-out"),
+    flush: true, body,
+  });
 
   if (!onToday.length && !upcoming.length) {
-    return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">No commanders out today or in the next 7 days.</div>`;
+    return section(() => dashEmpty("Nobody is out today or in the next 7 days."));
   }
 
   // Dates span the run, so two adjacent blocks of the same leave type read as
@@ -744,11 +1013,11 @@ function renderDashLeaveOut(visible, todayIso) {
     <td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openLeaveForm('${l.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('leave', '${l.id}', 'leave record')" title="Delete">✕</button></td>
   </tr>`;
 
-  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th style="text-align:left">Name</th><th>Type</th><th>Dates</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
-    ${onToday.map(row).join("")}
-    ${upcoming.length ? `<tr><td colspan="5" style="padding:6px 8px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;background:var(--surface2)">Upcoming this week</td></tr>` : ""}
-    ${upcoming.map(row).join("")}
-  </tbody></table></div>`;
+  return section(() => dashTable(
+    `<th style="text-align:left">Name</th><th>Type</th><th>Dates</th><th style="text-align:left">Reason</th><th></th>`,
+    onToday.map(row).join("")
+    + (upcoming.length ? `<tr><td colspan="5" style="padding:6px 8px;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;background:var(--surface2)">Upcoming this week</td></tr>` : "")
+    + upcoming.map(row).join("")));
 }
 
 // The unified absence view: everything "not in camp" in one place. Durable
@@ -845,9 +1114,9 @@ function renderLeaveTimeline(scoped, todayIso) {
   });
 
   const typeBg = t => ({
-    "Off-in-Lieu": "#58A6FF", "Annual Leave": "#39D2C0", "Compassionate": "#F85149", "Weekend": "#3FB950", "Night's Out": "#F778BA",
-    "Course": "#BC8CFF", "Guard Duty": "#D29922", "NDP": "#E3B341", "Other": "#8B949E"
-  })[t] || "#8B949E";
+    "Off-in-Lieu": "var(--accent)", "Annual Leave": "var(--teal)", "Compassionate": "var(--red)", "Weekend": "var(--green)", "Night's Out": "var(--pink)",
+    "Course": "var(--purple)", "Guard Duty": "var(--orange)", "NDP": "var(--yellow)", "Other": "var(--muted)"
+  })[t] || "var(--muted)";
 
   // Header: show the day-of-month for week boundaries + today marker.
   const headerCells = days.map((d, i) => {
@@ -870,7 +1139,7 @@ function renderLeaveTimeline(scoped, todayIso) {
         const radius = `${isStart ? '3px' : '0'} ${isEnd ? '3px' : '0'} ${isEnd ? '3px' : '0'} ${isStart ? '3px' : '0'}`;
         return `<td style="padding:0;border-left:${borderLeft};height:18px" title="${match.type}${match.reason ? ': ' + match.reason : ''} (${match.startDate} → ${match.endDate})"><div style="background:${typeBg(match.type)};height:14px;margin:2px 0;border-radius:${radius};opacity:.85"></div></td>`;
       }
-      const todayMark = isToday ? "background:#F8514922;" : "";
+      const todayMark = isToday ? "background:rgba(var(--redRGB),.13);" : "";
       return `<td style="padding:0;border-left:${borderLeft};${todayMark}height:18px"></td>`;
     }).join("");
     return `<tr onclick="openPerson('${d4}')" style="cursor:pointer"><td style="padding:3px 8px;white-space:nowrap;font-size:11px;font-weight:600;background:var(--surface);border-right:2px solid var(--border);position:sticky;left:0;z-index:1">${displayPersonLabel(d4)}</td>${cells}</tr>`;
@@ -911,32 +1180,45 @@ function backNote(info) {
 // set that drives the strength tiles + parade). Booked-out rows get a one-tap
 // Book in (plain undo); medical/leave rows get "Book in anyway" (override). A
 // "+ Book Out" button opens the unified Book Out modal (today or a date range).
-function renderDashOutOfCamp(scoped, outMap) {
+function dashSecOutOfCamp(scoped, outMap) {
   const rows = scoped.filter(r => outMap.has(r.id));
-  const color = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
+  // Token NAMES, not literals: the pill needs both the solid ink and a wash of
+  // the same hue, and both are derived from one token.
+  const color = { medical: "--red", leave: "--purple", bookedout: "--orange" };
   const label = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
-  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
-    <h3 style="font-size:13px;color:var(--muted);margin:0">🚪 Currently Out of Camp <span style="color:var(--dim);font-weight:400">(${rows.length})</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openBookOutForm()">+ Book Out</button>
-  </div>`;
-  if (!rows.length) return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">Everyone in scope is in camp.</div>`;
+  // Why they are out, in the closed header — the second question a commander
+  // asks, answered without a tap.
+  const kinds = {};
+  rows.forEach(r => { const k = outMap.get(r.id).kind; kinds[k] = (kinds[k] || 0) + 1; });
+  const section = body => ({
+    key: "outofcamp", icon: "🚪", title: "Out of camp",
+    count: rows.length, token: "--orange",
+    note: rows.length ? Object.entries(kinds).map(([k, n]) => `${n} ${(label[k] || k).toLowerCase()}`).join(" · ") : "everyone is in camp",
+    defaultOpen: !!rows.length,
+    action: dashAction("+ Book Out", "openBookOutForm()", "Book someone out of camp"),
+    flush: true, body,
+  });
+  if (!rows.length) return section(() => dashEmpty("Everyone in scope is in camp."));
   const body = rows.map(r => {
     const info = outMap.get(r.id);
-    const c = color[info.kind] || "#8B949E";
+    const tok = color[info.kind] || "--muted";
+    const c = `var(${tok})`;
     return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">
       <td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td>
       <td style="text-align:left">${displayPersonLabel(r.id)}</td>
-      <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${c}22;color:${c}">${label[info.kind] || info.kind}</span></td>
+      <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:color-mix(in srgb, ${c} 13%, transparent);color:${c}">${label[info.kind] || info.kind}</span></td>
       <td style="text-align:left;font-size:11px;color:var(--muted)">${escapeAttr(info.reason || "")}${backNote(info)}</td>
       <td style="white-space:nowrap">${info.kind === "bookedout"
         ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
         : `<button class="btn btn-icon" style="font-size:10px;padding:3px 8px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${info.kind} record (resets tomorrow)">✓ Book in anyway</button> <span style="font-size:10px;color:var(--dim)">via ${info.kind}</span>`}</td>
     </tr>`;
   }).join("");
-  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Why</th><th style="text-align:left">Detail</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
+  return section(() => dashTable(
+    `<th>4D</th><th style="text-align:left">Name</th><th>Why</th><th style="text-align:left">Detail</th><th></th>`,
+    body));
 }
 
-function renderDashAppointments(visible, todayIso) {
+function dashSecAppointments(visible, todayIso) {
   const upcoming = STATE.appointments
     .filter(a => !a.resolved)
     .filter(a => passesFilter(a.d4, visible))
@@ -951,13 +1233,22 @@ function renderDashAppointments(visible, todayIso) {
       return (a.time || "") < (b.time || "") ? -1 : 1;
     });
 
-  const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
-    <h3 style="font-size:13px;color:var(--muted);margin:0">📅 Upcoming Appointments <span style="color:var(--dim);font-weight:400">(${upcoming.length})</span></h3>
-    <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openAppointmentForm()">+ Book</button>
-  </div>`;
+  // "2 today" is the part that changes what a commander does in the next hour;
+  // otherwise name the next date so the header is still an answer.
+  const todayCount = upcoming.filter(a => displayDateToISO(a.date) === todayIso).length;
+  const note = !upcoming.length ? "nothing booked"
+    : todayCount ? `${todayCount} today · next ${upcoming[0].date || ""}`
+    : `next ${upcoming[0].date || ""}`;
+  const section = body => ({
+    key: "appointments", icon: "📅", title: "Appointments",
+    count: upcoming.length, token: "--accent", note,
+    defaultOpen: !!upcoming.length,
+    action: dashAction("+ Book", "openAppointmentForm()", "Book an appointment"),
+    flush: true, body,
+  });
 
   if (!upcoming.length) {
-    return header + `<div class="empty-state" style="padding:12px;font-size:11px;margin-bottom:12px">No upcoming appointments.</div>`;
+    return section(() => dashEmpty("No upcoming appointments."));
   }
 
   // Highlight today's appointments so they don't get lost in a long list.
@@ -974,7 +1265,7 @@ function renderDashAppointments(visible, todayIso) {
         ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); undoBookOut('${a.d4}')" title="Removes today's book-out">↩ Book in</button> `
         : `<button class="btn btn-icon btn-danger" style="font-size:10px;padding:3px 7px" onclick="event.stopPropagation(); bookOutToggle('${a.d4}', true, ${JSON.stringify('Appt: ' + (a.reason || 'appointment'))})" title="Book out of camp">🚪 Out</button> `)
       : "";
-    return `<tr onclick="openPerson('${a.d4}')" style="cursor:pointer${isToday ? ';background:#F8514911' : ''}">
+    return `<tr onclick="openPerson('${a.d4}')" style="cursor:pointer${isToday ? ';background:rgba(var(--redRGB),.07)' : ''}">
       <td class="mono" style="font-weight:700;color:var(--accent)">${displayId(a.d4)}</td>
       <td style="text-align:left">${displayPersonLabel(a.d4)}</td>
       <td style="text-align:left">${a.reason || ""}</td>
@@ -985,48 +1276,11 @@ function renderDashAppointments(visible, todayIso) {
     </tr>`;
   }).join("");
 
-  return header + `<div class="table-wrap" style="margin-bottom:12px"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Reason</th><th>Date</th><th>Time</th><th style="text-align:left">Location</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return section(() => dashTable(
+    `<th>4D</th><th style="text-align:left">Name</th><th style="text-align:left">Reason</th><th>Date</th><th>Time</th><th style="text-align:left">Location</th><th></th>`,
+    rows));
 }
 
-function renderDashProfileCards(scoped) {
-  // Ration: count distinct values. Unknowns get grouped under "Unspecified"
-  // so they show up but don't disappear silently.
-  const rationCounts = {};
-  scoped.forEach(r => { const k = (r.ration || "").trim() || "Unspecified"; rationCounts[k] = (rationCounts[k] || 0) + 1; });
-  const rationRows = Object.entries(rationCounts).sort((a, b) => b[1] - a[1]);
-  const rationColor = k => k === "Muslim" ? "var(--green)" : k === "Non-Muslim" ? "var(--accent)" : "var(--muted)";
-
-  // Allergies: each recruit's `allergies` is free text — split on comma so a
-  // single "Peanuts, Dairy" entry counts toward two distinct allergens.
-  const allergenCounts = {};
-  const allergic = [];
-  scoped.forEach(r => {
-    const raw = (r.allergies || "").trim();
-    if (!raw) return;
-    allergic.push(r);
-    raw.split(/[,;]/).map(s => s.trim()).filter(Boolean).forEach(a => {
-      const key = a.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-      allergenCounts[key] = (allergenCounts[key] || 0) + 1;
-    });
-  });
-  const allergenRows = Object.entries(allergenCounts).sort((a, b) => b[1] - a[1]);
-
-  return `<div class="grid-2">
-    <div class="card"><h3>Ration Breakdown</h3>
-      ${rationRows.length ? `<div style="display:flex;flex-direction:column;gap:6px">
-        ${rationRows.map(([k, n]) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px"><span style="color:${rationColor(k)};font-weight:600">${k}</span><span class="mono" style="color:var(--muted)">${n} (${pct(n, scoped.length)}%)</span></div>`).join("")}
-      </div>` : `<div style="color:var(--muted);font-size:12px">No ration data</div>`}
-    </div>
-    <div class="card"><h3>Allergies <span style="color:var(--muted);font-weight:400;font-size:11px">(${allergic.length} recruit${allergic.length === 1 ? '' : 's'})</span></h3>
-      ${allergic.length ? `
-        ${allergenRows.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${allergenRows.map(([a, n]) => `<span class="badge badge-yellow">${a} · ${n}</span>`).join("")}</div>` : ""}
-        <div style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto">
-          ${allergic.map(r => `<div onclick="openPerson('${r.id}')" style="cursor:pointer;font-size:11px;padding:4px 6px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px"><span><span class="mono" style="color:var(--accent);font-weight:700">${r.id}</span> ${r.name}</span><span style="color:var(--yellow);text-align:right">${r.allergies}</span></div>`).join("")}
-        </div>
-      ` : `<div style="color:var(--muted);font-size:12px">No recruits with allergies recorded</div>`}
-    </div>
-  </div>`;
-}
 
 function renderRoster(el) {
   const rsiCount = {};
@@ -1038,7 +1292,8 @@ function renderRoster(el) {
   // as out here, not just manual book-outs. Colours/labels mirror the dashboard
   // "Currently Out of Camp" panel.
   const campOutMap = outOfCampMap(rosterToday);
-  const CAMP_COLOR = { medical: "#F85149", leave: "#BC8CFF", bookedout: "#D29922" };
+  // Token names (see dashSecOutOfCamp) so the badge wash tracks the palette.
+  const CAMP_COLOR = { medical: "--red", leave: "--purple", bookedout: "--orange" };
   const CAMP_WHY = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
   // Status column = the recruit's CURRENTLY-active medical status(es), derived
   // from the medical layer (same source as the dashboard) rather than the stale
@@ -1080,10 +1335,10 @@ function renderRoster(el) {
       // The "back" date rides along with the badge — it spans chained records,
       // so an extended MC can't be read as ending at the first record.
       const campBadge = outInfo
-        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${CAMP_COLOR[outInfo.kind] || "#8B949E"}22;color:${CAMP_COLOR[outInfo.kind] || "#8B949E"}" title="Out of camp — ${escapeAttr(outInfo.reason || "")}${outInfo.back ? ` (back ${isoToDisplayDate(outInfo.back)})` : ""}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>${backLine(outInfo)}`
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:color-mix(in srgb, var(${CAMP_COLOR[outInfo.kind] || "--muted"}) 13%, transparent);color:var(${CAMP_COLOR[outInfo.kind] || "--muted"})" title="Out of camp — ${escapeAttr(outInfo.reason || "")}${outInfo.back ? ` (back ${isoToDisplayDate(outInfo.back)})` : ""}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>${backLine(outInfo)}`
         : forcedIn
-          ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#39D2C022;color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
-          : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#3FB95018;color:var(--green)">In camp</span>`;
+          ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(var(--tealRGB),.13);color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
+          : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(var(--greenRGB),.09);color:var(--green)">In camp</span>`;
       const campToggle = outInfo
         ? (outInfo.kind === "bookedout"
           ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
@@ -1594,12 +1849,18 @@ function renderIPPT(el) {
 function buildIPPTAwardMixChart(awardMix) {
   const canvas = document.getElementById("chart-ippt-awardmix");
   if (!canvas || typeof Chart === "undefined" || !awardMix || awardMix.length < 2) return;
+  // Canvas takes real colour strings, so the tokens are resolved once per build.
+  const IK = {
+    red: cssColor("--red"), green: cssColor("--green"), accent: cssColor("--accent"),
+    yellow: cssColor("--yellow"), purple: cssColor("--purple"), muted: cssColor("--muted"),
+    surface: cssColor("--surface"), border: cssColor("--border")
+  };
   const tiers = [
-    { key: "Fail",   color: "#F85149" },
-    { key: "Pass",   color: "#3FB950" },
-    { key: "Silver", color: "#58A6FF" },
-    { key: "Gold",   color: "#E3B341" },
-    { key: "Gold★",  color: "#BC8CFF" }
+    { key: "Fail",   color: IK.red },
+    { key: "Pass",   color: IK.green },
+    { key: "Silver", color: IK.accent },
+    { key: "Gold",   color: IK.yellow },
+    { key: "Gold★",  color: IK.purple }
   ];
   STATE.charts.ipptAwardMix = new Chart(canvas, {
     type: "bar",
@@ -1610,21 +1871,21 @@ function buildIPPTAwardMixChart(awardMix) {
         data: awardMix.map(r => r.count ? +(r.tally[t.key] / r.count * 100).toFixed(1) : 0),
         counts: awardMix.map(r => r.tally[t.key]),
         backgroundColor: t.color,
-        borderColor: "#161B22",
+        borderColor: IK.surface,
         borderWidth: 1
       }))
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: "top", labels: { color: "#8B949E", font: { size: 12 }, usePointStyle: true } },
+        legend: { position: "top", labels: { color: IK.muted, font: { size: 12 }, usePointStyle: true } },
         tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: {
           label: ctx => `${ctx.dataset.label}: ${ctx.dataset.counts[ctx.dataIndex]} (${ctx.parsed.y}%)`
         } }
       },
       scales: {
-        y: { stacked: true, min: 0, max: 100, title: { display: true, text: "% of takers", color: "#8B949E" }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 }, callback: v => v + "%" } },
-        x: { stacked: true, grid: { display: false }, ticks: { color: "#8B949E", font: { size: 14 } } }
+        y: { stacked: true, min: 0, max: 100, title: { display: true, text: "% of takers", color: IK.muted }, grid: { color: IK.border }, ticks: { color: IK.muted, font: { size: 12 }, callback: v => v + "%" } },
+        x: { stacked: true, grid: { display: false }, ticks: { color: IK.muted, font: { size: 14 } } }
       }
     }
   });
@@ -1638,7 +1899,12 @@ function buildIPPTAwardMixChart(awardMix) {
 function buildIPPTProgressChart(progression, attempts) {
   const canvas = document.getElementById("chart-ippt-progress");
   if (!canvas || typeof Chart === "undefined" || !progression || progression.length < 2 || attempts.length < 2) return;
-  const lineColor = r => { const d = ipptNetDelta(r); return d > 0 ? "#3FB95066" : d < 0 ? "#F8514966" : "#8B949E55"; };
+  const PK = {
+    up: cssColorA("--green", ".4"), down: cssColorA("--red", ".4"),
+    flat: cssColorA("--muted", ".33"), accent: cssColor("--accent"),
+    muted: cssColor("--muted"), border: cssColor("--border")
+  };
+  const lineColor = r => { const d = ipptNetDelta(r); return d > 0 ? PK.up : d < 0 ? PK.down : PK.flat; };
   const avg = attempts.map(n => {
     const xs = progression.filter(r => r.byAttempt[n] != null).map(r => r.byAttempt[n]);
     return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
@@ -1662,8 +1928,8 @@ function buildIPPTProgressChart(progression, attempts) {
         {
           label: "Company avg",
           data: avg,
-          borderColor: "#58A6FF",
-          backgroundColor: "#58A6FF",
+          borderColor: PK.accent,
+          backgroundColor: PK.accent,
           borderWidth: 3.5,
           tension: 0.25,
           pointRadius: 5,
@@ -1683,8 +1949,8 @@ function buildIPPTProgressChart(progression, attempts) {
         } }
       },
       scales: {
-        y: { title: { display: true, text: "Score", color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } },
-        x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 14 } } }
+        y: { title: { display: true, text: "Score", color: PK.muted, font: { size: 13 } }, grid: { color: PK.border }, ticks: { color: PK.muted, font: { size: 12 } } },
+        x: { grid: { display: false }, ticks: { color: PK.muted, font: { size: 14 } } }
       }
     }
   });
@@ -1697,6 +1963,10 @@ function buildIPPTProgressChart(progression, attempts) {
 function buildIPPTScatterChart(paired, cmpA, cmpB) {
   const canvas = document.getElementById("chart-ippt-scatter");
   if (!canvas || typeof Chart === "undefined" || !paired || paired.length < 2) return;
+  const SK = {
+    green: cssColor("--green"), red: cssColor("--red"), muted: cssColor("--muted"),
+    border: cssColor("--border")
+  };
   const all = paired.flatMap(p => [p.s1, p.s2]);
   const lo = Math.max(0, Math.floor((Math.min(...all) - 5) / 5) * 5);
   const hi = Math.min(100, Math.ceil((Math.max(...all) + 5) / 5) * 5);
@@ -1707,7 +1977,7 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
         {
           label: "Recruits",
           data: paired.map(p => ({ x: p.s1, y: p.s2, d4: p.d4 })),
-          pointBackgroundColor: paired.map(p => p.delta > 0 ? "#3FB950" : p.delta < 0 ? "#F85149" : "#8B949E"),
+          pointBackgroundColor: paired.map(p => p.delta > 0 ? SK.green : p.delta < 0 ? SK.red : SK.muted),
           pointBorderColor: "transparent",
           pointRadius: 6,
           pointHoverRadius: 9
@@ -1716,7 +1986,7 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
           label: "No change (y=x)",
           type: "line",
           data: [{ x: lo, y: lo }, { x: hi, y: hi }],
-          borderColor: "#8B949E",
+          borderColor: SK.muted,
           borderDash: [6, 6],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -1731,8 +2001,8 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
         tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: { label: ctx => ctx.raw.d4 ? `${displayId(ctx.raw.d4) || ctx.raw.d4}: ${ctx.raw.x} → ${ctx.raw.y}` : "" } }
       },
       scales: {
-        x: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpA} score`, color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } },
-        y: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpB} score`, color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } }
+        x: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpA} score`, color: SK.muted, font: { size: 13 } }, grid: { color: SK.border }, ticks: { color: SK.muted, font: { size: 12 } } },
+        y: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpB} score`, color: SK.muted, font: { size: 13 } }, grid: { color: SK.border }, ticks: { color: SK.muted, font: { size: 12 } } }
       }
     }
   });
@@ -1745,31 +2015,35 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
 function buildIPPTTrendChart(trend) {
   const canvas = document.getElementById("chart-ippt-trend");
   if (!canvas || typeof Chart === "undefined" || !trend || trend.length < 2) return;
+  const TK = {
+    accent: cssColor("--accent"), green: cssColor("--green"), orange: cssColor("--orange"),
+    muted: cssColor("--muted"), border: cssColor("--border")
+  };
   STATE.charts.ipptTrend = new Chart(canvas, {
     type: "line",
     data: {
       labels: trend.map(r => "IPPT " + r.n),
       datasets: [
-        { label: "Avg Push-ups", data: trend.map(r => r.pushups), borderColor: "#58A6FF", backgroundColor: "#58A6FF", yAxisID: "reps", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true },
-        { label: "Avg Sit-ups", data: trend.map(r => r.situps), borderColor: "#3FB950", backgroundColor: "#3FB950", yAxisID: "reps", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true },
-        { label: "Avg 2.4km", data: trend.map(r => r.runSec), borderColor: "#F2A93B", backgroundColor: "#F2A93B", yAxisID: "run", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true }
+        { label: "Avg Push-ups", data: trend.map(r => r.pushups), borderColor: TK.accent, backgroundColor: TK.accent, yAxisID: "reps", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true },
+        { label: "Avg Sit-ups", data: trend.map(r => r.situps), borderColor: TK.green, backgroundColor: TK.green, yAxisID: "reps", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true },
+        { label: "Avg 2.4km", data: trend.map(r => r.runSec), borderColor: TK.orange, backgroundColor: TK.orange, yAxisID: "run", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true }
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { position: "top", labels: { color: "#8B949E", font: { size: 13 }, padding: 16, usePointStyle: true } },
+        legend: { position: "top", labels: { color: TK.muted, font: { size: 13 }, padding: 16, usePointStyle: true } },
         tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: { label: ctx => ctx.dataset.yAxisID === "run"
           ? `${ctx.dataset.label}: ${formatSeconds(ctx.parsed.y)}`
           : `${ctx.dataset.label}: ${ctx.parsed.y}` } }
       },
       scales: {
-        reps: { type: "linear", position: "left", beginAtZero: false, title: { display: true, text: "Reps", color: "#8B949E", font: { size: 13 } }, grid: { color: "#30363D" }, ticks: { color: "#8B949E", font: { size: 12 } } },
+        reps: { type: "linear", position: "left", beginAtZero: false, title: { display: true, text: "Reps", color: TK.muted, font: { size: 13 } }, grid: { color: TK.border }, ticks: { color: TK.muted, font: { size: 12 } } },
         // Reversed so a FASTER time (fewer seconds) sits HIGHER — now an upward
         // run line means improvement, matching the rep lines.
-        run: { type: "linear", position: "right", reverse: true, title: { display: true, text: "2.4km (faster ↑)", color: "#8B949E", font: { size: 13 } }, grid: { drawOnChartArea: false }, ticks: { color: "#8B949E", font: { size: 12 }, callback: v => formatSeconds(v) } },
-        x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 14 } } }
+        run: { type: "linear", position: "right", reverse: true, title: { display: true, text: "2.4km (faster ↑)", color: TK.muted, font: { size: 13 } }, grid: { drawOnChartArea: false }, ticks: { color: TK.muted, font: { size: 12 }, callback: v => formatSeconds(v) } },
+        x: { grid: { display: false }, ticks: { color: TK.muted, font: { size: 14 } } }
       }
     }
   });
@@ -1780,19 +2054,24 @@ function buildIPPTAwardsChart(stats) {
   if (!canvas || typeof Chart === "undefined") return;
   // Order high → low so the legend reads top-to-bottom intuitively.
   // Only include non-zero slices so the chart isn't cluttered with empty tiers.
+  const AK = {
+    purple: cssColor("--purple"), yellow: cssColor("--yellow"), accent: cssColor("--accent"),
+    green: cssColor("--green"), red: cssColor("--red"), dim: cssColor("--dim"),
+    muted: cssColor("--muted"), surface: cssColor("--surface")
+  };
   const labels = [], data = [], colors = [];
-  if (stats.goldStar) { labels.push("Gold★"); data.push(stats.goldStar); colors.push("#BC8CFF"); }
-  if (stats.gold)     { labels.push("Gold");   data.push(stats.gold);     colors.push("#E3B341"); }
-  if (stats.silver)   { labels.push("Silver"); data.push(stats.silver);   colors.push("#58A6FF"); }
-  if (stats.pass)     { labels.push("Pass");   data.push(stats.pass);     colors.push("#3FB950"); }
-  if (stats.fail)     { labels.push("Fail");   data.push(stats.fail);     colors.push("#F85149"); }
-  if (stats.ytt)      { labels.push("YTT");    data.push(stats.ytt);      colors.push("#484F58"); }
+  if (stats.goldStar) { labels.push("Gold★"); data.push(stats.goldStar); colors.push(AK.purple); }
+  if (stats.gold)     { labels.push("Gold");   data.push(stats.gold);     colors.push(AK.yellow); }
+  if (stats.silver)   { labels.push("Silver"); data.push(stats.silver);   colors.push(AK.accent); }
+  if (stats.pass)     { labels.push("Pass");   data.push(stats.pass);     colors.push(AK.green); }
+  if (stats.fail)     { labels.push("Fail");   data.push(stats.fail);     colors.push(AK.red); }
+  if (stats.ytt)      { labels.push("YTT");    data.push(stats.ytt);      colors.push(AK.dim); }
   if (!data.length) return;
 
   STATE.charts.ipptAwards = new Chart(canvas, {
     type: "doughnut",
-    data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: "#161B22", borderWidth: 2 }] },
-    options: { plugins: { legend: { position: "right", labels: { color: "#8B949E", font: { size: 11 } } } } }
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: AK.surface, borderWidth: 2 }] },
+    options: { plugins: { legend: { position: "right", labels: { color: AK.muted, font: { size: 11 } } } } }
   });
 }
 
@@ -1800,13 +2079,14 @@ function buildIPPTDistributionChart(buckets) {
   const canvas = document.getElementById("chart-ippt-distribution");
   if (!canvas || typeof Chart === "undefined") return;
   // buckets: [YTT, Fail 0–60, Pass 61–74, Silver 75–84, Gold 85–89, Gold★ 90+]
+  const DK = { muted: cssColor("--muted"), border: cssColor("--border") };
   STATE.charts.ipptDistribution = new Chart(canvas, {
     type: "bar",
     data: {
       labels: ["YTT", "Fail", "Pass", "Silver", "Gold", "Gold★"],
       datasets: [{
         data: buckets,
-        backgroundColor: ["#484F58", "#F85149", "#3FB950", "#58A6FF", "#E3B341", "#BC8CFF"],
+        backgroundColor: [cssColor("--dim"), cssColor("--red"), cssColor("--green"), cssColor("--accent"), cssColor("--yellow"), cssColor("--purple")],
         borderWidth: 0,
         borderRadius: 4
       }]
@@ -1814,8 +2094,8 @@ function buildIPPTDistributionChart(buckets) {
     options: {
       plugins: { legend: { display: false } },
       scales: {
-        y: { beginAtZero: true, grid: { color: "#30363D" }, ticks: { color: "#8B949E", stepSize: 1 } },
-        x: { grid: { display: false }, ticks: { color: "#8B949E", font: { size: 10 } } }
+        y: { beginAtZero: true, grid: { color: DK.border }, ticks: { color: DK.muted, stepSize: 1 } },
+        x: { grid: { display: false }, ticks: { color: DK.muted, font: { size: 10 } } }
       }
     }
   });
@@ -1886,7 +2166,7 @@ function renderPolar(el) {
       </div>
       ${g.photos.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${photos}</div>` : ""}
       <label class="btn" style="cursor:pointer;font-size:11px;padding:6px 10px;display:inline-block">+ Add photos to this group<input type="file" accept="image/*" multiple onchange="addPolarPhotosToGroup(${g.id}, this.files); this.value=''" style="display:none"></label>
-      <div ondragover="event.preventDefault(); this.style.borderColor='var(--accent)'; this.style.background='#58A6FF11'" ondragleave="this.style.borderColor='var(--border)'; this.style.background='transparent'" ondrop="event.preventDefault(); this.style.borderColor='var(--border)'; this.style.background='transparent'; addPolarPhotosToGroup(${g.id}, event.dataTransfer.files)" style="display:inline-block;margin-left:6px;padding:6px 10px;font-size:11px;color:var(--muted);border:1px dashed var(--border);border-radius:6px">…or drop here</div>
+      <div ondragover="event.preventDefault(); this.style.borderColor='var(--accent)'; this.style.background='rgba(var(--accentRGB),.07)'" ondragleave="this.style.borderColor='var(--border)'; this.style.background='transparent'" ondrop="event.preventDefault(); this.style.borderColor='var(--border)'; this.style.background='transparent'; addPolarPhotosToGroup(${g.id}, event.dataTransfer.files)" style="display:inline-block;margin-left:6px;padding:6px 10px;font-size:11px;color:var(--muted);border:1px dashed var(--border);border-radius:6px">…or drop here</div>
     </div>`;
   }).join("");
 
@@ -1998,12 +2278,12 @@ function renderConducts(el) {
       <h2 style="font-size:18px;font-weight:700">Conducts Registry <span style="color:var(--muted);font-weight:400;font-size:13px">${rows.length} entries · ${totalUsage} record${totalUsage === 1 ? "" : "s"}</span></h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${needsConductMigration() ? `<button class="btn" onclick="maybeRunConductMigration()" title="Open the legacy-data migration modal">🔧 Migrate legacy data</button>` : ""}
-        ${duplicateConductIdGroups().length ? `<button class="btn" style="background:#F8514922;border-color:#F8514944;color:var(--red)" onclick="openFixConductIdsModal()" title="Multiple conducts share the same id — records resolve to the wrong name. Fix it.">⚠️ Fix duplicate ids (${duplicateConductIdGroups().length})</button>` : ""}
+        ${duplicateConductIdGroups().length ? `<button class="btn" style="background:rgba(var(--redRGB),.13);border-color:rgba(var(--redRGB),.27);color:var(--red)" onclick="openFixConductIdsModal()" title="Multiple conducts share the same id — records resolve to the wrong name. Fix it.">⚠️ Fix duplicate ids (${duplicateConductIdGroups().length})</button>` : ""}
         <button class="btn btn-success" onclick="pushTab('Conducts',STATE.conducts)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="promptCreateConduct()">+ New conduct</button>
       </div>
     </div>
-    ${emptyRegistryWithUsage ? `<div class="card" style="padding:12px 14px;margin-bottom:12px;background:#F8514922;border:1px solid #F8514944;font-size:12px;color:var(--red);line-height:1.6">
+    ${emptyRegistryWithUsage ? `<div class="card" style="padding:12px 14px;margin-bottom:12px;background:rgba(var(--redRGB),.13);border:1px solid rgba(var(--redRGB),.27);font-size:12px;color:var(--red);line-height:1.6">
       <strong>⚠️ Registry is empty but records reference conductIds.</strong> This usually means the Apps Script backend wasn't redeployed with the new <code>Conducts</code> tab in its <code>readAllTabs</code> map. Until that's fixed, conduct names will show as <code>[c001?]</code> placeholders across the app.
       <div style="margin-top:6px;color:var(--muted)">Fix: open Apps Script editor → confirm <code>"Conducts": "conducts"</code> is in <code>tabMap</code> → Deploy → Manage deployments → New version. Then pull again.</div>
     </div>` : ""}

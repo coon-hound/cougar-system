@@ -180,5 +180,46 @@ const API = {
     // Apps Script cold start + a Claude-vision extraction on a dense photo can
     // exceed 30s; give it a generous ceiling so OCR isn't aborted mid-flight.
     return this.post({ action: "analyzePhoto", imageBase64, mediaType, validD4s }, { timeoutMs: 120000 });
+  },
+
+  // ── Usage telemetry (js/telemetry.js) ─────────────────────────────────────
+  //
+  // These two deliberately sit OUTSIDE the sync machinery. They carry no
+  // `tab` and no `baseRev`, they bump no revision, they mark no tab dirty and
+  // they never enter the per-tab write queue — so a recorded click cannot
+  // wake every other phone in the company through revCheck. The usage table is
+  // excluded from REV_TABS and from readAll for the same reason; the insights
+  // view reads it back on demand, never as part of a launch pull. See
+  // TELEMETRY-DESIGN.md.
+  //
+  // Neither is ever allowed to surface an error to a user: telemetry.js catches
+  // everything these throw and retries the batch later.
+
+  // Append one batch of pre-aggregated counter deltas.
+  // batch: { batchId, device, rows:[{day,kind,name,events,completed,abandoned,clicks,ms}] }
+  // `batchId` makes the server's additive upsert replay-safe — a redelivered
+  // batch is recognised and ignored rather than double-counted.
+  async usageAppend(batch) {
+    return this.post({ action: "usageAppend", ...batch }, { timeoutMs: 15000 });
+  },
+
+  // Fire-and-forget flush for `visibilitychange` → hidden, where a fetch is not
+  // guaranteed to survive the page going away. Returns whether the browser
+  // accepted the payload, not whether the server stored it — the caller treats
+  // a dropped analytics batch as a non-event.
+  usageBeacon(batch) {
+    try {
+      if (typeof navigator === "undefined" || !navigator.sendBeacon || !STATE.apiUrl) return false;
+      const body = JSON.stringify({ ...batch, action: "usageAppend", auth: STATE.authToken });
+      // text/plain matches API.post, so this stays a CORS simple request and
+      // never needs a preflight the beacon could not perform.
+      return navigator.sendBeacon(STATE.apiUrl, new Blob([body], { type: "text/plain" }));
+    } catch { return false; }
+  },
+
+  // On-demand read for the insights view only. opts: { scope, device, days }
+  // where scope is "device" (that one device) or "company" (everyone).
+  async usageRead(opts) {
+    return this.post({ action: "usageRead", ...(opts || {}) }, { timeoutMs: 20000 });
   }
 };
