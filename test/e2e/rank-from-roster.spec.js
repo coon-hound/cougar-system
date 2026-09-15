@@ -68,10 +68,11 @@ test.describe("rank comes from the roster", () => {
       return generateParadeStateText("FP", today, "0730");
     });
 
-    expect(txt).toContain("PTE ALPHA ONE C1401");
+    // In the 40 SAR line the rank sits between the 4D and the name.
+    expect(txt).toContain("1401 PTE ALPHA ONE - ");
     // His platoon-mate was not promoted and must be untouched — the rank is
     // read per man, not once for the whole parade.
-    expect(txt).toContain("REC ALPHA TWO C1402");
+    expect(txt).toContain("1402 REC ALPHA TWO - ");
     expect(txt).not.toContain("REC ALPHA ONE");
   });
 

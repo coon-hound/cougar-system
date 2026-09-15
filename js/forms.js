@@ -511,7 +511,7 @@ function openMedicalForm(id) {
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-custom-save" checked style="width:15px;height:15px"> Save for reuse <span style="color:var(--dim)">(adds it to this dropdown)</span></label>
           <div style="font-size:10px;color:var(--muted)">Custom statuses are in-camp/restricted and don't get +1/+2 recovery tags.</div>
         </div>
-        <label id="f-incamp-wrap" style="display:${(selectedStatus === "MC" || selectedStatus === "Warded") ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, listed under MEDICAL STATUS not ATTC)</span></label>
+        <label id="f-incamp-wrap" style="display:${(selectedStatus === "MC" || selectedStatus === "Warded") ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, and the parade ATT C line is marked IN)</span></label>
         <div class="form-row">
           ${formField("f-start", "Start (inclusive)", "date", "", `value="${startVal}" min="2020-01-01" max="2099-12-31"`)}
           ${formField("f-end", "End (inclusive)", "date", "", `value="${endVal}" min="2020-01-01" max="2099-12-31"`)}
@@ -1664,11 +1664,9 @@ function leaveMany(d4s, t) {
 // previously retyped these by hand from chats; now the dashboard generates
 // an editable preview that round-trips to clipboard in one tap.
 
-const SEP = "----------------------------------------------------------------";
-
-// Statuses that have their own dedicated parade-state section (ATTC = MC/Warded,
-// REPORT SICK = Pending) or are cleared (NIL). MEDICAL STATUS is the catch-all
-// for every OTHER active restriction — LD, all Excuses, and any custom/one-off
+// Statuses that have their own dedicated section (ATT C = MC, OTHERS = Warded,
+// REPORT SICK = Pending) or are cleared (NIL). STATUS is the catch-all for
+// every OTHER active restriction — LD, all Excuses, and any custom/one-off
 // status (e.g. "Excuse Jumping") that isn't in the canonical MED_STATUSES list.
 // Using an exclusion predicate instead of a hardcoded allowlist means a new or
 // custom status can never silently fall through the cracks of the report.
@@ -1676,14 +1674,14 @@ const PARADE_SECTIONED_STATUSES = ["MC", "Warded", "Pending", "NIL"];
 const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(s);
 // A medical record counts as "kept in camp" for the parade when the recruit is
 // consuming it in camp (the record's inCamp flag) OR a commander manually booked
-// them IN today (the day-scoped force-in override). Either way they're present in
-// camp, so an MC/Warded belongs under MEDICAL STATUS, never ATTC.
+// them IN today (the day-scoped force-in override). Either way the body is
+// counted present, which is what the parade line's IN marker says.
 const medKeptInCamp = (m, dateIso) =>
   m.inCamp === true || isForcedIn(STATE.roster.find(r => r.id === m.d4), dateIso || todayISO());
-// A record belongs in MEDICAL STATUS if its status is a catch-all restriction
-// (LD/Excuse/custom) OR it's a kept-in-camp MC/Warded (pulled out of ATTC but
-// still needing to show its status). Shared by the parade state and the
-// standalone Medical Status List so the two never diverge.
+// A record belongs in the standalone Medical Status List if its status is a
+// catch-all restriction (LD/Excuse/custom) OR it's a kept-in-camp MC/Warded —
+// that list is a roll of who is restricted, so an MC being consumed in camp
+// belongs on it even though the parade state files it under ATT C.
 const isMedicalStatusRecord = (m, dateIso) =>
   isMedicalStatusCatchAll(m.status) || (medKeptInCamp(m, dateIso) && (m.status === "MC" || m.status === "Warded"));
 
@@ -1710,9 +1708,10 @@ function rosterRank(r) {
   return String(r?.rank || "").trim().toUpperCase() || "REC";
 }
 
-// R/N formatting per chat convention. Commanders are rank+name, no 4D.
-// Enlistees are "<RANK> <NAME> C<4D>" — the C prefix marks Cougar in the
-// battalion-wide parade state.
+// R/N formatting for the S/N-block reports (the standalone Medical Status List
+// and the per-conduct chat message). Commanders are rank+name, no 4D; enlistees
+// are "<RANK> <NAME> C<4D>", the C prefix marking Cougar company. The parade
+// state itself uses paradeLineName — 4D first, per the battalion format.
 function paradeRN(d4) {
   const r = STATE.roster.find(x => x.id === d4);
   if (!r) return d4;
@@ -1766,8 +1765,9 @@ function paradeStatusLabel(record, dateIso, run) {
 // When an MC ends on day N, on day N+1 the system says the recruit is back
 // (medStatusActive returns false), but they might not have booked back in
 // before parade time. The PDS opts each one in/out via checkboxes in the
-// FP/LP report modal. Map of d4 → true means "still ATTC despite the
-// medical record having ended". Cleared on modal open and on date change.
+// FP/LP report modal. Map of d4 → true means "still out despite the medical
+// record having ended" — they file under OTHERS as RETURNING FROM MC and count
+// away in the strength. Cleared on modal open and on date change.
 let _paradeOverrides = {};
 
 function findBorderlineReturnees(dateIso) {
@@ -1794,31 +1794,18 @@ function toggleBorderline(d4, checked, type) {
   regenerateReport(type);
 }
 
-// recordFilter is either an allowlist array (status ∈ list) or a predicate
-// receiving the whole record (m => boolean) — the record form lets a section
-// key off flags like inCamp, not just the status string (MEDICAL STATUS folds
-// in consume-in-camp MCs, ATTC excludes them).
-// collectD4s (optional Set) receives every d4 this section RENDERS, so a later
-// section can exclude anyone already shown here — used to keep a person out of
-// OTHERS once they appear in ATTC (a person can't be away on MC and out on
-// leave/book-out at the same time; the ATTC listing wins).
-function buildMedicalSection(label, dateIso, recordFilter, collectD4s) {
+// Builds the S/N-block section used by the standalone Medical Status List (the
+// parade state composes its own one-line entries). recordFilter is either an
+// allowlist array (status ∈ list) or a predicate receiving the whole record
+// (m => boolean), so a section can key off flags like inCamp, not just the
+// status string.
+function buildMedicalSection(label, dateIso, recordFilter) {
   const matchRecord = typeof recordFilter === "function"
     ? recordFilter
     : m => recordFilter.includes(m.status);
-  let matches = STATE.medical.filter(m =>
+  const matches = STATE.medical.filter(m =>
     medStatusActive(m, dateIso) && matchRecord(m, dateIso)
   );
-
-  // ATTC gets the PDS-confirmed borderline returnees folded in so they
-  // render with the same Reason/Status/Duration block as everyone else.
-  // Other sections aren't affected by overrides.
-  if (label === "ATTC") {
-    const existingD4s = new Set(matches.map(m => m.d4));
-    findBorderlineReturnees(dateIso)
-      .filter(m => _paradeOverrides[m.d4] && !existingD4s.has(m.d4))
-      .forEach(m => matches.push(m));
-  }
   const byD4 = {};
   matches.forEach(m => { (byD4[m.d4] = byD4[m.d4] || []).push(m); });
   // Collapse same-status duplicates per recruit (a re-issued MC) to ONE record
@@ -1829,10 +1816,9 @@ function buildMedicalSection(label, dateIso, recordFilter, collectD4s) {
   Object.keys(byD4).forEach(d4 => { byD4[d4] = dedupeActiveRecordsByFamily(byD4[d4]); });
   // Order recruits by their most-severe status (MC/Warded > LD > Excuse > …) so
   // MEDICAL STATUS lists a consume-in-camp MC above LD/Excuse entries. Stable for
-  // ties; harmless for ATTC/REPORT SICK where every entry shares one severity.
+  // ties; harmless for a single-severity section.
   const groupRank = d4 => Math.max(...byD4[d4].map(m => medSeverityRank(m.status)));
   const peopleIds = Object.keys(byD4).sort((a, b) => groupRank(b) - groupRank(a));
-  if (collectD4s) peopleIds.forEach(d4 => collectD4s.add(d4));
 
   if (!peopleIds.length) {
     return `${label}:\n\nS/N:\nR/N:\nReason:`;
@@ -1924,123 +1910,371 @@ function outsideApptsForParade(dateIso) {
   );
 }
 
-function buildAppointmentSection(dateIso, paradeTime) {
-  const upcoming = upcomingParadeAppointments(dateIso, paradeTime);
-  if (!upcoming.length) return `MEDICAL APPT:\n\nS/N:\nR/N:\nReason:\nLocation:\nDate:\nTime:`;
-  const blocks = upcoming.map((a, idx) => {
-    const sn = String(idx + 1).padStart(2, "0");
-    return `S/N: ${sn}\nR/N: ${paradeRN(a.d4)}\nReason: ${a.reason || ""}\nLocation: ${a.location || ""}\nDate: ${toDDMMYY(displayDateToISO(a.date))}\nTime: ${fmtHrs(a.time)}`;
-  });
-  return `MEDICAL APPT: ${String(upcoming.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
+// ─── 40 SAR PARADE STATE FORMAT ─────────────────────────
+// One format for all five companies (battalion template, Sep 2026). A state is
+// a header + command team, a company strength summary, then one block per
+// sub-unit — COY HQ first, then PL 7 … PL 9 — each carrying the same six
+// sections in the same fixed order. Every record is ONE line:
+//   <n>. <4D> <RANK> <NAME> - <DESCRIPTION> (<DATES>) [OUT|IN] [@ <LOCATION>]
+//
+// Two invariants hold the format together:
+//   1. A person is filed in exactly ONE block (their platoon, or COY HQ), but
+//      may hold several records and so appear on several LINES — an MC plus an
+//      excuse is two facts, not two bodies.
+//   2. Strength is computed only from outOfCampMap + the ticked borderline
+//      returnees, never by counting section lines, so listing a fact twice can
+//      never move a number. The blocks therefore always add up to COMPANY.
+const PARADE_COMPANY_LINE = "40 SAR COUGAR COMPANY";
+const PARADE_RULE_EQ = "=".repeat(32);
+const PARADE_RULE_DASH = "-".repeat(32);
+// Fixed names, fixed order — never renamed, merged or split (battalion rule 8).
+const PARADE_SECTION_ORDER = ["ATT C", "STATUS", "REPORT SICK", "MA", "OFF/LEAVE", "OTHERS"];
+// Which sections mean "not in camp" by default. The OUT/IN marker is emitted
+// only when a record CONTRADICTS its section's default — an MC consumed in
+// camp reads "… IN", an excuse held while out of camp reads "… OUT" — so the
+// line is quiet in the normal case and explicit in the surprising one.
+const PARADE_SECTION_IMPLIES_OUT = { "ATT C": true, "OFF/LEAVE": true, "OTHERS": true };
+// Leave types that are genuine time off. Everything else we file as leave
+// (Course, Guard Duty, NDP, Other) belongs under OTHERS per the battalion's
+// section table — an exclusion list, so a new leave type can never vanish.
+const PARADE_OFF_LEAVE_TYPES = ["Off-in-Lieu", "Annual Leave", "Compassionate", "Weekend", "Night's Out", "Hospitalisation Leave"];
+
+// Free text — reasons, locations, leave types, names — comes off a phone
+// keyboard and can carry anything. The line format gives " - ", "(", ")" and
+// "@" structural meaning, and a single newline would split one record into two
+// lines that no longer parse (and no longer count), so every piece of free text
+// is flattened and those characters neutralised before it reaches a line.
+function paradeSafeText(v) {
+  return String(v == null ? "" : v)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[()]/g, "")
+    .replace(/@/g, "at")
+    .replace(/\s+-\s+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function buildOthersSection(dateIso, excludeD4s) {
-  // Single source of truth — same map the dashboard uses. OTHERS lists leave +
-  // manual book-outs; medical (MC/Warded) lives in the ATTC/MEDICAL STATUS
-  // sections, so it's excluded here.
-  const map = outOfCampMap(dateIso);
-  const entries = [];
-  for (const [d4, info] of map) {
-    if (info.kind === "medical") continue;
-    // Never list someone here who is already shown in ATTC. outOfCampMap's
-    // medical precedence covers active MC/Warded, but a borderline returnee
-    // (MC ended yesterday, ticked still-out) is folded into ATTC with an
-    // INACTIVE record, so leave/book-out could otherwise double-list them.
-    if (excludeD4s && excludeD4s.has(d4)) continue;
-    if (info.kind === "leave") {
-      const l = STATE.leave.find(x => x.d4 === d4 && (() => {
-        const s = displayDateToISO(x.startDate), e = displayDateToISO(x.endDate);
-        return s && e && s <= dateIso && dateIso <= e;
-      })());
-      // Same chaining rule as medical: two adjacent blocks of the same leave
-      // type are one absence, so the Duration must span both.
-      const dur = l ? paradeDuration(l, leaveRun(l)) : "";
-      entries.push({ d4, reason: info.reason, extra: dur ? `\nDuration: ${dur}` : "" });
-    } else {  // bookedout — appointment-driven, or ad-hoc out of camp
-      // If they're booked out for an out-of-camp appointment today, render the
-      // full appointment format: "<reason> (MA)" + Location / Date / Time.
-      const appt = STATE.appointments.find(a =>
-        a.d4 === d4 && !a.resolved && a.outOfCamp && displayDateToISO(a.date) === dateIso
-      );
-      if (appt) {
-        const locLine = appt.location ? `\nLocation: ${appt.location}` : "";
-        entries.push({
-          d4,
-          reason: (appt.reason || "Appointment") + " (MA)",
-          extra: `${locLine}\nDate: ${toDDMMYY(displayDateToISO(appt.date))}\nTime: ${fmtHrs(appt.time)}`
-        });
-      } else {
-        entries.push({ d4, reason: info.reason, extra: "" });
-      }
-    }
+const paradeMarker = (section, isAway) =>
+  (!!PARADE_SECTION_IMPLIES_OUT[section] === !!isAway) ? "" : (isAway ? "OUT" : "IN");
+
+// "<4D> <RANK> <NAME>", 4D first and without the C prefix (battalion tip 6).
+// Commanders hold no 4D of their own — the 00xx id is administrative — so they
+// print as rank + name, which the template explicitly allows.
+function paradeLineName(d4) {
+  const r = STATE.roster.find(x => x.id === d4);
+  if (!r) return paradeSafeText(d4);
+  const name = paradeSafeText(r.name).toUpperCase();
+  const bareId = paradeSafeText(r.id).replace(/^C/i, "");
+  // A commander prints as rank + name — their 00xx id is administrative, and
+  // the template lets a commander omit the 4D. Their rank is read raw, never
+  // through rosterRank: that function's "REC" fallback is the enlistee default
+  // and would file a specialist as a recruit. That omission only holds while
+  // the RANK is there, though — "<RANK> <NAME>" is what marks the line as
+  // naming a person — so a row missing either half falls back to leading with
+  // the 4D, keeping the record identifiable to a reader and to the parser.
+  if (r.role === "Commander") {
+    const rank = paradeSafeText(r.rank).toUpperCase();
+    return (rank && name) ? `${rank} ${name}` : [bareId, rank, name].filter(Boolean).join(" ");
   }
-  if (!entries.length) return `OTHERS:\n\nS/N:\nR/N:\nReason:\nDuration:`;
-  const blocks = entries.map((e, idx) => {
-    const sn = String(idx + 1).padStart(2, "0");
-    return `S/N: ${sn}\nR/N: ${paradeRN(e.d4)}\nReason: ${e.reason}${e.extra}`;
-  });
-  return `OTHERS: ${String(entries.length).padStart(2, "0")}\n\n${blocks.join("\n\n")}`;
+  // An enlistee's rank comes from the Roster column, never a literal: a cohort
+  // enlists as REC and is promoted, and the filed line is read against the
+  // battalion's nominal roll.
+  return [bareId, paradeSafeText(rosterRank(r)).toUpperCase(), name].filter(Boolean).join(" ");
 }
 
-// Strength block — TOTAL is the entire roster (recruits + commanders); CURRENT
-// is TOTAL minus everyone OUT OF CAMP today. "Out of camp" is the single shared
-// computation (outOfCampMap: active MC/Warded + active leave + manual book-outs)
-// so this ALWAYS matches the dashboard "In Camp" number for the same date.
-function buildStrengthBlock(dateIso) {
-  const all = STATE.roster;
-  const recruits = all.filter(r => r.role !== "Commander");
-  const commanders = all.filter(r => r.role === "Commander");
+// Dates are ALWAYS DDMMYY in brackets: a range, a single day, or "SINCE …"
+// when there is no end date (a permanent status).
+function paradeDateSpan(startIso, endIso) {
+  if (startIso && endIso) return startIso === endIso ? toDDMMYY(startIso) : `${toDDMMYY(startIso)}-${toDDMMYY(endIso)}`;
+  if (startIso) return `SINCE ${toDDMMYY(startIso)}`;
+  return endIso ? toDDMMYY(endIso) : "";
+}
 
-  const awaySet = new Set(outOfCampMap(dateIso).keys());
-  // Union in borderline MC returnees the PDS confirmed still-out for this parade.
+// The dates + day-count to print for a record, spanning the whole run of
+// back-to-back re-issues (see statusRun) — never the single record's own end
+// date, which is what made an extended MC read as ending days early.
+function paradeSpanOf(record, run) {
+  const chained = !!(run && run.chained);
+  const s = (chained ? run.startIso : "") || displayDateToISO(record.startDate || record.date || "");
+  const e = (chained ? run.endIso : "") || displayDateToISO(record.endDate || "");
+  return { startIso: s, endIso: e, text: paradeDateSpan(s, e), days: (s && e) ? daysBetween(s, e) + 1 : null };
+}
+
+// "4D MC (Fever)" — day count, the status in caps, the reason in brackets.
+function paradeDesc(days, label, reason) {
+  // A custom status / leave type / book-out reason is free text too, and can
+  // sanitise away to nothing. A record whose description is empty stops being
+  // a record — the line would read "1. 1401 REC ALPHA ONE - " — so it always
+  // keeps a word.
+  const head = (days && days > 0 ? `${days}D ` : "") + (paradeSafeText(label) || "UNSPECIFIED");
+  const r = paradeSafeText(reason);
+  return r ? `${head} (${r})` : head;
+}
+
+const paradeFirstReason = records => (records.find(r => String(r.reason || "").trim()) || {}).reason || "";
+
+function paradeLine(n, e) {
+  const parts = [`${n}. ${paradeLineName(e.d4)} - ${e.desc}`];
+  if (e.dates) parts.push(`(${e.dates})`);
+  if (e.marker) parts.push(e.marker);
+  const loc = paradeSafeText(e.location);
+  if (loc) parts.push(`@ ${loc}`);
+  return parts.join(" ");
+}
+
+// Everyone counted AWAY for this parade: the shared out-of-camp computation
+// (so the numbers can never diverge from the dashboard) plus the borderline
+// returnees the PDS ticked as not-yet-booked-in.
+function paradeAwaySet(dateIso) {
+  const set = new Set(outOfCampMap(dateIso).keys());
   findBorderlineReturnees(dateIso)
     .filter(m => _paradeOverrides[m.d4])
-    .forEach(m => awaySet.add(m.d4));
-  const isAway = r => awaySet.has(r.id);
+    .forEach(m => set.add(m.d4));
+  return set;
+}
 
-  // Per-platoon recruit breakdown.
-  const recruitPlatoons = {};
-  recruits.forEach(r => {
-    const p = getPlt(r) || "?";
-    (recruitPlatoons[p] = recruitPlatoons[p] || { total: 0, away: 0 }).total++;
-    if (isAway(r)) recruitPlatoons[p].away++;
+// Active medical records of ONE status, one line per person per status family
+// (a re-issued MC prints once, dated across its whole run).
+function paradeMedEntries(dateIso, away, status, section) {
+  const byD4 = {};
+  STATE.medical.forEach(m => {
+    if (medStatusActive(m, dateIso) && m.status === status) (byD4[m.d4] = byD4[m.d4] || []).push(m);
   });
-  const pltKeys = Object.keys(recruitPlatoons).filter(k => k !== "?").sort();
-  const pltLines = pltKeys.map(p => {
-    const { total, away } = recruitPlatoons[p];
-    return `PLATOON ${p}: ${total - away}/${total}`;
-  }).join("\n");
+  const out = [];
+  Object.keys(byD4).forEach(d4 => {
+    dedupeActiveRecordsByFamily(byD4[d4]).forEach(r => {
+      const span = paradeSpanOf(r, medStatusRun(r));
+      out.push({
+        d4, section,
+        desc: paradeDesc(span.days, String(status).toUpperCase(), r.reason),
+        dates: span.text,
+        // A consume-in-camp / booked-in MC is still an MC — it stays under
+        // ATT C and carries IN, rather than hiding in another section.
+        marker: paradeMarker(section, away.has(d4)),
+        location: r.location || ""
+      });
+    });
+  });
+  return out;
+}
 
-  const totalAway = all.filter(isAway).length;
-  const cmdAway = commanders.filter(isAway).length;
+// STATUS = every in-camp restriction (LD, RMJ, all excuses, custom statuses).
+// An exclusion predicate, so a status we have never seen before still lands
+// somewhere instead of falling through the cracks.
+function paradeStatusEntries(dateIso, away) {
+  const byD4 = {};
+  STATE.medical.forEach(m => {
+    if (medStatusActive(m, dateIso) && isMedicalStatusCatchAll(m.status)) (byD4[m.d4] = byD4[m.d4] || []).push(m);
+  });
+  const out = [];
+  Object.keys(byD4).forEach(d4 => {
+    // Restrictions sharing one duration stay on ONE line (battalion tip 1):
+    // "30D EXCUSE RMJ, HEAVY LOAD" instead of four near-identical lines.
+    const groups = new Map();
+    dedupeActiveRecordsByFamily(byD4[d4]).forEach(r => {
+      const span = paradeSpanOf(r, medStatusRun(r));
+      const key = span.text + "|" + (span.days || "");
+      if (!groups.has(key)) groups.set(key, { span, records: [] });
+      groups.get(key).records.push(r);
+    });
+    groups.forEach(g => {
+      const isExcuse = r => /^excuse\s+/i.test(String(r.status));
+      const excuses = g.records.filter(isExcuse);
+      const lines = [];
+      if (excuses.length) {
+        lines.push({
+          label: "EXCUSE " + excuses.map(r => String(r.status).replace(/^excuse\s+/i, "").toUpperCase()).join(", "),
+          records: excuses
+        });
+      }
+      g.records.filter(r => !isExcuse(r)).forEach(r => lines.push({ label: String(r.status).toUpperCase(), records: [r] }));
+      lines.forEach(l => out.push({
+        d4, section: "STATUS",
+        desc: paradeDesc(g.span.days, l.label, paradeFirstReason(l.records)),
+        dates: g.span.text,
+        marker: paradeMarker("STATUS", away.has(d4)),
+        location: (l.records.find(r => r.location) || {}).location || ""
+      }));
+    });
+  });
+  return out;
+}
 
-  return [
-    `TOTAL STRENGTH: ${all.length}`,
-    `CURRENT STRENGTH: ${all.length - totalAway}`,
-    pltLines,
-    `COMMANDERS: ${commanders.length - cmdAway}/${commanders.length}`
-  ].filter(Boolean).join("\n");
+// REPORT SICK. A "Pending" record is a report-sick whose MO outcome is not
+// known yet; the location tells in-camp (RSI) from outside (RSO).
+function paradeReportSickEntries(dateIso, away) {
+  const out = [];
+  STATE.medical.forEach(m => {
+    if (!medStatusActive(m, dateIso) || m.status !== "Pending") return;
+    const startIso = displayDateToISO(m.startDate || m.date || "");
+    out.push({
+      d4: m.d4, section: "REPORT SICK",
+      desc: paradeDesc(null, m.location ? "RSO" : "RSI", m.reason),
+      dates: startIso ? toDDMMYY(startIso) : "",
+      marker: paradeMarker("REPORT SICK", away.has(m.d4)),
+      location: m.location || ""
+    });
+  });
+  return out;
+}
+
+// MA — today's remaining appointments plus every future-dated one. Future
+// entries need no UPCOMING marker: the dates say when they apply (rule 11).
+function paradeApptEntries(dateIso, paradeTime, away) {
+  return upcomingParadeAppointments(dateIso, paradeTime).map(a => {
+    const iso = displayDateToISO(a.date);
+    const time = a.time ? pad4Time(a.time) : "";
+    return {
+      d4: a.d4, section: "MA",
+      desc: paradeDesc(null, "MA", a.reason),
+      dates: [iso ? toDDMMYY(iso) : "", time].filter(Boolean).join(" "),
+      // Only a TODAY appointment can be why they are out of camp right now; a
+      // future one must never mark a present recruit as OUT.
+      marker: (iso === dateIso && away.has(a.d4)) ? "OUT" : "",
+      location: a.location || ""
+    };
+  });
+}
+
+// Leave splits by type: time off files under OFF/LEAVE, duty-ish absences
+// (course, guard duty, NDP, ad-hoc) under OTHERS.
+function paradeLeaveEntries(dateIso, away) {
+  const out = [];
+  const seen = new Set();
+  STATE.leave.forEach(l => {
+    const s = displayDateToISO(l.startDate), e = displayDateToISO(l.endDate);
+    if (!(s && e && s <= dateIso && dateIso <= e)) return;
+    const run = leaveRun(l);
+    const span = paradeSpanOf(l, run);
+    // Overlapping duplicates of the same leave are one absence, so key the
+    // line on the merged run rather than the record.
+    const key = [l.d4, l.type || "", span.startIso, span.endIso].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    const section = (!l.type || PARADE_OFF_LEAVE_TYPES.indexOf(l.type) >= 0) ? "OFF/LEAVE" : "OTHERS";
+    out.push({
+      d4: l.d4, section,
+      desc: paradeDesc(null, (paradeSafeText(l.type) || "LEAVE").toUpperCase(), l.reason),
+      dates: span.text,
+      marker: paradeMarker(section, away.has(l.d4)),
+      location: ""
+    });
+  });
+  return out;
+}
+
+// The rest of OTHERS: recruits returning from an MC that ended, and manual
+// book-outs that aren't already filed elsewhere.
+function paradeOthersEntries(dateIso, away) {
+  const out = [];
+  findBorderlineReturnees(dateIso).filter(m => _paradeOverrides[m.d4]).forEach(m => {
+    const span = paradeSpanOf(m, medStatusRun(m));
+    out.push({
+      d4: m.d4, section: "OTHERS",
+      desc: paradeDesc(null, "RETURNING FROM MC", m.reason),
+      dates: span.text,
+      marker: paradeMarker("OTHERS", away.has(m.d4)),
+      location: ""
+    });
+  });
+  for (const [d4, info] of outOfCampMap(dateIso)) {
+    if (info.kind !== "bookedout") continue;
+    // An out-of-camp appointment is already filed under MA, carrying the OUT
+    // marker. Listing the same absence again here would read as two events.
+    const appt = STATE.appointments.find(a =>
+      a.d4 === d4 && !a.resolved && a.outOfCamp && displayDateToISO(a.date) === dateIso
+    );
+    if (appt) continue;
+    out.push({
+      d4, section: "OTHERS",
+      desc: paradeDesc(null, (paradeSafeText(info.reason) || "OUT OF CAMP").toUpperCase(), ""),
+      dates: toDDMMYY(dateIso),
+      marker: paradeMarker("OTHERS", away.has(d4)),
+      location: ""
+    });
+  }
+  return out;
+}
+
+// "<LABEL>: <present>/<strength>" plus the OFFICER / WOSPEC / ENLISTEE split.
+// Every person falls in exactly one rank bucket, so the three lines always sum
+// to the block line (battalion rule 10).
+function paradeStrengthLines(label, people, away) {
+  const present = list => list.filter(p => !away.has(p.id)).length;
+  const lines = [`${label}: ${present(people)}/${people.length}`];
+  ["OFFICER", "WOSPEC", "ENLISTEE"].forEach(cat => {
+    const group = people.filter(p => rankCategory(p) === cat);
+    lines.push(`${cat}: ${present(group)}/${group.length}`);
+  });
+  return lines;
+}
+
+// The command-team appointments a parade state asks for, in filing order:
+// CDO / CDS / COS, then one PDS per platoon carrying that platoon's number.
+function paradeDutyRoles(blocks) {
+  return ["CDO", "CDS", "COS"].concat(
+    (blocks || paradeBlocks())
+      .filter(b => b !== PARADE_COY_HQ)
+      .map(b => "PDS " + b.replace(/^PL\s*/, ""))
+  );
+}
+
+function paradeCommandTeamLines(dateIso, blocks) {
+  // dutyForDate lives in state.js; the text generators are also loaded without
+  // it (unit-test harness), where every appointment reads as unassigned.
+  const duty = (typeof dutyForDate === "function" ? dutyForDate(dateIso) : null) || {};
+  return paradeDutyRoles(blocks).map(role => {
+    const r = STATE.roster.find(x => x.id === duty[role]);
+    // An unfilled appointment keeps the template's placeholder — visibly
+    // incomplete beats a silently missing line.
+    const who = r ? [r.rank, (r.name || "").toUpperCase()].filter(Boolean).join(" ") : "<RANK> <NAME>";
+    return `${role}: ${who}`;
+  });
 }
 
 function generateParadeStateText(type, dateIso, time) {
-  const dateStr = toDDMMYY(dateIso);
-  const header = (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE";
-  // Everyone shown in ATTC, so OTHERS can exclude them — a person away on MC
-  // must never also appear as booked out / on leave (the same person can't be
-  // both). Populated by the ATTC build below before OTHERS is built.
-  const attcD4s = new Set();
-  const sections = [
-    buildStrengthBlock(dateIso),
-    // ATTC = MC/Warded physically AWAY. Kept-in-camp MC/Warded (consume-in-camp OR
-    // a manual same-day Book In) are excluded here and fall through to MEDICAL
-    // STATUS below, so anyone counted in camp is never listed as away.
-    buildMedicalSection("ATTC", dateIso, (m, d) => (m.status === "MC" || m.status === "Warded") && !medKeptInCamp(m, d), attcD4s),
-    buildMedicalSection("REPORT SICK", dateIso, m => m.status === "Pending"),
-    buildMedicalSection("MEDICAL STATUS", dateIso, isMedicalStatusRecord),
-    buildAppointmentSection(dateIso, time),
-    buildOthersSection(dateIso, attcD4s)
+  const away = paradeAwaySet(dateIso);
+  const blocks = paradeBlocks();
+  const roster = STATE.roster || [];
+  const entries = [].concat(
+    paradeMedEntries(dateIso, away, "MC", "ATT C"),
+    paradeStatusEntries(dateIso, away),
+    paradeReportSickEntries(dateIso, away),
+    paradeApptEntries(dateIso, time, away),
+    paradeLeaveEntries(dateIso, away),
+    // Warded files under OTHERS, not ATT C — the battalion's section table is
+    // explicit about it, and HQ collates on those section names.
+    paradeMedEntries(dateIso, away, "Warded", "OTHERS"),
+    paradeOthersEntries(dateIso, away)
+  );
+  const byId = new Map(roster.map(r => [r.id, r]));
+  // Someone with a record but no roster row (a deleted recruit, a stale sheet)
+  // still has to appear somewhere, so they file under COY HQ rather than
+  // disappearing from the state entirely.
+  const blockOf = d4 => paradeBlockOf(byId.get(d4));
+
+  const L = [
+    PARADE_COMPANY_LINE,
+    (type === "FP" ? "FIRST" : "LAST") + " PARADE STATE",
+    `DATE: ${toDDMMYY(dateIso)} TIME: ${pad4Time(time)}`,
+    ...paradeCommandTeamLines(dateIso, blocks),
+    PARADE_RULE_EQ,
+    ...paradeStrengthLines("COMPANY", roster, away),
+    PARADE_RULE_EQ
   ];
-  return `COUGAR COMPANY\n${header}\nDATE: ${dateStr} @ ${fmtHrs(time)}\n\n${SEP}\n\n${sections.join(`\n\n${SEP}\n\n`)}\n\n${SEP}`;
+  blocks.forEach((block, i) => {
+    if (i) L.push(PARADE_RULE_DASH);
+    L.push(...paradeStrengthLines(block, roster.filter(r => paradeBlockOf(r) === block), away));
+    PARADE_SECTION_ORDER.forEach(section => {
+      const list = entries
+        .filter(e => e.section === section && blockOf(e.d4) === block)
+        .sort((a, b) => String(a.d4).localeCompare(String(b.d4)));
+      // Never leave a section blank — write 0 and keep the header (rule 2).
+      L.push(`${section}: ${list.length}`);
+      list.forEach((e, idx) => L.push(paradeLine(idx + 1, e)));
+    });
+  });
+  return L.join("\n");
 }
 
 function generateMedicalStatusText(dateIso, time) {
@@ -2139,6 +2373,7 @@ function openReportModal(type) {
           ${formField("rep-date", "Date", "date", "", dateExtra)}
           ${formField("rep-time", "Time (HHMM)", "text", "0700", timeExtra)}
         </div>
+        ${isParade ? `<div id="duty-section"></div>` : ""}
         ${isParade ? `<div id="borderline-section"></div>` : ""}
         ${isParade ? `<div id="appt-camp-section"></div>` : ""}
         ${isConduct ? `<div id="rep-conduct-picker"></div>` : ""}
@@ -2153,6 +2388,7 @@ function openReportModal(type) {
   // Stash the report type so regenerate from the date/time onchange knows
   // which composer to call.
   document.getElementById("rep-text").dataset.type = type;
+  if (isParade) renderDutySection(defaultDate, type);
   if (isParade) renderBorderlineSection(defaultDate, type);
   if (isParade) renderApptCampSection(defaultDate, type);
   if (isConduct) renderConductPicker();
@@ -2192,6 +2428,7 @@ function renderConductPicker() {
 // Date change → re-render the date-scoped checklists + regenerate the textarea.
 function onParadeDateChange(type) {
   _paradeOverrides = {};
+  renderDutySection(gv("rep-date"), type);
   renderBorderlineSection(gv("rep-date"), type);
   renderApptCampSection(gv("rep-date"), type);
   regenerateReport(type);
@@ -2200,6 +2437,55 @@ function onParadeDateChange(type) {
 // Time change only affects the MEDICAL APPT section's parade-time cutoff.
 function onParadeTimeChange(type) {
   regenerateReport(type);
+}
+
+// ── Command team (CDO / CDS / COS / PDS) ─────────────────
+// The appointments rotate daily, so they are picked per parade date rather
+// than stored on the roster. An unrecorded date inherits the most recent
+// earlier team (dutyForDate) as a starting point; whatever the PDS picks here
+// is remembered against THIS date, so regenerating the same state later
+// reproduces the same command team.
+function setDutyFromPicker(dateIso, role, d4, type) {
+  setDutyHolder(dateIso, role, d4);
+  // Only the unfilled counter is refreshed, not the whole section: re-rendering
+  // would rebuild the <select> the user is still inside and drop their focus.
+  const badge = document.getElementById("duty-missing");
+  if (badge) {
+    const n = paradeUnfilledDuty(dateIso);
+    badge.textContent = n ? `${n} unfilled` : "all filled";
+    badge.style.color = n ? "var(--orange)" : "var(--green)";
+  }
+  regenerateReport(type);
+}
+
+// How many command-team appointments have nobody assigned for this date.
+const paradeUnfilledDuty = dateIso => {
+  const duty = dutyForDate(dateIso);
+  return paradeDutyRoles(paradeBlocks()).filter(role => !STATE.roster.some(r => r.id === duty[role])).length;
+};
+
+function renderDutySection(dateIso, type) {
+  const host = document.getElementById("duty-section");
+  if (!host) return;
+  const duty = dutyForDate(dateIso);
+  const commanders = STATE.roster
+    .filter(r => r.role === "Commander")
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  const rows = paradeDutyRoles(paradeBlocks()).map(role => {
+    const opts = [`<option value="">— not set —</option>`].concat(
+      commanders.map(c => `<option value="${escapeAttr(c.id)}" ${duty[role] === c.id ? "selected" : ""}>${escapeAttr([c.rank, c.name].filter(Boolean).join(" "))}</option>`)
+    ).join("");
+    return `<label class="duty-row">
+      <span class="duty-role">${role}</span>
+      <select onchange="setDutyFromPicker('${dateIso}', '${role}', this.value, '${type}')">${opts}</select>
+    </label>`;
+  }).join("");
+  const missing = paradeUnfilledDuty(dateIso);
+  host.innerHTML = `<div style="font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px">
+    <div style="font-weight:600;margin-bottom:4px">🎖 Command team — <span id="duty-missing" style="color:${missing ? "var(--orange)" : "var(--green)"}">${missing ? `${missing} unfilled` : "all filled"}</span></div>
+    <div style="color:var(--muted);margin-bottom:6px">Rotates daily, so it is saved against this parade date. Unfilled appointments print as <span class="mono">&lt;RANK&gt; &lt;NAME&gt;</span>.</div>
+    ${commanders.length ? rows : `<div style="color:var(--orange)">No commanders in the roster yet — add them from the Roster tab.</div>`}
+  </div>`;
 }
 
 // Book-out checklist toggle (parade modal). Writes the PERSISTENT booked-out
@@ -2229,7 +2515,7 @@ function renderApptCampSection(dateIso, type) {
     const reason = "Appt: " + (a.reason || "appointment");
     return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 6px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <input type="checkbox" ${checked} onchange="toggleApptCamp('${a.d4}', this.checked, ${JSON.stringify(reason)}, '${type}')" style="width:14px;height:14px;cursor:pointer">
-      <span>${paradeRN(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
+      <span>${paradeLineName(a.d4)} — ${escapeAttr(a.reason || "")} (${fmtHrs(a.time)})</span>
     </label>`;
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:rgba(var(--accentRGB),.07);border:1px solid rgba(var(--accentRGB),.27);border-radius:6px;padding:8px 10px">
@@ -2251,12 +2537,12 @@ function renderBorderlineSection(dateIso, type) {
     const endShort = toDDMMYY(displayDateToISO(m.endDate || "")) || m.endDate || "";
     return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 6px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <input type="checkbox" ${checked} onchange="toggleBorderline('${m.d4}', this.checked, '${type}')" style="width:14px;height:14px;cursor:pointer">
-      <span>${paradeRN(m.d4)} — ${m.status} ended ${endShort}</span>
+      <span>${paradeLineName(m.d4)} — ${m.status} ended ${endShort}</span>
     </label>`;
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:rgba(var(--orangeRGB),.07);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:8px 10px">
     <div style="color:var(--orange);font-weight:600;margin-bottom:4px">⚠ Borderline returnees (${candidates.length}) — MC/Warded ended yesterday</div>
-    <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be added to ATTC.</div>
+    <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be listed under OTHERS as returning from MC, and counted away.</div>
     ${rows}
   </div>`;
 }
@@ -2425,11 +2711,11 @@ let _compareOpts = null;
 
 const CMP_SECTION_BADGE = {
   ATTC: "red", REPORT_SICK: "orange", MEDICAL_STATUS: "yellow",
-  MEDICAL_APPT: "accent", OTHERS: "purple", UNKNOWN: "pink"
+  MEDICAL_APPT: "accent", OFF_LEAVE: "teal", OTHERS: "purple", UNKNOWN: "pink"
 };
 const CMP_VERBS = {
-  added: { ATTC: "went OUT of camp", REPORT_SICK: "reported sick", MEDICAL_STATUS: "new status", MEDICAL_APPT: "new appointment", OTHERS: "went OUT of camp", UNKNOWN: "newly listed" },
-  removed: { ATTC: "back IN camp", REPORT_SICK: "no longer pending", MEDICAL_STATUS: "status ended", MEDICAL_APPT: "appt done / removed", OTHERS: "back IN camp", UNKNOWN: "no longer listed" }
+  added: { ATTC: "went OUT of camp", REPORT_SICK: "reported sick", MEDICAL_STATUS: "new status", MEDICAL_APPT: "new appointment", OFF_LEAVE: "on leave / off", OTHERS: "went OUT of camp", UNKNOWN: "newly listed" },
+  removed: { ATTC: "back IN camp", REPORT_SICK: "no longer pending", MEDICAL_STATUS: "status ended", MEDICAL_APPT: "appt done / removed", OFF_LEAVE: "back from leave", OTHERS: "back IN camp", UNKNOWN: "no longer listed" }
 };
 
 // "FP · 110726 0700 · saved 11/07 0832" — battalion-style date, local time.

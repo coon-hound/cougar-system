@@ -171,8 +171,8 @@ function renderDashboard(el) {
   const active = scoped.length - liveRows.length;
   // Out of Camp / In Camp use the SHARED computation (outOfCampMap): active
   // MC/Warded + active leave + manual book-outs. This is the SAME source the
-  // parade state uses, so the dashboard "In Camp" and parade CURRENT STRENGTH
-  // always agree. (Note: "Non-Active" above is medical-only — a recruit on LD/
+  // parade state uses, so the dashboard "In Camp" and the parade COMPANY
+  // present/strength always agree. (Note: "Non-Active" above is medical-only — a recruit on LD/
   // Excuse is non-active/restricted but still IN camp; only MC/Warded/leave/
   // booked-out count as out of camp.)
   const outMap = outOfCampMap(today);

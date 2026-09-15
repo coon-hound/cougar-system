@@ -205,6 +205,7 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 .badge-yellow{background:rgba(var(--yellowRGB),.14);color:var(--yellow);border:1px solid rgba(var(--yellowRGB),.3)}
 .badge-purple{background:rgba(var(--purpleRGB),.15);color:var(--purple);border:1px solid rgba(var(--purpleRGB),.32)}
 .badge-accent{background:rgba(var(--accentRGB),.15);color:var(--accentLift);border:1px solid rgba(var(--accentRGB),.32)}
+.badge-teal{background:rgba(var(--tealRGB),.15);color:var(--teal);border:1px solid rgba(var(--tealRGB),.32)}
 .badge-pink{background:rgba(var(--pinkRGB),.15);color:var(--pink);border:1px solid rgba(var(--pinkRGB),.32)}
 
 /* ── Buttons ───────────────────────────────────────────────
@@ -265,6 +266,14 @@ tbody tr:last-child td{border-bottom:none}
 .form-group input::placeholder,.form-group textarea::placeholder{color:var(--dim)}
 .form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* Command team picker (parade state). One row per appointment: a fixed-width
+   mono role label and the commander select, which borrows the form-field
+   treatment so it reads as part of the same sheet on a phone. */
+.duty-row{display:flex;align-items:center;gap:8px;padding:3px 0}
+.duty-row .duty-role{flex:0 0 52px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:.02em}
+.duty-row select{flex:1;min-width:0;min-height:34px;padding:8px 11px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;cursor:pointer;transition:border-color var(--d2) var(--ez)}
+.duty-row select:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 
 /* ── Modal ─────────────────────────────────────────────────
    Desktop: a centred dialog that scales in. Mobile: a true iOS sheet (see the
@@ -512,6 +521,7 @@ tbody tr:last-child td{border-bottom:none}
 
   /* Forms */
   .form-group input,.form-group select,.form-group textarea{padding:11px 12px;font-size:14px;min-height:44px}
+  .duty-row select{padding:11px 12px;font-size:14px;min-height:44px}
   .form-row{grid-template-columns:1fr}
 
   /* Modal → iOS sheet. Slides up from the bottom edge, rounded top corners,
@@ -543,7 +553,7 @@ tbody tr:last-child td{border-bottom:none}
   .sync-panel{padding:14px;border-radius:var(--r2)}
 
   /* iOS Safari select arrow override — make sure selects look tappable */
-  select.topbar-select,.form-group select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
+  select.topbar-select,.form-group select,.duty-row select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
 
   /* Hard cap any inline min-width on selects/inputs so a wide dropdown (the
      Conduct-Detail filter is 260px on desktop) can't force the page wider

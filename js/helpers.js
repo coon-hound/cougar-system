@@ -453,6 +453,53 @@ function deleteEntry(arrayName, id, label) {
   }
 }
 
+// ── Rank categories + parade blocks ──────────────────────
+// The battalion parade state splits every strength line into OFFICER /
+// WOSPEC / ENLISTEE, and the three must add up to the block total (battalion
+// rule 10), so every person has to land in exactly one bucket. Recruits are
+// always enlistees. A commander whose rank string we don't recognise falls
+// back to WOSPEC — a BMT company's command body is overwhelmingly
+// specialists, and guessing ENLISTEE would quietly inflate the recruit line.
+const RANK_OFFICER = ["2LT", "LTA", "LTE", "CPT", "MAJ", "LTC", "SLTC", "COL", "BG", "ME4", "ME5", "ME6", "ME7", "ME8"];
+const RANK_WOSPEC = ["3SG", "2SG", "1SG", "SSG", "MSG", "SGT", "3WO", "2WO", "1WO", "MWO", "SWO", "CWO", "ME1", "ME2", "ME3"];
+// OCT is a trainee, not yet commissioned — counted with the enlistees.
+const RANK_ENLISTEE = ["REC", "PTE", "PFC", "LCP", "CPL", "CFC", "SCT", "OCT"];
+
+function rankCategory(r) {
+  if (!r || r.role !== "Commander") return "ENLISTEE";
+  const rank = String(r.rank || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (RANK_OFFICER.indexOf(rank) >= 0) return "OFFICER";
+  if (RANK_WOSPEC.indexOf(rank) >= 0) return "WOSPEC";
+  if (RANK_ENLISTEE.indexOf(rank) >= 0) return "ENLISTEE";
+  return "WOSPEC";
+}
+
+// The parade-state block a person is filed under. Cougar files COY HQ first
+// (the whole command body — our commanders hold no platoon 4D) then one block
+// per platoon, labelled "PL 7" … "PL 9". A recruit with no resolvable platoon
+// also lands in COY HQ rather than a phantom block, so the blocks always sum
+// to the company strength.
+const PARADE_COY_HQ = "COY HQ";
+const paradePltLabel = plt => "PL " + plt;
+function paradeBlockOf(r) {
+  if (!r || r.role === "Commander") return PARADE_COY_HQ;
+  const plt = getPlt(r);
+  return plt ? paradePltLabel(plt) : PARADE_COY_HQ;
+}
+
+// Every block in filing order: COY HQ, then the platoons present in the
+// roster, numerically ascending.
+function paradeBlocks() {
+  const plts = new Set();
+  (STATE.roster || []).forEach(r => {
+    if (r.role === "Commander") return;
+    const p = getPlt(r);
+    if (p) plts.add(p);
+  });
+  const sorted = [...plts].sort((a, b) => (+a || 0) - (+b || 0) || String(a).localeCompare(String(b)));
+  return [PARADE_COY_HQ].concat(sorted.map(paradePltLabel));
+}
+
 // ── Medical status enum ──────────────────────────────────
 // Every medical record represents a "report sick" event. `date` captures
 // when the recruit reported sick. `status` is the outcome from the MO.

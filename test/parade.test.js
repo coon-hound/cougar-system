@@ -1,9 +1,9 @@
-// Parade-state generation tests (js/forms.js), focused on the consume-in-camp
-// MC flag: such a recruit must (a) stay in CURRENT STRENGTH, (b) drop out of
-// ATTC, and (c) appear under MEDICAL STATUS as "<N>D MC (consume in camp)",
-// ordered by severity (above LD/Excuse). helpers.js + forms.js are loaded
-// together (forms.js's parade generators call helpers.js functions); no DOM is
-// needed for the text generators.
+// Parade-state generation tests (js/forms.js) against the 40 SAR battalion
+// format: one block per sub-unit, six fixed sections, one line per record.
+// Covers the placement rules that decide whether a body counts as present —
+// the consume-in-camp MC, a person who is out for several reasons at once,
+// and the merged span of a re-issued status. helpers.js + forms.js are loaded
+// together (the parade generators call helpers.js); no DOM is needed.
 const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
@@ -31,79 +31,172 @@ const DATE = "2026-06-29";
 const state = () => ({
   roster: [
     { id: "1303", role: "Recruit", name: "Shuan Aaron Tan Yong Sheng" },
-    { id: "1201", role: "Recruit", name: "Away Guy" },
-    { id: "1405", role: "Recruit", name: "LD Guy" }
+    { id: "2201", role: "Recruit", name: "Away Guy" },
+    { id: "3405", role: "Recruit", name: "LD Guy" }
   ],
   medical: [
-    // consume-in-camp MC (top severity) — should lead MEDICAL STATUS
+    // consume-in-camp MC — still ATT C, but counted present (IN)
     { d4: "1303", status: "MC", reason: "Fever", startDate: "29 Jun 2026", endDate: "30 Jun 2026", inCamp: true, location: "" },
-    // ordinary away MC — the only ATTC entry
-    { d4: "1201", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "01 Jul 2026", inCamp: false, location: "" },
-    // an LD to prove severity ordering within MEDICAL STATUS
-    { d4: "1405", status: "LD", reason: "Ankle", startDate: "29 Jun 2026", endDate: "02 Jul 2026", location: "" }
+    // ordinary away MC
+    { d4: "2201", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "01 Jul 2026", inCamp: false, location: "" },
+    // an LD, which belongs under STATUS rather than ATT C
+    { d4: "3405", status: "LD", reason: "Ankle", startDate: "29 Jun 2026", endDate: "02 Jul 2026", location: "" }
   ],
   leave: [], appointments: [], attendance: [], customStatuses: []
 });
 
-// Pull out one labelled "SECTION: nn\n\n...blocks" chunk from the full report.
+// Every record line filed under one section header, across all blocks. A
+// section runs from its "<LABEL>: <n>" header to the next header; the lines
+// between are the numbered records.
 function section(text, label) {
-  const parts = text.split(/\n-+\n/).map(s => s.trim());
-  return parts.find(p => p.startsWith(label + ":")) || "";
+  const head = new RegExp("^" + label.replace("/", "\\/") + ": (\\d+)$");
+  const lines = [];
+  let inside = false;
+  text.split("\n").forEach(l => {
+    if (head.test(l)) { inside = true; return; }
+    if (inside && /^\d+\. /.test(l)) { lines.push(l); return; }
+    inside = false;
+  });
+  return lines.join("\n");
+}
+
+// The section's claimed count, summed over every block.
+function sectionCount(text, label) {
+  const head = new RegExp("^" + label.replace("/", "\\/") + ": (\\d+)$");
+  return text.split("\n").reduce((n, l) => {
+    const m = head.exec(l);
+    return m ? n + +m[1] : n;
+  }, 0);
 }
 
 module.exports = async function run() {
-  suite("parade: consume-in-camp MC placement + strength");
+  suite("parade: 40 SAR format skeleton");
 
   const txt = loadParade(state()).generateParadeStateText("FP", DATE, "0730");
 
-  await test("CURRENT STRENGTH counts the consume-in-camp recruit present", () => {
-    // 3 recruits, only the ordinary away MC (1201) is out → CURRENT = 2, TOTAL = 3.
-    ok(/TOTAL STRENGTH: 3/.test(txt), "total is 3");
-    ok(/CURRENT STRENGTH: 2/.test(txt), "current is 2 (only 1201 away)");
+  await test("header, command team and block order follow the template", () => {
+    const lines = txt.split("\n");
+    eq(lines[0], "40 SAR COUGAR COMPANY", "company line");
+    eq(lines[1], "FIRST PARADE STATE", "report type");
+    eq(lines[2], "DATE: 290626 TIME: 0730", "date + time line");
+    // No duty roster in this harness → every appointment is a placeholder.
+    ok(/^CDO: <RANK> <NAME>$/m.test(txt), "CDO line");
+    ok(/^PDS 1: <RANK> <NAME>$/m.test(txt), "a PDS line per platoon");
+    ok(txt.indexOf("COY HQ:") < txt.indexOf("PL 1:"), "COY HQ is filed first");
+    ok(txt.indexOf("PL 1:") < txt.indexOf("PL 2:") && txt.indexOf("PL 2:") < txt.indexOf("PL 3:"), "platoons ascend");
   });
 
-  await test("ATTC lists only the ordinary away MC, not the in-camp one", () => {
-    const attc = section(txt, "ATTC");
-    ok(/C1201/.test(attc), "away MC in ATTC");
-    ok(!/C1303/.test(attc), "consume-in-camp MC excluded from ATTC");
-    ok(/ATTC: 01/.test(attc), "ATTC count is 1");
+  await test("every block carries all six sections, in order, never blank", () => {
+    const blocks = txt.split("\n" + "-".repeat(32) + "\n");
+    eq(blocks.length, 4, "COY HQ + PL 1 + PL 2 + PL 3");
+    blocks.forEach(b => {
+      const headers = b.split("\n").map(l => /^([A-Z][A-Z /]*): \d+$/.exec(l)).filter(Boolean).map(m => m[1]);
+      eq(String(headers), "ATT C,STATUS,REPORT SICK,MA,OFF/LEAVE,OTHERS", "six fixed section names in order");
+    });
   });
 
-  await test("MEDICAL STATUS shows '(consume in camp)' and sorts MC above LD", () => {
-    const med = section(txt, "MEDICAL STATUS");
-    ok(/Status: 2D MC \(consume in camp\)/.test(med), "in-camp MC labelled correctly");
-    ok(/C1405/.test(med) && /Status: 4D LD/.test(med), "LD also listed");
-    ok(med.indexOf("C1303") < med.indexOf("C1405"), "MC (sev 100) sorts above LD (sev 80)");
-    ok(/MEDICAL STATUS: 02/.test(med), "two entries in MEDICAL STATUS");
+  await test("strength lines add up: blocks to COMPANY, ranks to their block", () => {
+    // 3 recruits, only the away MC (1201) is out → COMPANY 2/3.
+    ok(/^COMPANY: 2\/3$/m.test(txt), "company present/strength: " + txt.split("\n")[9]);
+    ok(/^COY HQ: 0\/0$/m.test(txt), "no commanders in this roster");
+    ok(/^PL 1: 1\/1$/m.test(txt), "PL 1 (1303) present");
+    ok(/^PL 2: 0\/1$/m.test(txt), "PL 2 (2201) away on MC");
+    ok(/^PL 3: 1\/1$/m.test(txt), "PL 3 (3405) present");
+    // The three rank lines under COMPANY must sum to the company strength.
+    const [officer, wospec, enlistee] = txt.split("\n").slice(txt.split("\n").indexOf("COMPANY: 2/3") + 1, txt.split("\n").indexOf("COMPANY: 2/3") + 4);
+    eq(officer, "OFFICER: 0/0", "officers");
+    eq(wospec, "WOSPEC: 0/0", "wospecs");
+    eq(enlistee, "ENLISTEE: 2/3", "enlistees carry the whole company");
   });
 
-  suite("parade: a person is never in both ATTC and OTHERS");
+  suite("parade: consume-in-camp MC stays under ATT C, marked IN");
 
-  await test("active away MC + accidental book-out + leave → ATTC only", () => {
-    // 1201 is genuinely away on MC AND was accidentally booked out AND put on
-    // leave. outOfCampMap's medical precedence must keep them out of OTHERS.
+  await test("an in-camp MC is counted present but still listed", () => {
+    const attc = section(txt, "ATT C");
+    ok(/^1\. 1303 REC SHUAN AARON TAN YONG SHENG - 2D MC \(Fever\) \(290626-300626\) IN$/m.test(attc), "in-camp MC line: " + attc);
+    ok(/2201 REC AWAY GUY - 3D MC \(Flu\) \(290626-010726\)$/m.test(attc), "away MC carries no marker: " + attc);
+    eq(sectionCount(txt, "ATT C"), 2, "both MCs are listed");
+  });
+
+  await test("an LD files under STATUS, never ATT C", () => {
+    const status = section(txt, "STATUS");
+    ok(/3405 REC LD GUY - 4D LD \(Ankle\)/.test(status), "LD under STATUS: " + status);
+    ok(!/3405/.test(section(txt, "ATT C")), "LD is not an ATT C entry");
+    eq(sectionCount(txt, "STATUS"), 1, "one STATUS entry");
+  });
+
+  suite("parade: one body, one absence — no double counting");
+
+  await test("active away MC + accidental book-out + leave is still one line", () => {
+    // 2201 is genuinely away on MC AND was accidentally booked out AND put on
+    // leave. outOfCampMap's medical precedence must keep the duplicates out.
     const st = state();
-    const r = st.roster.find(x => x.id === "1201");
+    const r = st.roster.find(x => x.id === "2201");
     r.outOfCamp = true; r.outSince = DATE;
-    st.leave.push({ id: 1, d4: "1201", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "accidental" });
+    st.leave.push({ id: 1, d4: "2201", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "accidental" });
     const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
-    ok(/C1201/.test(section(out, "ATTC")), "on MC → ATTC");
-    ok(!/C1201/.test(section(out, "OTHERS")), "accidental book-out/leave suppressed from OTHERS");
+    ok(/2201/.test(section(out, "ATT C")), "on MC → ATT C");
+    ok(!/2201/.test(section(out, "OTHERS")), "accidental book-out suppressed from OTHERS");
+    // The leave record is real data, so it is still filed — but the body is
+    // counted away exactly once, which is what the strength line proves.
+    ok(/^COMPANY: 2\/3$/m.test(out), "still one body away: " + out);
   });
 
-  await test("borderline returnee (MC ended yesterday, ticked) + leave → ATTC only", () => {
+  await test("borderline returnee (MC ended yesterday, ticked) is filed once", () => {
     // 1201's MC ended the day before DATE, so it is INACTIVE — the PDS ticks
-    // them still-out (folded into ATTC). They also have leave today, which
-    // would otherwise leak them into OTHERS since medical precedence no longer
-    // applies to an inactive record.
+    // them still-out. They also have leave today, which must not double-file
+    // them now that medical precedence no longer applies.
     const st = state();
-    st.medical.find(m => m.d4 === "1201").endDate = "28 Jun 2026"; // ended yesterday
-    st.leave.push({ id: 2, d4: "1201", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "x" });
+    st.medical.find(m => m.d4 === "2201").endDate = "28 Jun 2026"; // ended yesterday
+    st.leave.push({ id: 2, d4: "2201", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "x" });
     const bundle = loadParade(st);
-    bundle.tickBorderline("1201");
+    bundle.tickBorderline("2201");
     const out = bundle.generateParadeStateText("FP", DATE, "0730");
-    ok(/C1201/.test(section(out, "ATTC")), "ticked borderline returnee is in ATTC");
-    ok(!/C1201/.test(section(out, "OTHERS")), "not double-listed in OTHERS");
+    const others = section(out, "OTHERS");
+    ok(/2201 REC AWAY GUY - RETURNING FROM MC/.test(others), "returning from MC files under OTHERS: " + others);
+    ok(!/2201/.test(section(out, "ATT C")), "the ended MC is no longer an ATT C entry");
+    ok(/^COMPANY: 2\/3$/m.test(out), "ticked returnee counts away: " + out);
+  });
+
+  await test("an out-of-camp appointment is filed under MA, not twice", () => {
+    const st = state();
+    st.appointments.push({ id: 31, d4: "3405", reason: "Physio", date: "29 Jun 2026", time: "1400", location: "CGH", outOfCamp: true, resolved: false });
+    const r = st.roster.find(x => x.id === "3405");
+    r.outOfCamp = true; r.outSince = DATE; r.outReason = "Appt: Physio";
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/3405 REC LD GUY - MA \(Physio\) \(290626 1400\) OUT @ CGH/.test(section(out, "MA")), "MA line carries the OUT marker: " + section(out, "MA"));
+    ok(!/3405/.test(section(out, "OTHERS")), "the same absence is not repeated under OTHERS");
+  });
+
+  suite("parade: leave and duty split by section");
+
+  await test("time off files under OFF/LEAVE, duty under OTHERS", () => {
+    const st = state();
+    st.leave.push(
+      { id: 41, d4: "3405", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "family" },
+      { id: 42, d4: "1303", type: "Guard Duty", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "Coy guard" }
+    );
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/3405 REC LD GUY - ANNUAL LEAVE \(family\) \(290626-300626\)/.test(section(out, "OFF/LEAVE")), "leave: " + section(out, "OFF/LEAVE"));
+    ok(/1303 .* - GUARD DUTY \(Coy guard\) \(290626\)/.test(section(out, "OTHERS")), "guard duty: " + section(out, "OTHERS"));
+  });
+
+  await test("Warded files under OTHERS per the battalion's section table", () => {
+    const st = state();
+    st.medical.push({ d4: "3405", status: "Warded", reason: "Dengue", startDate: "29 Jun 2026", endDate: "03 Jul 2026", inCamp: false, location: "TTSH" });
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/3405 REC LD GUY - 5D WARDED \(Dengue\) \(290626-030726\) @ TTSH/.test(section(out, "OTHERS")), "warded: " + section(out, "OTHERS"));
+    ok(!/3405/.test(section(out, "ATT C")), "Warded is not an ATT C entry");
+  });
+
+  await test("restrictions sharing one duration collapse to one line", () => {
+    const st = state();
+    st.medical.push(
+      { d4: "3405", status: "Excuse RMJ", reason: "Back pain", startDate: "29 Jun 2026", endDate: "02 Jul 2026" },
+      { d4: "3405", status: "Excuse Heavy Load", reason: "Back pain", startDate: "29 Jun 2026", endDate: "02 Jul 2026" }
+    );
+    const status = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "STATUS");
+    ok(/4D EXCUSE RMJ, HEAVY LOAD \(Back pain\) \(290626-020726\)/.test(status), "merged excuses: " + status);
   });
 
   // ── Back-to-back re-issues ───────────────────────────────
@@ -112,40 +205,39 @@ module.exports = async function run() {
   // the chat the recruit was back days before they actually are.
   suite("parade: chained statuses report the whole run");
 
-  await test("ATTC states the extended MC's real end date and total days", () => {
+  await test("ATT C states the extended MC's real end date and total days", () => {
     const st = state();
     // 1201's away MC is 29 Jun – 01 Jul; extend it with a second record.
-    st.medical.push({ d4: "1201", status: "MC", reason: "Flu", startDate: "02 Jul 2026", endDate: "04 Jul 2026", inCamp: false, location: "" });
-    const attc = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "ATTC");
-    ok(/Status: 6D MC \(extended\)/.test(attc), "6 days across both records: " + attc);
-    ok(/Duration: 290626 - 040726/.test(attc), "duration spans the run: " + attc);
-    ok(!/010726\b(?! -)/.test(attc.split("Duration:")[1] || ""), "no stray first-record end");
+    st.medical.push({ d4: "2201", status: "MC", reason: "Flu", startDate: "02 Jul 2026", endDate: "04 Jul 2026", inCamp: false, location: "" });
+    const attc = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "ATT C");
+    ok(/2201 REC AWAY GUY - 6D MC \(Flu\) \(290626-040726\)/.test(attc), "6 days across both records: " + attc);
+    eq(attc.split("\n").filter(l => /2201/.test(l)).length, 1, "one line, not two");
   });
 
   await test("a genuine gap is NOT merged into one run", () => {
     const st = state();
     // Back in camp 02–03 Jul, then a fresh MC — today's absence still ends 01 Jul.
-    st.medical.push({ d4: "1201", status: "MC", reason: "Flu", startDate: "04 Jul 2026", endDate: "05 Jul 2026", inCamp: false, location: "" });
-    const attc = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "ATTC");
-    ok(/Status: 3D MC$/m.test(attc), "unchanged 3D MC: " + attc);
-    ok(/Duration: 290626 - 010726/.test(attc), "ends at the real return: " + attc);
+    st.medical.push({ d4: "2201", status: "MC", reason: "Flu", startDate: "04 Jul 2026", endDate: "05 Jul 2026", inCamp: false, location: "" });
+    const attc = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "ATT C");
+    ok(/2201 REC AWAY GUY - 3D MC \(Flu\) \(290626-010726\)/.test(attc), "ends at the real return: " + attc);
   });
 
-  await test("OTHERS spans back-to-back leave of the same type", () => {
+  await test("OFF/LEAVE spans back-to-back leave of the same type", () => {
     const st = state();
     st.leave.push(
-      { id: 11, d4: "1405", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "family" },
-      { id: 12, d4: "1405", type: "Annual Leave", startDate: "01 Jul 2026", endDate: "02 Jul 2026", reason: "family" }
+      { id: 11, d4: "3405", type: "Annual Leave", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "family" },
+      { id: 12, d4: "3405", type: "Annual Leave", startDate: "01 Jul 2026", endDate: "02 Jul 2026", reason: "family" }
     );
-    const others = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "OTHERS");
-    ok(/Duration: 290626 - 020726/.test(others), "leave run merged: " + others);
+    const off = section(loadParade(st).generateParadeStateText("FP", DATE, "0730"), "OFF/LEAVE");
+    ok(/\(290626-020726\)/.test(off), "leave run merged: " + off);
+    eq(off.split("\n").filter(Boolean).length, 1, "one line for one absence");
   });
 
   await test("strength still counts each body once across a run", () => {
     const st = state();
-    st.medical.push({ d4: "1201", status: "MC", reason: "Flu", startDate: "02 Jul 2026", endDate: "04 Jul 2026", inCamp: false, location: "" });
+    st.medical.push({ d4: "2201", status: "MC", reason: "Flu", startDate: "02 Jul 2026", endDate: "04 Jul 2026", inCamp: false, location: "" });
     const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
-    ok(/CURRENT STRENGTH: 2/.test(out), "still 2 present, chaining is display-only");
+    ok(/^COMPANY: 2\/3$/m.test(out), "still 2 present, chaining is display-only");
   });
 
   suite("parade: an enlistee's rank comes from the Roster, not a constant");
@@ -153,12 +245,13 @@ module.exports = async function run() {
   // The failure this pins: "REC" was written literally into the R/N formatter,
   // so a cohort promoted to PTE on posting into unit training still paraded as
   // recruits — against a battalion nominal roll that said otherwise. Rank
-  // MOVES; the generator has to read it.
+  // MOVES; the generator has to read it. In the 40 SAR line the rank sits
+  // between the 4D and the name: "2201 PTE AWAY GUY".
   await test("a PTE on the roster parades as PTE", () => {
     const st = state();
     for (const r of st.roster) r.rank = "PTE";
     const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
-    ok(/PTE .* C1201/.test(txt2), "expected a PTE line: " + section(txt2, "ATTC"));
+    ok(/^\d+\. 2201 PTE AWAY GUY - /m.test(txt2), "expected a PTE line: " + section(txt2, "ATT C"));
     ok(!/\bREC\b/.test(txt2), "no line may still say REC: " + txt2);
   });
 
@@ -166,23 +259,26 @@ module.exports = async function run() {
     // Every row looked like this before the column carried anything, so the
     // fallback is what stops this change blanking the rank for whole platoons.
     const txt2 = loadParade(state()).generateParadeStateText("FP", DATE, "0730");
-    ok(/REC .* C1201/.test(txt2), "blank rank must render REC: " + section(txt2, "ATTC"));
+    ok(/^\d+\. 2201 REC AWAY GUY - /m.test(txt2), "blank rank must render REC: " + section(txt2, "ATT C"));
   });
 
   await test("rank is read per man, not once for the parade", () => {
     const st = state();
-    st.roster[1].rank = "PTE";           // 1201, the away MC in ATTC
+    st.roster.find(r => r.id === "2201").rank = "PTE";   // the away MC in ATT C
     const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
-    ok(/PTE .* C1201/.test(txt2), "the promoted man is PTE: " + txt2);
-    ok(/REC .* C1405/.test(txt2), "his platoon-mate is untouched: " + txt2);
+    ok(/^\d+\. 2201 PTE /m.test(txt2), "the promoted man is PTE: " + txt2);
+    ok(/^\d+\. 3405 REC /m.test(txt2), "his platoon-mate is untouched: " + txt2);
   });
 
   await test("a commander is still rank + name with no 4D", () => {
+    // A commander's rank is read raw, never through rosterRank: its "REC"
+    // fallback is the enlistee default and would file a specialist as a
+    // recruit. The 00xx id stays administrative while the rank is there.
     const st = state();
     st.roster.push({ id: "0012", role: "Commander", name: "Section Comd", rank: "3SG" });
     st.medical.push({ d4: "0012", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "01 Jul 2026", inCamp: false, location: "" });
     const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
-    ok(/3SG SECTION COMD/i.test(txt2), "commander keeps rank+name: " + txt2);
-    ok(!/C0012/.test(txt2), "and never shows a 00xx id: " + txt2);
+    ok(/^\d+\. 3SG SECTION COMD - /m.test(txt2), "commander keeps rank+name: " + txt2);
+    ok(!/0012/.test(txt2), "and never shows a 00xx id: " + txt2);
   });
 };
