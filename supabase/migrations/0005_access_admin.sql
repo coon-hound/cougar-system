@@ -58,14 +58,23 @@ $$;
 -- That matters because this response crosses the wire to a phone and sits in
 -- its memory. A list that carried tokens would turn one screenshot into 26
 -- working credentials.
-create or replace view access_overview as
+-- Dropped rather than replaced: `create or replace view` cannot change a view's
+-- column list, so adding `token` below would fail on a shape mismatch.
+drop view if exists access_overview cascade;
+
+create view access_overview as
   select 'token'::text as kind,
          t.person, t.d4, t.device_label,
          t.issued_at as at, t.expires_at, t.last_seen_at,
          case when t.revoked_at is not null then 'revoked'
               when t.expires_at <= now()    then 'expired'
               else 'active' end as status,
-         t.can_invite
+         t.can_invite,
+         null::integer as used_count, null::integer as max_uses,
+         -- An AUTH token is never exposed, whatever its state. There is no
+         -- reason for one to reach a phone: the page manages access by person
+         -- and device, not by credential.
+         null::text as token
     from auth_tokens t
    union all
   select 'invite'::text,
@@ -75,7 +84,17 @@ create or replace view access_overview as
               when i.used_count >= i.max_uses         then 'redeemed'
               when i.expires_at <= now()              then 'expired'
               else 'open' end,
-         false
+         false,
+         i.used_count, i.max_uses,
+         -- An UNOPENED invite hands its link back, because that link is exactly
+         -- what the page exists to give out, and without this it is visible
+         -- once at creation and then lost. Redeemed, expired and revoked
+         -- invites send nothing: those links are dead, and a dead credential on
+         -- screen only confuses somebody later.
+         case when i.revoked_at is null
+               and i.used_count < i.max_uses
+               and (i.expires_at is null or i.expires_at > now())
+              then i.token end
     from invites i
    where i.person is not null;
 

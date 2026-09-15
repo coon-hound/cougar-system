@@ -2172,16 +2172,18 @@ function promptRenameConduct(id) {
 
 // ── Access (owner only) ─────────────────────────────────────────────────────
 //
-// Hand someone a link, see who has access, take it away. The nav button is
-// hidden unless the backend says this token may do it (refreshIdentity,
-// js/main.js) — and the backend refuses the actions regardless, because this
-// file is served to every phone and can be read by anyone.
+// One page: hand someone a link, see everything that can get in, take any of it
+// away. Grouped by person, because a person is the unit you think in — their
+// phone and their tablet belong side by side.
 //
-// Phone-first: one tap to create, one tap to copy, one tap to revoke, and the
-// link is shown big enough to check before sending.
+// The nav button is hidden unless the backend says this token may do it
+// (refreshIdentity, js/main.js), and this view refuses to draw its controls
+// without it. Neither is the control: js/* is public code served to every
+// phone, so anyone can unhide the button or call the action directly. The Edge
+// Function refuses every one of these actions without `can_invite`.
 let _accessRows = null;
 let _accessBusy = false;
-let _lastInvite = null;
+let _accessNote = null;
 
 function renderAccess(el) {
   if (!STATE.me?.canInvite) {
@@ -2190,35 +2192,24 @@ function renderAccess(el) {
     return;
   }
 
-  // Everyone on the current roster, so a link is always tagged to a real
-  // person. The backend re-reads the name from the roster anyway; this is so
-  // you pick rather than type, which on a phone is the difference between
-  // working and not.
-  const people = (STATE.roster || [])
-    .filter(r => r.id)
+  const people = (STATE.roster || []).filter(r => r.id)
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-
-  const byD4 = new Map(people.map(r => [String(r.id), r]));
   const rows = _accessRows || [];
-  const tokens = rows.filter(r => r.kind === "token");
-  const invites = rows.filter(r => r.kind === "invite" && r.status === "open");
-  const holders = new Set(tokens.filter(t => t.status === "active").map(t => t.d4));
-  const invited = new Set(invites.map(i => i.d4));
 
-  const justMade = _lastInvite ? `
-    <div class="card" style="border-color:var(--green)">
-      <h3 style="margin-top:0">Link for ${escapeAttr(_lastInvite.person)}</h3>
-      <input readonly id="acc-link" value="${escapeAttr(_lastInvite.url)}"
-             style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);
-                    background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box">
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn" style="flex:1;padding:12px" onclick="copyInviteLink()">Copy link</button>
-        <button class="btn" style="padding:12px" onclick="_lastInvite=null;render()">Done</button>
-      </div>
-      <p style="font-size:11px;color:var(--muted);margin:8px 0 0">
-        Send it to ${escapeAttr(_lastInvite.person)} directly. Anyone who opens it
-        becomes them in the app and in the change history.</p>
-    </div>` : "";
+  // Group by person so someone's devices sit together, and drop the dead rows:
+  // a revoked credential is not something you can act on, and a list of them is
+  // just noise on a phone screen.
+  const live = rows.filter(r =>
+    (r.kind === "token" && r.status === "active") ||
+    (r.kind === "invite" && r.status === "open"));
+  const groups = new Map();
+  for (const r of live) {
+    const k = r.d4 || r.person || "?";
+    if (!groups.has(k)) groups.set(k, { person: r.person, d4: r.d4, rows: [] });
+    groups.get(k).rows.push(r);
+  }
+  const ordered = [...groups.values()]
+    .sort((a, b) => String(a.d4 || "").localeCompare(String(b.d4 || "")));
 
   el.innerHTML = `
     <h2>Access</h2>
@@ -2226,68 +2217,118 @@ function renderAccess(el) {
       Signed in as <strong>${escapeAttr(STATE.me.person || "unnamed")}</strong>.
       Only this device can hand out access.</p>
 
-    ${justMade}
+    ${_accessNote ? `
+      <div class="card" style="border-color:var(--green)">
+        <h3 style="margin-top:0">${escapeAttr(_accessNote.title)}</h3>
+        <input readonly id="acc-link" value="${escapeAttr(_accessNote.url)}"
+               style="width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);
+                      background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box">
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn" style="flex:1;padding:12px" onclick="copyInviteLink()">Copy link</button>
+          <button class="btn" style="padding:12px" onclick="_accessNote=null;render()">Done</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin:8px 0 0">
+          Send it to them directly. Whoever opens it becomes them, in the app and
+          in the change history.</p>
+      </div>` : ""}
 
     <div class="card">
       <h3 style="margin-top:0">Give someone access</h3>
       <select id="acc-who" style="width:100%;padding:11px;border-radius:6px;
               border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px">
         <option value="">Choose a person…</option>
-        ${people.map(r => {
-          const has = holders.has(String(r.id)) ? " — already has access"
-                    : invited.has(String(r.id)) ? " — invite already sent" : "";
-          return `<option value="${escapeAttr(r.id)}"${has ? " disabled" : ""}>${
-            escapeAttr(r.id)} ${escapeAttr(r.name || "")}${has}</option>`;
-        }).join("")}
+        ${people.map(r => `<option value="${escapeAttr(r.id)}">${
+          escapeAttr(r.id)} ${escapeAttr(r.name || "")}</option>`).join("")}
       </select>
+      <input id="acc-device" placeholder="Device name, e.g. phone" value="phone"
+             style="width:100%;margin-top:8px;padding:11px;border-radius:6px;
+                    border:1px solid var(--border);background:var(--surface);
+                    color:var(--text);font-size:14px;box-sizing:border-box">
+      <p style="font-size:11px;color:var(--muted);margin:6px 0 0">
+        One link per device. Naming them is what lets you remove a lost tablet
+        without signing them out of their phone.</p>
       <button class="btn" style="width:100%;margin-top:10px;padding:13px;font-size:15px"
               onclick="createAccessLink()" ${_accessBusy ? "disabled" : ""}>
-        ${_accessBusy ? "Creating…" : "Create link"}</button>
+        ${_accessBusy ? "Working…" : "Create link"}</button>
     </div>
 
     <div class="card">
-      <h3 style="margin-top:0">Who has access
-        <span style="color:var(--muted);font-weight:400">(${tokens.filter(t => t.status === "active").length})</span></h3>
+      <h3 style="margin-top:0">Who can get in
+        <span style="color:var(--muted);font-weight:400">(${live.length})</span></h3>
       ${_accessRows === null
         ? `<p style="color:var(--muted)">Loading…</p>`
-        : accessTable(tokens.filter(t => t.status === "active"), byD4, "token")}
-    </div>
-
-    <div class="card">
-      <h3 style="margin-top:0">Invites not used yet
-        <span style="color:var(--muted);font-weight:400">(${invites.length})</span></h3>
-      ${_accessRows === null
-        ? `<p style="color:var(--muted)">Loading…</p>`
-        : invites.length
-          ? accessTable(invites, byD4, "invite")
-          : `<p style="color:var(--muted)">None outstanding.</p>`}
+        : ordered.length
+          ? ordered.map(accessGroup).join("")
+          : `<p style="color:var(--muted)">Nobody yet.</p>`}
     </div>`;
 
   if (_accessRows === null) loadAccess();
 }
 
-function accessTable(rows, byD4, kind) {
-  if (!rows.length) return `<p style="color:var(--muted)">Nobody yet.</p>`;
-  return `<table><thead><tr>
-      <th style="text-align:left">Who</th><th>4D</th>
-      <th>${kind === "token" ? "Last used" : "Expires"}</th><th></th>
-    </tr></thead><tbody>
-    ${rows.map(r => {
-      const when = kind === "token"
-        ? (r.last_seen_at ? new Date(r.last_seen_at).toLocaleDateString() : "never")
-        : (r.expires_at ? new Date(r.expires_at).toLocaleDateString() : "—");
-      const label = kind === "token" ? "Remove" : "Cancel";
-      return `<tr>
-        <td style="text-align:left">${escapeAttr(r.person || "(unnamed)")}
-          ${r.can_invite ? '<span style="font-size:10px;color:var(--accent)">· you</span>' : ""}</td>
-        <td class="mono">${escapeAttr(r.d4 || "—")}</td>
-        <td style="font-size:12px;color:var(--muted)">${when}</td>
-        <td>${r.can_invite ? "" :
-          `<button class="btn btn-icon btn-danger" style="padding:7px 12px"
-             onclick="revokeAccessFor('${escapeAttr(r.d4)}','${kind}','${escapeAttr(r.person || "")}')"
-             >${label}</button>`}</td>
-      </tr>`;
-    }).join("")}</tbody></table>`;
+function accessGroup(g) {
+  return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+    <div style="font-weight:600;font-size:13px">${escapeAttr(g.person || "(unnamed)")}
+      <span class="mono" style="color:var(--muted);font-weight:400">${escapeAttr(g.d4 || "")}</span></div>
+    ${g.rows.map(accessRow).join("")}
+  </div>`;
+}
+
+function accessRow(r) {
+  const dev = escapeAttr(r.device_label || "device");
+  const d4 = escapeAttr(r.d4 || "");
+  const mine = r.can_invite;
+
+  if (r.kind === "invite") {
+    const exp = r.expires_at ? new Date(r.expires_at).toLocaleDateString() : "—";
+    // A multi-use link stays usable AFTER the first redemption — that is the
+    // whole point of it, since it lets someone re-open it on a second device or
+    // after clearing their browser. So "not opened yet" is only true while
+    // used_count is 0; past that it is a live link with uses remaining, and
+    // saying otherwise would have the page lying about the credential it is
+    // holding.
+    const used = Number(r.used_count || 0);
+    const left = Math.max(Number(r.max_uses || 1) - used, 0);
+    const state = used === 0
+      ? `<span style="color:var(--yellow)">● not opened yet</span>`
+      : `<span style="color:var(--yellow)">● link still usable</span>`;
+    const uses = used === 0 ? "" : ` · ${left} use${left === 1 ? "" : "s"} left`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-top:7px;flex-wrap:wrap">
+      <span style="flex:1;min-width:120px;font-size:12px">
+        ${state} · ${dev}${uses}
+        <span style="color:var(--muted)"> · expires ${exp}</span></span>
+      ${r.token ? `<button class="btn" style="padding:7px 11px;font-size:12px"
+        onclick="copyRowLink('${escapeAttr(r.token)}')">Copy link</button>` : ""}
+      <button class="btn btn-danger" style="padding:7px 11px;font-size:12px"
+        onclick="revokeAccessFor('${d4}','invite','${escapeAttr(r.person || "")}','${dev}')">Cancel</button>
+    </div>`;
+  }
+
+  // An active token that nobody has used for a long time is the signature of a
+  // cleared browser: the row looks fine, the person cannot get in. Surface it
+  // rather than waiting for them to complain.
+  const seen = r.last_seen_at ? new Date(r.last_seen_at) : null;
+  const days = seen ? Math.floor((Date.now() - seen) / 86400000) : null;
+  const stale = days === null || days >= 14;
+  const when = seen ? (days === 0 ? "today" : `${days}d ago`) : "never used";
+
+  return `<div style="display:flex;align-items:center;gap:8px;margin-top:7px;flex-wrap:wrap">
+    <span style="flex:1;min-width:120px;font-size:12px">
+      <span style="color:var(--green)">● active</span> · ${dev}
+      <span style="color:${stale ? "var(--orange)" : "var(--muted)"}"> · ${when}</span>
+      ${mine ? '<span style="color:var(--accent);font-size:10px"> · you</span>' : ""}</span>
+    ${mine ? "" : `
+      <button class="btn" style="padding:7px 11px;font-size:12px"
+        onclick="reissueAccessFor('${d4}','${dev}','${escapeAttr(r.person || "")}')">Re-issue</button>
+      <button class="btn btn-danger" style="padding:7px 11px;font-size:12px"
+        onclick="revokeAccessFor('${d4}','token','${escapeAttr(r.person || "")}','${dev}')">Remove</button>`}
+  </div>`;
+}
+
+function inviteUrl(token) {
+  // Built here so the link points at wherever this app is actually served from,
+  // which is what the recipient opens and differs between the live site and a
+  // local preview.
+  return location.origin + location.pathname.replace(/[^/]*$/, "") + "?token=" + token;
 }
 
 async function loadAccess() {
@@ -2296,23 +2337,22 @@ async function loadAccess() {
     _accessRows = (res && res.access) || [];
   } catch (e) {
     _accessRows = [];
-    syncLog(`Could not load access list: ${e.message}`, "var(--red)");
+    if (typeof syncLog === "function") syncLog(`Could not load access: ${e.message}`, "var(--red)");
   }
   if (STATE.nav === "access") render();
 }
 
 async function createAccessLink() {
   const d4 = document.getElementById("acc-who")?.value;
+  const device = (document.getElementById("acc-device")?.value || "device").trim();
   if (!d4) { alert("Choose a person first."); return; }
   _accessBusy = true; render();
   try {
-    const res = await API.createInvite(d4, "phone", 14);
+    // Three uses over 90 days: the same link covers a second device AND lets
+    // them re-open it after a browser wipe, without needing you at all.
+    const res = await API.createInvite(d4, device, 90, 3);
     if (res.error) { alert(res.error); return; }
-    // Built here rather than server-side so the link always points at wherever
-    // this app is actually being served from — which is what the recipient
-    // needs to open, and differs between the live site and a local preview.
-    const base = location.origin + location.pathname.replace(/[^/]*$/, "");
-    _lastInvite = { person: res.person, d4: res.d4, url: `${base}?token=${res.token}` };
+    _accessNote = { title: `Link for ${res.person} (${device})`, url: inviteUrl(res.token) };
     _accessRows = null;
   } catch (e) {
     alert(`Could not create the link: ${e.message}`);
@@ -2321,17 +2361,40 @@ async function createAccessLink() {
   }
 }
 
-async function revokeAccessFor(d4, what, person) {
-  const verb = what === "token" ? "Remove access for" : "Cancel the invite for";
-  if (!confirm(`${verb} ${person || d4}?`)) return;
+// The cleared-browser fix: kill the token they can no longer reach, mint a
+// fresh link for the same person and device, hand it straight back.
+async function reissueAccessFor(d4, device, person) {
+  if (!confirm(`${person || d4} lost access on "${device}"?\n\nThis signs that device out and creates a new link to send them.`)) return;
+  _accessBusy = true; render();
   try {
-    const res = await API.revokeAccess(d4, what);
+    const res = await API.reissueAccess(d4, device, 90, 3);
     if (res.error) { alert(res.error); return; }
+    _accessNote = { title: `New link for ${res.person} (${device})`, url: inviteUrl(res.token) };
     _accessRows = null;
-    render();
+  } catch (e) {
+    alert(`Could not re-issue: ${e.message}`);
+  } finally {
+    _accessBusy = false; render();
+  }
+}
+
+async function revokeAccessFor(d4, what, person, device) {
+  const verb = what === "token" ? "Remove" : "Cancel the link for";
+  if (!confirm(`${verb} ${person || d4}${device ? ` (${device})` : ""}?`)) return;
+  try {
+    const res = await API.revokeAccess(d4, what, device || null);
+    if (res.error) { alert(res.error); return; }
+    _accessRows = null; render();
   } catch (e) {
     alert(`Could not do that: ${e.message}`);
   }
+}
+
+function copyRowLink(token) {
+  const url = inviteUrl(token);
+  navigator.clipboard?.writeText(url).catch(() => {});
+  _accessNote = { title: "Link", url };
+  render();
 }
 
 function copyInviteLink() {
@@ -2339,8 +2402,6 @@ function copyInviteLink() {
   if (!input) return;
   // Clipboard access is refused in some mobile contexts; selecting the text is
   // a working fallback rather than a dead end.
-  navigator.clipboard?.writeText(input.value).catch(() => {
-    input.focus(); input.select();
-  });
+  navigator.clipboard?.writeText(input.value).catch(() => {});
   input.focus(); input.select();
 }

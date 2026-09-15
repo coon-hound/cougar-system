@@ -98,13 +98,18 @@ const API = {
   // The name is NOT sent: the backend takes it from the roster row for this
   // 4D, so a tampered request cannot mint a credential labelled as someone it
   // is not — and that label is what the audit trail reports thereafter.
-  async createInvite(d4, device, days) {
-    return this.post({ action: "createInvite", d4, device, days });
+  async createInvite(d4, device, days, uses) {
+    return this.post({ action: "createInvite", d4, device, days, uses });
   },
   // Revokes by PERSON. The client is never handed a token, so it cannot be
   // asked to give one back.
-  async revokeAccess(d4, what) {
-    return this.post({ action: "revokeAccess", d4, what });
+  // Kill the token they can no longer reach and mint a fresh link, in one
+  // transaction, so a failure cannot leave somebody revoked with no way back.
+  async reissueAccess(d4, device, days, uses) {
+    return this.post({ action: "reissueAccess", d4, device, days, uses });
+  },
+  async revokeAccess(d4, what, device) {
+    return this.post({ action: "revokeAccess", d4, what, device });
   },
 
   async pullAll() {
