@@ -1284,7 +1284,10 @@ function dashSecAppointments(visible, todayIso) {
 function renderRoster(el) {
   const rsiCount = {};
   STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
-  const scoped = filteredRoster();
+  // Default order: highest rank first, lowest at the bottom, with the 4D (the
+  // order the roster arrives in) as the tie-break so two 3SGs stay stable.
+  // sortByRank copies, so STATE.roster itself is never reordered.
+  const scoped = sortByRank(filteredRoster());
   const rosterToday = todayISO();
   // Camp column reads the SHARED out-of-camp definition (outOfCampMap) so it can
   // never disagree with the dashboard / parade strength — medical and leave count
@@ -2193,8 +2196,9 @@ function renderAccess(el) {
     return;
   }
 
-  const people = (STATE.roster || []).filter(r => r.id)
-    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  // Senior-first, 4D inside a rank: access is handed out to the command body
+  // far more often than to a recruit, so they belong at the top of the list.
+  const people = sortByRank((STATE.roster || []).filter(r => r.id));
   const rows = _accessRows || [];
 
   // Group by person so someone's devices sit together, and drop the dead rows:

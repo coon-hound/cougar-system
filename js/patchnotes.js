@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 139;
+const APP_VERSION = 140;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 140,
+    date: "16 Sep 2026",
+    title: "Everyone lists by rank now",
+    intro: "The Roster and the person dropdowns used to come out in 4D order, so the OC sat somewhere in the middle of a list of recruits. They now read top down by rank.",
+    items: [
+      { t: "🎖️ Highest rank first", d: "The Roster table and every “who is this for?” dropdown - medical, IPPT, Book Out, Leave, Log Conduct, the FP/LP duty pickers and the Access screen - now start at the most senior person and end at the most junior." },
+      { t: "🔢 Same person, same place", d: "Inside one rank nothing moved: two 3SGs still read in 4D order, so a list you know stays where you expect it." },
+      { t: "🧹 Blank ranks go to the bottom", d: "Someone with no rank filled in still shows up, just last, rather than disappearing or landing at the top." },
+    ],
+  },
   {
     v: 139,
     date: "15 Sep 2026",

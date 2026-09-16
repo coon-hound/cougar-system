@@ -453,25 +453,103 @@ function deleteEntry(arrayName, id, label) {
   }
 }
 
-// ── Rank categories + parade blocks ──────────────────────
+// ── Rank order + rank categories + parade blocks ─────────
+// ONE ordered source of truth for rank, for the whole app. Two things read it:
+// the parade state's OFFICER / WOSPEC / ENLISTEE strength split, and every
+// list of people that should read senior-first (the Roster table and the
+// person-picking dropdowns). Do NOT write a second rank list anywhere - the
+// category arrays below are derived from this one so the vocabulary cannot
+// drift. The one other rank list in the codebase is `PC_RANKS` in
+// parade-compare.js, which is a loose regex for STRIPPING a rank prefix off a
+// parsed name (it also carries CDT and matches case-insensitively), not an
+// ordering; keep the two in step by hand when a rank is added here.
+//
+// Ordered highest to lowest, Singapore Army. Within the officer and the
+// WOSPEC tiers the Military Expert (ME) ranks sit as one contiguous band
+// rather than interleaved with the line ranks: an ME maps to a RANGE of line
+// ranks, not to one, so interleaving would bake a guess into the order.
+// Cougar is a BMT company and has never had an ME on strength, so the band
+// keeps them sensibly ordered among themselves without inventing an
+// equivalence we would have to defend.
+const RANK_TIERS = [
+  // OFFICER: general, field, then junior officers; ME4-ME8 as the ME band.
+  ["OFFICER", ["BG", "COL", "SLTC", "LTC", "MAJ", "CPT", "LTA", "LTE", "2LT",
+               "ME8", "ME7", "ME6", "ME5", "ME4"]],
+  // WOSPEC: warrant officers, then the ME1-ME3 band, then the specialists.
+  // SGT is a legacy token that predates the 3SG/2SG/1SG scheme; it sits with
+  // the senior specialists.
+  ["WOSPEC", ["CWO", "SWO", "MWO", "1WO", "2WO", "3WO",
+              "ME3", "ME2", "ME1",
+              "MSG", "SSG", "SGT", "1SG", "2SG", "3SG"]],
+  // ENLISTEE: cadets first - OCT is a trainee, not yet commissioned, and is
+  // counted with the enlistees on the parade state - then the men.
+  ["ENLISTEE", ["OCT", "SCT", "CFC", "CPL", "LCP", "PFC", "PTE", "REC"]],
+];
+
+// Flat order (index 0 is the most senior) plus the two lookups built off it.
+const RANK_ORDER = [];
+const RANK_SENIORITY = new Map();      // token -> index, 0 = highest
+const RANK_TIER_OF = new Map();        // token -> OFFICER / WOSPEC / ENLISTEE
+for (const [tier, ranks] of RANK_TIERS) {
+  for (const token of ranks) {
+    RANK_SENIORITY.set(token, RANK_ORDER.length);
+    RANK_TIER_OF.set(token, tier);
+    RANK_ORDER.push(token);
+  }
+}
+const RANK_OFFICER = RANK_ORDER.filter(t => RANK_TIER_OF.get(t) === "OFFICER");
+const RANK_WOSPEC = RANK_ORDER.filter(t => RANK_TIER_OF.get(t) === "WOSPEC");
+const RANK_ENLISTEE = RANK_ORDER.filter(t => RANK_TIER_OF.get(t) === "ENLISTEE");
+
+// An unrecognised or blank rank is NOT an error: the roster column is free
+// text and a row can arrive without one. It sorts one past the bottom of the
+// list, i.e. below REC, which is where an unidentified body belongs on a
+// senior-first list.
+const RANK_UNKNOWN = RANK_ORDER.length;
+
+// Accepts a roster record or a bare rank string. Never throws.
+function rankToken(r) {
+  const raw = typeof r === "string" ? r : (r && r.rank) || "";
+  return String(raw).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// Seniority index: 0 is the highest rank, larger is more junior.
+function rankIndex(r) {
+  const i = RANK_SENIORITY.get(rankToken(r));
+  return i === undefined ? RANK_UNKNOWN : i;
+}
+
+// The comparator every senior-first list uses. Rank is the PRIMARY key; the
+// caller's existing order (4D, then name) stays as the tie-breaker, so two
+// 3SGs still read in the stable order they always did.
+function byRank(tie) {
+  const fallback = typeof tie === "function" ? tie : byD4ThenName;
+  return (a, b) => (rankIndex(a) - rankIndex(b)) || fallback(a, b);
+}
+
+// The default tie-break: 4D order, falling back to name for the roster rows
+// that have no 4D.
+function byD4ThenName(a, b) {
+  const ida = String((a && a.id) || ""), idb = String((b && b.id) || "");
+  if (ida !== idb) return ida < idb ? -1 : 1;
+  return String((a && a.name) || "").localeCompare(String((b && b.name) || ""));
+}
+
+// Sort a list of roster records senior-first. Returns a NEW array - callers
+// hand us STATE.roster itself and must never reorder it in place.
+function sortByRank(list, tie) {
+  return (Array.isArray(list) ? list.slice() : []).sort(byRank(tie));
+}
+
 // The battalion parade state splits every strength line into OFFICER /
 // WOSPEC / ENLISTEE, and the three must add up to the block total (battalion
 // rule 10), so every person has to land in exactly one bucket. Recruits are
 // always enlistees. A commander whose rank string we don't recognise falls
-// back to WOSPEC — a BMT company's command body is overwhelmingly
+// back to WOSPEC - a BMT company's command body is overwhelmingly
 // specialists, and guessing ENLISTEE would quietly inflate the recruit line.
-const RANK_OFFICER = ["2LT", "LTA", "LTE", "CPT", "MAJ", "LTC", "SLTC", "COL", "BG", "ME4", "ME5", "ME6", "ME7", "ME8"];
-const RANK_WOSPEC = ["3SG", "2SG", "1SG", "SSG", "MSG", "SGT", "3WO", "2WO", "1WO", "MWO", "SWO", "CWO", "ME1", "ME2", "ME3"];
-// OCT is a trainee, not yet commissioned — counted with the enlistees.
-const RANK_ENLISTEE = ["REC", "PTE", "PFC", "LCP", "CPL", "CFC", "SCT", "OCT"];
-
 function rankCategory(r) {
   if (!r || r.role !== "Commander") return "ENLISTEE";
-  const rank = String(r.rank || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (RANK_OFFICER.indexOf(rank) >= 0) return "OFFICER";
-  if (RANK_WOSPEC.indexOf(rank) >= 0) return "WOSPEC";
-  if (RANK_ENLISTEE.indexOf(rank) >= 0) return "ENLISTEE";
-  return "WOSPEC";
+  return RANK_TIER_OF.get(rankToken(r)) || "WOSPEC";
 }
 
 // The parade-state block a person is filed under. Cougar files COY HQ first
@@ -1103,10 +1181,12 @@ function exportJSON(data, filename) {
 // render as "rank name" without the administrative 00xx prefix.
 // `opts.onchange` lets callers wire an inline change handler — useful when
 // the picker is one row in a list-style form (e.g. the Log Conduct wizard).
+// Options are ordered senior-first (sortByRank), 4D order inside a rank, so
+// every person picker in the app reads the same way round.
 function rosterSelect(id = "form-d4", required = true, selected = "", roleFilter = "", opts = {}) {
   // Back-compat: some old callers pass {onchange: ...} as the fourth arg.
   if (roleFilter && typeof roleFilter === "object") { opts = roleFilter; roleFilter = ""; }
-  const rows = roleFilter ? STATE.roster.filter(r => r.role === roleFilter) : STATE.roster;
+  const rows = sortByRank(roleFilter ? STATE.roster.filter(r => r.role === roleFilter) : STATE.roster);
   const optLabel = r => r.role === "Commander"
     ? [r.rank, r.name].filter(Boolean).join(" ")
     : `${r.id} ${r.name}`;
