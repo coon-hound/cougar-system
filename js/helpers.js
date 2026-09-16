@@ -246,9 +246,12 @@ function displayId(d4) {
   return r.role === "Commander" ? "" : d4;
 }
 
-function getRank(d4) {
-  return STATE.roster.find(r => r.id === d4)?.rank || "";
-}
+// getRank(d4) used to live here: it returned the raw column with no fallback,
+// had zero call sites, and was a trap - the next person to want a rank would
+// have found it by name and bypassed rosterRank(), whose REC fallback is the
+// only thing that keeps a never-filled row from rendering blank. Rank is read
+// through rosterRank() in js/forms.js, or off r.rank directly on a branch that
+// has already established the person is a Commander.
 
 // "3SG NICHOLAS ENG" for commanders, plain name for recruits.
 function displayPersonLabel(d4) {

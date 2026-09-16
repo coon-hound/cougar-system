@@ -11,10 +11,17 @@
 // truth of what battalion actually received, so both sides of a diff are
 // parsed from text — never from live records.
 
-// Rank tokens stripped from names so a promotion (3SG → 2SG) never makes the
-// same person diff as removed+added. A commander normally prints with NO 4D,
-// so their identity is the rank-stripped name.
-const PC_RANKS = "REC|PTE|LCP|CPL|CFC|SCT|3SG|2SG|1SG|SSG|MSG|3WO|2WO|1WO|MWO|SWO|OCT|2LT|LTA|CPT|MAJ|LTC|COL|ME[1-8]|SGT|CDT";
+// Rank tokens stripped from names so a promotion (3SG → 2SG, REC → PTE) never
+// makes the same person diff as removed+added. A commander normally prints with
+// NO 4D, so their identity is the rank-stripped name.
+//
+// This list must cover every rank the app can render, which means every token in
+// RANK_OFFICER / RANK_WOSPEC / RANK_ENLISTEE in js/helpers.js. A token missing
+// here is silent: the rank stays glued to the name, the key becomes
+// "nm:PFC ALPHA TAN", and the man reads as removed AND added across the very
+// promotion this stripping exists to absorb. PFC, LTE, SLTC, BG and CWO were
+// all missing.
+const PC_RANKS = "REC|PTE|PFC|LCP|CPL|CFC|SCT|3SG|2SG|1SG|SSG|MSG|3WO|2WO|1WO|MWO|SWO|CWO|OCT|2LT|LTA|LTE|CPT|MAJ|SLTC|LTC|COL|BG|ME[1-8]|SGT|CDT";
 const PC_RANK_RE = new RegExp("^(?:" + PC_RANKS + ")\\b[ .]*", "i");
 
 // Canonical section keys are format-independent: the 40 SAR format's "ATT C",

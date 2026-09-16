@@ -1658,7 +1658,7 @@ function tgConfirmRegistration(chatId) {
     tgSend(chatId, "You're a commander ✅. Which section(s) do you command? e.g. P1S3 (comma-separate for multiple).");
   } else {
     tgClearState(chatId);
-    tgSendMenu(chatId, "✅ Registered: REC " + d.name + " (C" + d.d4 + "), Platoon " + d.d4.charAt(0) + " Section " + d.d4.charAt(1) + ".\nWhenever you feel unwell, tap below or type /reportsick.");
+    tgSendMenu(chatId, "✅ Registered: " + tgRank(d) + " " + d.name + " (C" + d.d4 + "), Platoon " + d.d4.charAt(0) + " Section " + d.d4.charAt(1) + ".\nWhenever you feel unwell, tap below or type /reportsick.");
   }
 }
 
@@ -1702,9 +1702,23 @@ function tgFindSectionCmds(plt, sect) {
   return out;
 }
 
+// An enlistee's rank is whatever the Roster says, NOT a constant. The mirror of
+// rosterRank() in js/forms.js, and it exists for the same reason: a cohort
+// enlists as REC and is promoted to PTE on posting into unit training, and this
+// bot announces a man to his commanders by rank. This was the literal "REC" at
+// four call sites, so a PTE reporting sick was still announced as a recruit -
+// the same bug the frontend had, in the one surface that is not the frontend.
+// REC stays the fallback for a row whose rank was never filled in.
+//
+// `role` is deliberately NOT consulted here: that is the Commander /
+// not-Commander switch. Rank is the thing that moves.
+function tgRank(x) {
+  return String((x && x.rank) || "").trim().toUpperCase() || "REC";
+}
+
 function tgRN(user) {
   if (user.role === "Commander") return (user.rank ? user.rank + " " : "") + user.name;
-  return "REC " + user.name + " (C" + tgPadD4(user.d4) + ")";
+  return tgRank(user) + " " + user.name + " (C" + tgPadD4(user.d4) + ")";
 }
 
 // ─── Group notify (with @mention of the SC) ────────────
@@ -1810,7 +1824,7 @@ function tgHandleMessage(msg) {
   // Global commands (work in any state).
   if (text === "/cancel") { tgClearState(chatId); tgSendMenu(chatId, "Cancelled. What would you like to do?"); return; }
   if (text === "/start") {
-    if (user) tgSendMenu(chatId, "Welcome back, " + (user.role === "Commander" ? user.name : ("REC " + user.name)) + ".");
+    if (user) tgSendMenu(chatId, "Welcome back, " + (user.role === "Commander" ? user.name : (tgRank(user) + " " + user.name)) + ".");
     else tgStartRegistration(chatId);
     return;
   }
@@ -1858,7 +1872,7 @@ function tgHandleMessage(msg) {
       tgSetState(chatId, state);
       var who = role === "Commander"
         ? ((match.rank ? match.rank + " " : "") + match.name)
-        : ("REC " + match.name + " (C" + state.d4 + ")");
+        : (tgRank(match) + " " + match.name + " (C" + state.d4 + ")");
       tgSend(chatId, "Please confirm — you're registering as:\n\n" + who +
         "\nPlatoon " + state.d4.charAt(0) + " Section " + state.d4.charAt(1) + "\n\nIs this you?",
         kb([[btn("✅ Yes, that's me", "reg:confirm")], [btn("🔄 No, re-enter", "reg:redo")]]));
