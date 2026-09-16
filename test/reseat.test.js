@@ -314,6 +314,27 @@ async function main() {
     ok(/ALPHA TAN/.test(P.formatSwapReport(p, { names: true })), "--names opts in");
   });
 
+  suite("reseat — the runner is wired to the planner");
+
+  // The bug this pins, found by running the thing rather than testing it: the
+  // planner was exported and unit-tested, the runner called planSwap, and
+  // nobody imported it. Every unit test passed because they all import the
+  // PLANNER directly - the one path never exercised was the runner's own
+  // import line, which is the only path an operator ever takes.
+  await test("every planner function the runner calls is actually imported", () => {
+    const src = fs.readFileSync(path.join(ROOT, "scripts/reseat.mjs"), "utf8");
+    const line = src.match(/import\s*\{([^}]*)\}\s*from\s*"\.\/reseat-plan\.mjs"/);
+    ok(line, "reseat.mjs imports from reseat-plan.mjs");
+    const imported = new Set(line[1].split(",").map((t) => t.trim()).filter(Boolean));
+
+    // Everything the planner offers, as actually called in the runner body.
+    const body = src.slice(line.index + line[0].length);
+    const used = new Set();
+    for (const m of body.matchAll(/\b(plan[A-Z]\w*|format\w*Report|parseSections)\s*\(/g)) used.add(m[1]);
+    ok(used.size >= 4, "found the call sites: " + [...used].join(", "));
+    for (const name of used) ok(imported.has(name), `${name}() is called but not imported`);
+  });
+
   suite("reseat — no real name may reach this public repository");
 
   // Walk the tree, not just the files above: a SECTION block appearing anywhere

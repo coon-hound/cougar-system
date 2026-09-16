@@ -44,7 +44,7 @@
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
-import { formatReseatReport, parseSections, planReseat } from "./reseat-plan.mjs";
+import { formatReseatReport, formatSwapReport, parseSections, planReseat, planSwap } from "./reseat-plan.mjs";
 
 // Exactly REV_TABS (Edge Function). A re-section can touch any of them, and a
 // tab whose rev did not move is a tab every phone in the field still believes
