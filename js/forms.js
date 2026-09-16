@@ -2492,9 +2492,12 @@ function renderDutySection(dateIso, type) {
   const host = document.getElementById("duty-section");
   if (!host) return;
   const duty = dutyForDate(dateIso);
-  const commanders = STATE.roster
-    .filter(r => r.role === "Commander")
-    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  // Senior-first: you fill CDO/CDS/COS from the top of the command body down.
+  // Name order stays as the tie-break inside a rank.
+  const commanders = sortByRank(
+    STATE.roster.filter(r => r.role === "Commander"),
+    (a, b) => String(a.name || "").localeCompare(String(b.name || "")),
+  );
   const rows = paradeDutyRoles(paradeBlocks()).map(role => {
     const opts = [`<option value="">— not set —</option>`].concat(
       commanders.map(c => `<option value="${escapeAttr(c.id)}" ${duty[role] === c.id ? "selected" : ""}>${escapeAttr([c.rank, c.name].filter(Boolean).join(" "))}</option>`)
@@ -3302,7 +3305,8 @@ function openFitnessReportModal() {
   const today = todayISO();
   const monthAgo = new Date(today); monthAgo.setMonth(monthAgo.getMonth() - 1);
   const monthAgoIso = monthAgo.toISOString().slice(0, 10);
-  const recipients = filteredRoster().filter(r => r.role !== "Commander" && r.email);
+  // Senior-first, then 4D - same order as every other person picker.
+  const recipients = sortByRank(filteredRoster().filter(r => r.role !== "Commander" && r.email));
   const skipped = filteredRoster().filter(r => r.role !== "Commander" && !r.email).length;
   const scopeNote = isFilterActive() ? ` in ${filterLabel()}` : "";
 
