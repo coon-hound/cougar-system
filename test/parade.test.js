@@ -22,7 +22,12 @@ function loadParade(state) {
     + "\n;this.generateParadeStateText = generateParadeStateText;"
     // Expose the borderline-returnee override so tests can simulate the PDS
     // ticking a recently-ended MC as still-out.
-    + "this.tickBorderline = d4 => { _paradeOverrides[d4] = true; };";
+    + "this.tickBorderline = d4 => { _paradeOverrides[d4] = true; };"
+    // The other two rank-bearing reports. They are separate generators with
+    // their own R/N formatters (paradeRN and a near-copy, rnNoC), so the parade
+    // state agreeing with the roster says nothing about them.
+    + "this.generateMedicalStatusText = generateMedicalStatusText;"
+    + "this.generateMSKReportText = generateMSKReportText;";
   vm.runInContext(src, sandbox, { filename: "parade-bundle.js" });
   return sandbox;
 }
@@ -280,5 +285,60 @@ module.exports = async function run() {
     const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
     ok(/^\d+\. 3SG SECTION COMD - /m.test(txt2), "commander keeps rank+name: " + txt2);
     ok(!/0012/.test(txt2), "and never shows a 00xx id: " + txt2);
+  });
+
+  await test("the whole company promoted: no surface still says REC", () => {
+    // The real event this was built for. Every enlistee row carries PTE and
+    // the commander keeps his own rank, so the only correct output has no REC
+    // in it anywhere - and the commander is untouched, because the split is on
+    // role, not on rank.
+    const st = state();
+    for (const r of st.roster) r.rank = "PTE";
+    st.roster.push({ id: "0012", role: "Commander", name: "Section Comd", rank: "3SG" });
+    st.medical.push({ d4: "0012", status: "MC", reason: "Flu", startDate: "29 Jun 2026", endDate: "01 Jul 2026", inCamp: false, location: "" });
+    const txt2 = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(!/\bREC\b/.test(txt2), "a REC survived a company-wide promotion: " + txt2);
+    ok(/\bPTE AWAY GUY\b/.test(txt2), "the enlistees are PTE: " + txt2);
+    ok(/\b3SG SECTION COMD\b/.test(txt2), "the commander kept his rank: " + txt2);
+  });
+
+  suite("parade: the other two reports read the same column");
+
+  // The Medical Status List and the MSK report are separate generators with
+  // their own R/N formatters (paradeRN, and rnNoC which is a near-copy of it).
+  // The parade state agreeing with the roster says nothing about either, and
+  // "shown as PTE everywhere" means these too.
+  const mskState = () => {
+    const st = state();
+    st.msk = [
+      { d4: "2201", type: "Report", description: "Shin splints", timestamp: "2026-06-20T08:00:00Z", cleared: false },
+      { d4: "0012", type: "Report", description: "Knee", timestamp: "2026-06-20T08:00:00Z", cleared: false },
+    ];
+    st.roster.push({ id: "0012", role: "Commander", name: "Section Comd", rank: "3SG" });
+    return st;
+  };
+
+  await test("the Medical Status List carries the roster rank", () => {
+    const st = state();
+    for (const r of st.roster) r.rank = "PTE";
+    const txt2 = loadParade(st).generateMedicalStatusText(DATE, "0730");
+    // The Medical Status List files the in-camp MC and the LD; the away MC is
+    // an ATT C line and does not appear here.
+    ok(/R\/N: PTE LD GUY C3405/.test(txt2), "expected a PTE R/N line: " + txt2);
+    ok(!/\bREC\b/.test(txt2), "no line may still say REC: " + txt2);
+  });
+
+  await test("a blank rank still falls back to REC in the Medical Status List", () => {
+    const txt2 = loadParade(state()).generateMedicalStatusText(DATE, "0730");
+    ok(/R\/N: REC LD GUY C3405/.test(txt2), "blank rank must render REC: " + txt2);
+  });
+
+  await test("the MSK report carries the roster rank, and leaves the commander alone", () => {
+    const st = mskState();
+    for (const r of st.roster) if (r.role !== "Commander") r.rank = "PTE";
+    const txt2 = loadParade(st).generateMSKReportText(DATE, "0730");
+    ok(/R\/N: PTE AWAY GUY 2201/.test(txt2), "expected a PTE R/N line, 4D with no C: " + txt2);
+    ok(/R\/N: 3SG SECTION COMD/.test(txt2), "the commander keeps his own rank: " + txt2);
+    ok(!/\bREC\b/.test(txt2), "no line may still say REC: " + txt2);
   });
 };
