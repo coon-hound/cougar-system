@@ -60,12 +60,15 @@ const REV_TABS = [
 const TEMP = "~";
 
 export function parseArgs(argv) {
-  const out = { apply: false, names: false, plt: "", file: "" };
+  const out = { apply: false, names: false, plt: "", file: "", swap: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--apply") out.apply = true;
     else if (a === "--names") out.names = true;
     else if (a === "--plt") out.plt = String(argv[++i] ?? "").trim();
+    // Two men exchange their existing 4Ds and nothing else moves. Each side is
+    // a 4D or an exact name; quote a name so the shell keeps it in one word.
+    else if (a === "--swap") out.swap = [String(argv[++i] ?? "").trim(), String(argv[++i] ?? "").trim()];
     else if (!a.startsWith("--") && !out.file) out.file = a;
   }
   return out;
@@ -120,8 +123,9 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const { DATABASE_URL } = process.env;
 
-  if (!args.file || !args.plt) {
+  if (!args.swap && (!args.file || !args.plt)) {
     console.error("usage: DATABASE_URL=... node scripts/reseat.mjs <sections.txt> --plt <n> [--apply] [--names]");
+    console.error("       DATABASE_URL=... node scripts/reseat.mjs --swap <4D|name> <4D|name> [--plt <n>] [--apply] [--names]");
     process.exitCode = 2;
     return;
   }
@@ -131,11 +135,15 @@ async function main() {
     return;
   }
 
-  const { sections, issues: parseIssues } = parseSections(fs.readFileSync(args.file, "utf8"));
-  if (parseIssues.length) {
-    for (const i of parseIssues) console.error(`✗ ${i.message}`);
-    process.exitCode = 1;
-    return;
+  let sections = [];
+  if (!args.swap) {
+    const parsed = parseSections(fs.readFileSync(args.file, "utf8"));
+    if (parsed.issues.length) {
+      for (const i of parsed.issues) console.error(`✗ ${i.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    sections = parsed.sections;
   }
 
   const { default: postgres } = await import("postgres");
@@ -146,8 +154,15 @@ async function main() {
       select "id", "name", "role", "pid" from roster
        where deleted_at is null and intake = ${intake}`;
 
-    const plan = planReseat({ plt: args.plt, roster, sections });
-    console.log(formatReseatReport(plan, { names: args.names }));
+    // Both paths produce the same { ok, moves: [{oldId,newId,name,pid}] } shape,
+    // so everything below - the two-phase rename, the child tables, the people
+    // registry, the log and the rev bump - is shared and cannot drift apart.
+    const plan = args.swap
+      ? planSwap({ plt: args.plt, roster, a: args.swap[0], b: args.swap[1] })
+      : planReseat({ plt: args.plt, roster, sections });
+    console.log(args.swap
+      ? formatSwapReport(plan, { names: args.names })
+      : formatReseatReport(plan, { names: args.names }));
 
     if (!plan.ok) { process.exitCode = 1; return; }
     if (!plan.moves.length) {
@@ -155,7 +170,7 @@ async function main() {
       return;
     }
     if (!args.apply) {
-      console.log("\nPreview only. Nothing was written. Add --apply to re-seat.");
+      console.log(`\nPreview only. Nothing was written. Add --apply to ${args.swap ? "swap" : "re-seat"}.`);
       return;
     }
 
@@ -214,7 +229,7 @@ async function main() {
       for (const m of plan.moves) {
         await tx`
           insert into intake_log (intake, pid, name, old_d4, new_d4, matched_by, rows_moved)
-          values (${intake}, ${m.pid}, ${m.name}, ${m.oldId}, ${m.newId}, 'reseat',
+          values (${intake}, ${m.pid}, ${m.name}, ${m.oldId}, ${m.newId}, ${args.swap ? "swap" : "reseat"},
                   ${tx.json(carried.get(m.oldId) ?? {})})`;
       }
 
@@ -223,7 +238,9 @@ async function main() {
     });
 
     console.log("\n" + "─".repeat(72));
-    console.log(`APPLIED. ${plan.moves.length} men re-seated in platoon ${plan.plt}.`);
+    console.log(args.swap
+      ? `APPLIED. ${plan.moves[0].oldId} and ${plan.moves[1].oldId} have exchanged seats.`
+      : `APPLIED. ${plan.moves.length} men re-seated in platoon ${plan.plt}.`);
     console.log("Rows re-keyed (both phases, so twice the row count):");
     for (const [t, c] of Object.entries(touched)) if (c) console.log(`  ${t}  ${c}`);
     console.log("");

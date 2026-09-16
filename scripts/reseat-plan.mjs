@@ -361,3 +361,140 @@ export function formatReseatReport(plan, { names = false } = {}) {
   }
   return L.join("\n");
 }
+
+// ── A two-man seat swap ──────────────────────────────────────────────────────
+//
+// Re-dealing a whole platoon assigns 4Ds by POSITION in the list, so a man who
+// did not move sections still changes seat if the men above him did. When the
+// real-world change is "these two exchange sections", that churn is noise: it
+// re-issues invites, invalidates every phone's cache for men who did not move,
+// and writes intake_log rows for changes that did not happen.
+//
+// A swap is the minimal, exact expression of that change: two men exchange
+// their existing 4Ds and nobody else is touched. It reuses the same apply path
+// as a re-section, so the same two-phase rename, the same catalogue-discovered
+// child tables and the same single transaction still hold.
+//
+// Resolution is deliberately as strict as the re-section matcher. A man is
+// named by his 4D, or by a name that resolves to exactly ONE roster row. A near
+// miss is ranked and reported, never accepted: the cost of being wrong here is
+// two men swapping each other's medical history.
+export function planSwap({ plt, roster, a, b }) {
+  const issues = [];
+  const pltStr = plt === undefined || plt === null || plt === "" ? "" : String(plt);
+
+  // Commanders hold an administrative 00xx id and no section seat, so there is
+  // no seat for them to exchange.
+  const members = roster
+    .filter((r) => /^\d{4}$/.test(padD4(r.id)) && String(r.role ?? "") !== "Commander")
+    .map((r) => ({ ...r, id: padD4(r.id) }));
+
+  const byId = new Map(members.map((m) => [m.id, m]));
+  const byKey = new Map();
+  for (const m of members) {
+    const k = nameKey(m.name);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(m);
+  }
+
+  const resolve = (raw, side) => {
+    const want = String(raw ?? "").trim();
+    if (!want) {
+      issues.push({ level: "error", message: `${side}: no man given` });
+      return null;
+    }
+
+    // A bare 4D is unambiguous, so it wins outright and skips name matching.
+    if (/^[A-Za-z]?\d{3,4}$/.test(want)) {
+      const id = padD4(want);
+      const hit = byId.get(id);
+      if (!hit) {
+        issues.push({ level: "error", message: `${side}: ${id} is not an enlistee on the current roster` });
+        return null;
+      }
+      return { ...hit, how: "4d" };
+    }
+
+    const hits = byKey.get(nameKey(want)) ?? [];
+    if (hits.length === 1) return { ...hits[0], how: "name" };
+    if (hits.length > 1) {
+      issues.push({
+        level: "error",
+        message:
+          `${side}: "${want}" matches ${hits.length} men (${hits.map((h) => h.id).join(", ")}). ` +
+          `Name him by 4D instead.`,
+      });
+      return null;
+    }
+
+    const ranked = members
+      .map((m) => ({ id: m.id, name: m.name, score: rankScore(want, m.name) }))
+      .sort((x, y) => y.score - x.score)
+      .slice(0, 3);
+    issues.push({
+      level: "error",
+      message: `${side}: nobody on the roster is named "${want}".`,
+      candidates: ranked,
+      fix: ranked.length ? ranked[0].id : "",
+    });
+    return null;
+  };
+
+  const ma = resolve(a, "first man");
+  const mb = resolve(b, "second man");
+  if (!ma || !mb) return { ok: false, plt: pltStr, moves: [], issues, pair: [ma, mb] };
+
+  if (ma.id === mb.id) {
+    issues.push({ level: "error", message: `both names resolve to the same man (${ma.id}). Nothing to swap.` });
+    return { ok: false, plt: pltStr, moves: [], issues, pair: [ma, mb] };
+  }
+
+  // --plt is an optional guard, not a filter: if the operator says which
+  // platoon this is, a name that quietly resolved into a different one is a
+  // mistake worth stopping on rather than a swap worth making.
+  if (pltStr) {
+    for (const m of [ma, mb]) {
+      if (m.id[0] !== pltStr) {
+        issues.push({
+          level: "error",
+          message: `${m.id} (${m.name}) is in platoon ${m.id[0]}, not ${pltStr}. Drop --plt to swap across platoons.`,
+        });
+      }
+    }
+    if (issues.length) return { ok: false, plt: pltStr, moves: [], issues, pair: [ma, mb] };
+  }
+
+  const moves = [
+    { oldId: ma.id, newId: mb.id, name: ma.name, pid: ma.pid ?? null },
+    { oldId: mb.id, newId: ma.id, name: mb.name, pid: mb.pid ?? null },
+  ];
+  return { ok: true, plt: pltStr, moves, issues, pair: [ma, mb] };
+}
+
+export function formatSwapReport(plan, { names = false } = {}) {
+  const L = [];
+  const who = (m) => (names ? `  ${m.name}` : "");
+  L.push("─".repeat(72));
+  L.push(`SWAP${plan.plt ? `  platoon ${plan.plt}` : ""}`);
+  L.push("");
+  if (plan.moves.length === 2) {
+    const [x, y] = plan.moves;
+    L.push(`  ${x.oldId} -> ${x.newId}${who(x)}`);
+    L.push(`  ${y.oldId} -> ${y.newId}${who(y)}`);
+    L.push("");
+    L.push("  Nobody else moves.");
+  }
+  if (plan.issues.length) {
+    L.push("");
+    for (const i of plan.issues) {
+      L.push(`✗ ${i.message}`);
+      for (const c of i.candidates ?? []) {
+        L.push(`    ${c.id}  ${(c.score * 100).toFixed(0)}%${names ? "  " + c.name : ""}`);
+      }
+      if (i.fix) L.push(`    did you mean: ${i.fix}`);
+    }
+  }
+  L.push("");
+  L.push(plan.ok ? "READY" : "BLOCKED");
+  return L.join("\n");
+}
