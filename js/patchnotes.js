@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 139;
+const APP_VERSION = 140;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 140,
+    date: "16 Sep 2026",
+    title: "Everyone is a PTE",
+    intro: "The whole company is posted into unit training, so nobody in Cougar is a recruit any more. Platoons 7 and 8 were still filed as REC on every report; they are not now. Rank is read off the roster in one place, so a man's rank follows him wherever his name is printed.",
+    items: [
+      { t: "🎖️ PTE on every surface", d: "The parade state, the Medical Status List, the MSK report, the conduct chat message, the fitness report and the profile card all read the rank off the roster. Nothing prints REC as a fixed word any more." },
+      { t: "🤖 The Telegram bot too", d: "The bot announced every enlistee as REC when he reported sick or registered, no matter what the roster said. It now uses his real rank." },
+      { t: "🔄 Comparing two parade states across a promotion", d: "A man whose rank changed between the two states used to read as one person leaving and a different one arriving. He now reads as the same man, which is what he is." },
+    ],
+  },
   {
     v: 139,
     date: "15 Sep 2026",

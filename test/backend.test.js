@@ -308,4 +308,49 @@ module.exports = async function run() {
     ok(/\[cougar-nonok\].*conflict serverRev=/.test(confLine), "conflict logged: " + confLine);
     ok(!b.db.spy.warns.some(l => /reason|Alice|tok/.test(l)), "no payload/PII in log lines");
   });
+
+  suite("backend: the Telegram bot reads rank off the roster, never a literal");
+
+  // The bot announces a man to his commanders by rank, and it printed the
+  // literal "REC" at four call sites. So a PTE who reported sick reached his SC
+  // as a recruit - the frontend bug, in the one surface that is not the
+  // frontend. Names invented; this repository is public.
+  const ENLISTEE = { role: "Recruit", name: "ALPHA TAN", d4: "7101" };
+
+  await test("an enlistee's R/N carries the rank the Roster gave him", () => {
+    const b = loadBackend();
+    eq(b.tgRN(Object.assign({}, ENLISTEE, { rank: "PTE" })), "PTE ALPHA TAN (C7101)");
+  });
+
+  await test("a blank rank still falls back to REC", () => {
+    const b = loadBackend();
+    eq(b.tgRN(Object.assign({}, ENLISTEE, { rank: "" })), "REC ALPHA TAN (C7101)");
+    eq(b.tgRN(ENLISTEE), "REC ALPHA TAN (C7101)", "a missing column is the same as a blank one");
+  });
+
+  await test("the rank is normalised the way rosterRank normalises it", () => {
+    const b = loadBackend();
+    eq(b.tgRank({ rank: " pte " }), "PTE");
+  });
+
+  await test("a commander is rank + name, with no 4D and no REC fallback", () => {
+    const b = loadBackend();
+    eq(b.tgRN({ role: "Commander", name: "ZULU COMMANDER", rank: "3SG", d4: "0001" }), "3SG ZULU COMMANDER");
+    // rosterRank's REC fallback is the ENLISTEE default; applying it to a
+    // commander would file a specialist as a recruit.
+    eq(b.tgRN({ role: "Commander", name: "ZULU COMMANDER", rank: "", d4: "0001" }), "ZULU COMMANDER");
+  });
+
+  await test("no rank literal is left anywhere in the bot's output", () => {
+    // A guard, not a unit test: the four literals were spread across
+    // registration, the welcome-back line and the confirm prompt, and the next
+    // one would be just as easy to add.
+    const fs = require("fs");
+    const path = require("path");
+    const src = fs.readFileSync(path.join(__dirname, "..", "apps-script-Code.gs"), "utf8");
+    const offenders = src.split("\n")
+      .map((l, i) => [i + 1, l])
+      .filter(([, l]) => /"(?:REC|PTE|PFC|LCP|CPL|CFC|SCT|OCT)\s/.test(l));
+    eq(offenders.map(([n]) => n), [], "a rank is printed as a literal: " + JSON.stringify(offenders));
+  });
 };

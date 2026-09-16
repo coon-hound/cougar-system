@@ -3192,7 +3192,13 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
   const startNice = isoToDisplayDate(startIso);
   const endNice = isoToDisplayDate(endIso);
   const bareId = String(r.id).replace(/^C/i, "");
-  const recHeader = `${rosterRank(r)} ${(r.name || "").toUpperCase()} ${bareId}`;
+  // The one rosterRank call site that had no commander branch. The report is
+  // only ever opened for an enlistee (openFitnessReportModal filters commanders
+  // out), but rosterRank's REC fallback would file a 3SG as a recruit the day
+  // somebody widens that filter, and the header is what gets emailed out.
+  const recHeader = r.role === "Commander"
+    ? [r.rank, (r.name || "").toUpperCase()].filter(Boolean).join(" ")
+    : `${rosterRank(r)} ${(r.name || "").toUpperCase()} ${bareId}`;
 
   // Two parallel chart blocks — same layout/captions, different image src.
   const noChartsBlock = "";
