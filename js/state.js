@@ -41,8 +41,8 @@ const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 //   v1 "cougar-data"     - contained a hardcoded personnel fallback
 //   v2 "cougar-data-v2"  - the BMT cohort, archived at intake 16
 //   v3 "cougar-data-v3"  - intake 16 before platoon 9 was re-sectioned
-const STORAGE_KEY = "cougar-data-v4";
-const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3"];
+const STORAGE_KEY = "cougar-data-v5";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
