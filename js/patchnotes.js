@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 139;
+const APP_VERSION = 140;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 140,
+    date: "16 Sep 2026",
+    title: "Hospitalisation Leave is now a status you can log",
+    intro: "An MO-issued hospitalisation leave is not an MC and it is not ordinary leave: the man is away from camp and cannot come in to endorse anything. It now has its own entry in Report Sick instead of being typed in as a note.",
+    items: [
+      { t: "🏥 Pick it like any other status", d: "Report Sick → Status now lists Hospitalisation Leave under “Severe (away from camp)”, next to MC and Warded. There is no “consume in camp” option for it, because that is exactly what it rules out." },
+      { t: "📊 Counted away, everywhere", d: "Strength board, roster Camp column, Out of Camp panel and the parade state all treat it like an MC: out of camp, not participating, and extended re-issues merge into one span." },
+      { t: "📝 Its own line on the parade state", d: "It files under ATT C alongside MC, but reads “14D HOSP LEAVE (Post-op) (010926-140926)” so HQ can see it is not an MC." },
+    ],
+  },
   {
     v: 139,
     date: "15 Sep 2026",
