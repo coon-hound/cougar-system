@@ -32,6 +32,17 @@ const PATCH_NOTES = [
     ],
   },
   {
+    v: 141,
+    date: "16 Sep 2026",
+    title: "Hospitalisation Leave is now a status you can log",
+    intro: "An MO-issued hospitalisation leave is not an MC and it is not ordinary leave: the man is away from camp and cannot come in to endorse anything. It now has its own entry in Report Sick instead of being typed in as a note.",
+    items: [
+      { t: "🏥 Pick it like any other status", d: "Report Sick → Status now lists Hospitalisation Leave under “Severe (away from camp)”, next to MC and Warded. There is no “consume in camp” option for it, because that is exactly what it rules out." },
+      { t: "📊 Counted away, everywhere", d: "Strength board, roster Camp column, Out of Camp panel and the parade state all treat it like an MC: out of camp, not participating, and extended re-issues merge into one span." },
+      { t: "📝 Its own line on the parade state", d: "It files under ATT C alongside MC, but reads “14D HOSP LEAVE (Post-op) (010926-140926)” so HQ can see it is not an MC." },
+    ],
+  },
+  {
     v: 140,
     date: "16 Sep 2026",
     title: "Everyone is a PTE",

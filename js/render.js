@@ -170,10 +170,11 @@ function renderDashboard(el) {
     .sort((a, b) => topTag(a).ghostDay - topTag(b).ghostDay);
   const active = scoped.length - liveRows.length;
   // Out of Camp / In Camp use the SHARED computation (outOfCampMap): active
-  // MC/Warded + active leave + manual book-outs. This is the SAME source the
+  // MC/Hosp Leave/Warded + active leave + manual book-outs. This is the SAME source the
   // parade state uses, so the dashboard "In Camp" and the parade COMPANY
   // present/strength always agree. (Note: "Non-Active" above is medical-only — a recruit on LD/
-  // Excuse is non-active/restricted but still IN camp; only MC/Warded/leave/
+  // Excuse is non-active/restricted but still IN camp; only away medical (see
+  // MED_AWAY_STATUSES) / leave/
   // booked-out count as out of camp.)
   const outMap = outOfCampMap(today);
   const outScoped = scoped.filter(r => outMap.has(r.id));
@@ -282,7 +283,7 @@ function renderDashboard(el) {
   };
   const chartColor = label => {
     if (label === "Active") return CK.green;
-    if (label === "MC" || label === "Warded") return CK.red;
+    if (label === "MC" || label === "Warded" || label === MED_HOSP_LEAVE) return CK.red;
     if (label === "LD" || label === "MC+1") return CK.orange;
     if (label === "LD+1" || label === "MC+2") return CK.yellow;
     if (label === "RMJ" || (typeof label === "string" && label.startsWith("Excuse"))) return CK.accent;
@@ -292,7 +293,9 @@ function renderDashboard(el) {
     type: "doughnut",
     // borderColor must be set explicitly: Chart.js defaults a doughnut's
     // segment border to white, which draws a bright ring on a dark card.
-    data: { labels: Object.keys(statusCounts), datasets: [{ data: Object.values(statusCounts), backgroundColor: Object.keys(statusCounts).map(chartColor), borderColor: CK.surface, borderWidth: 3 }] },
+    // Keys stay the full status (that is what chartColor matches on); the
+    // legend shows the phone-width shorthand.
+    data: { labels: Object.keys(statusCounts).map(medStatusShortLabel), datasets: [{ data: Object.values(statusCounts), backgroundColor: Object.keys(statusCounts).map(chartColor), borderColor: CK.surface, borderWidth: 3 }] },
     // maintainAspectRatio:false → fill the .chart-box wrapper's fixed height
     // instead of deriving a height from the canvas width, which is what used
     // to grow this doughnut to ~500px on a desktop card.

@@ -27,7 +27,10 @@ function load(file, extra) {
     Boolean, RegExp, Set, Map, isNaN, parseInt, parseFloat, localStorage: null
   }, extra || {});
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, file), "utf8"), sandbox, { filename: file });
+  // js/state.js's normalizers call shared helpers, so helpers.js loads first
+  // for it, exactly as index.html does.
+  const files = file === "js/state.js" ? ["js/helpers.js", file] : [file];
+  files.forEach(f => vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sandbox, { filename: f }));
   // `const`/`let` at a script's top level are lexical, not properties of the
   // sandbox global, so nextId/normId are unreachable as sandbox.nextId. Reach
   // them by evaluating in the same context instead.

@@ -384,6 +384,11 @@ function normalizeMedical(records) {
     // spelling so badge colors / parade-state filters match consistently.
     let status = r.status || "";
     if (/^Excused /.test(status)) status = status.replace(/^Excused /, "Excuse ");
+    // One-way spelling migration: the repo stores the British "Hospitalisation
+    // Leave". A row imported or hand-typed as "Hospitalization Leave" is the
+    // same status and must not read as an unknown custom one (it would land in
+    // the parade STATUS catch-all and stop counting the man out of camp).
+    status = canonMedStatus(status);
     return {
       id: normId(r.id),
       d4: padD4(r.d4 || ""),
