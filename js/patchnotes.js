@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 142;
+const APP_VERSION = 143;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 143,
+    date: "16 Sep 2026",
+    title: "The men are back in 4D order",
+    intro: "Sorting everyone by rank was right for the command body and wrong for the men. The whole company holds one rank, so a rank sort did nothing except scramble the order you actually read a platoon in.",
+    items: [
+      { t: "\ud83d\udd22 Enlistees read by 4D again", d: "The Roster and every person dropdown list the men in 4D order - platoon, then section, then bunk - the way a nominal roll reads. A man given a different rank no longer jumps the queue." },
+      { t: "\ud83c\udf96\ufe0f The command body still reads senior-first", d: "Officers, then warrant officers and specialists, highest at the top, and they always sit above the men - including a commander whose rank column is blank, who used to fall to the very bottom of the list." },
+    ],
+  },
   {
     v: 142,
     date: "16 Sep 2026",
