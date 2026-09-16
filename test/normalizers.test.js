@@ -31,7 +31,10 @@ function loadState() {
     },
   };
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, "js/state.js"), "utf8"), sandbox, { filename: "state.js" });
+  // helpers.js loads first in index.html and the normalizers now call into it
+  // (canonMedStatus), so load the same pair here.
+  ["js/helpers.js", "js/state.js"].forEach(f =>
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sandbox, { filename: f }));
   return sandbox;
 }
 

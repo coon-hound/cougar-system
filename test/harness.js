@@ -19,7 +19,10 @@ const { makeBrowser } = require("./mocks/browser");
 
 const ROOT = path.resolve(__dirname, "..");
 const GS_PATH = path.join(ROOT, "apps-script-Code.gs");
-const FRONTEND_FILES = ["js/state.js", "js/api.js", "js/sync.js"];
+// helpers.js first, exactly as index.html loads it: state.js's read-boundary
+// normalizers call shared helpers (canonMedStatus), so loading state.js alone
+// no longer reflects the browser.
+const FRONTEND_FILES = ["js/helpers.js", "js/state.js", "js/api.js", "js/sync.js"];
 const VALID_TOKEN = "testtoken";
 
 function loadBackend() {

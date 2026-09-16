@@ -8,9 +8,18 @@
 // js/main.js bootstrap + js/state.js loadLocal), so specs seed localStorage via
 // test/e2e/support.js and never touch the network — deterministic and offline,
 // mirroring the node harness's mock-fetch approach.
+const crypto = require("crypto");
 const { defineConfig, devices } = require("@playwright/test");
 
-const PORT = process.env.PW_PORT ? Number(process.env.PW_PORT) : 5599;
+// The default port is derived from THIS checkout's path, because
+// `reuseExistingServer` will happily adopt a server someone else already
+// started - and with one fixed port that meant a worktree's run could be served
+// the MAIN checkout's files and pass against code it never contains. Every
+// worktree now gets its own port, and the server is pinned to this directory
+// with --directory so it cannot serve another tree either way. PW_PORT still
+// overrides.
+const pathPort = 5500 + (parseInt(crypto.createHash("sha1").update(__dirname).digest("hex").slice(0, 6), 16) % 400);
+const PORT = process.env.PW_PORT ? Number(process.env.PW_PORT) : pathPort;
 
 module.exports = defineConfig({
   testDir: "./test/e2e",
@@ -30,7 +39,7 @@ module.exports = defineConfig({
   // A dependency-free static server for the repo root. python3 ships on macOS
   // and ubuntu-latest (CI), so this needs no extra install.
   webServer: {
-    command: `python3 -m http.server ${PORT}`,
+    command: `python3 -m http.server ${PORT} --directory ${__dirname}`,
     url: `http://127.0.0.1:${PORT}/index.html`,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

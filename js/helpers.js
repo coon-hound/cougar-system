@@ -507,18 +507,60 @@ function paradeBlocks() {
 // Every medical record represents a "report sick" event. `date` captures
 // when the recruit reported sick. `status` is the outcome from the MO.
 // Only these statuses are official:
-//   • MC / Warded — away from camp
+//   • MC / Hospitalisation Leave / Warded — away from camp
 //   • LD / Excuse X (incl. Excuse RMJ) — in camp, restricted
 //   • Pending — reported sick, MO outcome not yet known
 //   • NIL — MO seen, no status issued (recruit back to active)
+//
+// Hospitalisation Leave is an MO-issued leave following treatment. It behaves
+// exactly like an MC for in/out of camp, strength and participation, but it is
+// NOT an MC: the man cannot come into camp to endorse it, so it is kept as its
+// own classification everywhere it is printed.
+//
+// SPELLING: the repo and the battalion template are British throughout, so
+// "Hospitalisation" (s) is the one stored value. canonMedStatus() folds the
+// American "Hospitalization" spelling onto it at every read boundary, so a row
+// typed or imported the other way can never fall through the cracks.
+const MED_HOSP_LEAVE = "Hospitalisation Leave";
+function canonMedStatus(status) {
+  const s = String(status == null ? "" : status).trim();
+  return /^hospitali[sz]ation\s+leave$/i.test(s) ? MED_HOSP_LEAVE : s;
+}
+
 const MED_STATUS_GROUPS = [
-  { label: "Severe (away from camp)", options: ["MC", "Warded"] },
+  { label: "Severe (away from camp)", options: ["MC", MED_HOSP_LEAVE, "Warded"] },
   { label: "In camp, restricted",     options: ["LD"] },
   { label: "Excuses",                 options: ["Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb"] },
   { label: "Awaiting MO",             options: ["Pending"] },
   { label: "Cleared by MO",           options: ["NIL"] }
 ];
 const MED_STATUSES = MED_STATUS_GROUPS.flatMap(g => g.options);
+
+// The statuses that put the man PHYSICALLY away from camp. The single list the
+// out-of-camp map, the parade strength, the borderline-returnee checklist and
+// the MC-days counters all read, so adding an away status here can never leave
+// one of them behind. Spelling-tolerant via canonMedStatus.
+const MED_AWAY_STATUSES = ["MC", "Warded", MED_HOSP_LEAVE];
+const isAwayMedStatus = s => MED_AWAY_STATUSES.indexOf(canonMedStatus(s)) >= 0;
+
+// Display shorthand for statuses whose full name will not sit in a phone-width
+// badge or a parade line. "HOSP LEAVE" is what the battalion writes, so the
+// badge, the roster cell and the parade line all read off this one map.
+// Away statuses a commander may legitimately have the man CONSUME IN CAMP (the
+// "Consume in camp" / force-in flag). Hospitalisation Leave is deliberately NOT
+// one of them: the man is on MO-ordered leave and cannot come in to endorse it,
+// which is the whole distinction from an ordinary MC.
+const MED_IN_CAMP_STATUSES = ["MC", "Warded"];
+
+const MED_SHORT_LABELS = { [MED_HOSP_LEAVE]: "Hosp Leave" };
+function medStatusShortLabel(tag) {
+  const raw = String(tag == null ? "" : tag);
+  const short = MED_SHORT_LABELS[medStatusBaseFamily(raw)];
+  if (!short) return raw;
+  // Keep any "+N" ghost suffix the caller passed in.
+  const ghost = /\+\d+$/.exec(raw);
+  return short + (ghost ? ghost[0] : "");
+}
 
 // ── Custom statuses ──────────────────────────────────────
 // User-defined statuses live in STATE.customStatuses (persisted via state.js).
@@ -551,7 +593,7 @@ function statusParticipates(status) {
 // ── Same-status-family collapsing ────────────────────────
 // A tag's base family ignores the ghost suffix: MC+1 → MC, LD+2 → LD. Used to
 // collapse duplicate statuses of the same kind (a re-issued MC) down to one.
-const medStatusBaseFamily = tag => String(tag).replace(/\+\d+$/, "");
+const medStatusBaseFamily = tag => canonMedStatus(String(tag).replace(/\+\d+$/, ""));
 
 // Within one status family, is record-tag pair `a` more significant than `b`?
 // More severe wins; ties broken by recency (later start date), so a newly
@@ -747,7 +789,7 @@ function outUntilISO(records, runOf) {
 // bookOutToggle so the three never drift on what "out" means.
 function derivedCampOut(d4, dateIso) {
   dateIso = dateIso || todayISO();
-  const awayMed = STATE.medical.filter(m => m.d4 === d4 && medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp);
+  const awayMed = STATE.medical.filter(m => m.d4 === d4 && medStatusActive(m, dateIso) && isAwayMedStatus(m.status) && !m.inCamp);
   if (awayMed.length) {
     const mc = awayMed[0];
     return withReturn({ kind: "medical", reason: mc.status + (mc.reason ? " — " + mc.reason : "") }, outUntilISO(awayMed, medStatusRun));
@@ -787,7 +829,7 @@ function outOfCampMap(dateIso) {
   STATE.medical.forEach(m => {
     // inCamp MC/Warded is consumed IN camp — counted present, so it never joins
     // the out-of-camp set (nor the dashboard "Out of Camp" tile / parade CURRENT).
-    if (medStatusActive(m, dateIso) && (m.status === "MC" || m.status === "Warded") && !m.inCamp && !forcedIn.has(m.d4)) {
+    if (medStatusActive(m, dateIso) && isAwayMedStatus(m.status) && !m.inCamp && !forcedIn.has(m.d4)) {
       (awayMed[m.d4] = awayMed[m.d4] || []).push(m);
     }
   });
@@ -841,7 +883,9 @@ function medStatusTag(record, todayIso) {
 // Severity rank used to pick the most-restrictive tag when a recruit has
 // multiple records hitting the same day. Higher = more severe.
 function medSeverityRank(tag) {
-  if (tag === "MC" || tag === "Warded") return 100;
+  // Hospitalisation Leave is as severe as an MC: same rank, so it sorts and
+  // collapses alongside one rather than below every excuse.
+  if (tag === "MC" || tag === "Warded" || tag === MED_HOSP_LEAVE) return 100;
   if (tag === "LD") return 80;
   if (tag === "RMJ") return 70;
   if (typeof tag === "string" && tag.startsWith("Excuse")) return 60;
@@ -911,6 +955,7 @@ function medTagBadge(tag) {
   const palettes = {
     "MC":               { bg: "rgba(var(--redRGB),.13)",    bd: "rgba(var(--redRGB),.27)",    fg: "var(--red)" },
     "Warded":           { bg: "rgba(var(--redRGB),.13)",    bd: "rgba(var(--redRGB),.27)",    fg: "var(--red)" },
+    [MED_HOSP_LEAVE]:   { bg: "rgba(var(--redRGB),.13)",    bd: "rgba(var(--redRGB),.27)",    fg: "var(--red)" },
     "MC+1":             { bg: "rgba(var(--orangeRGB),.2)",  bd: "rgba(var(--orangeRGB),.4)",  fg: "var(--orange)" },
     "MC+2":             { bg: "rgba(var(--yellowRGB),.13)", bd: "rgba(var(--yellowRGB),.27)", fg: "var(--yellow)" },
     "LD":               { bg: "rgba(var(--orangeRGB),.13)", bd: "rgba(var(--orangeRGB),.27)", fg: "var(--orange)" },
@@ -925,7 +970,7 @@ function medTagBadge(tag) {
     : customStatusByName(medStatusBaseFamily(tag))
     ? { bg: "rgba(var(--tealRGB),.13)", bd: "rgba(var(--tealRGB),.27)", fg: "var(--teal)" }
     : palettes.Pending);
-  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;background:${p.bg};color:${p.fg};border:1px solid ${p.bd}">${tag}</span>`;
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;background:${p.bg};color:${p.fg};border:1px solid ${p.bd}">${medStatusShortLabel(tag)}</span>`;
 }
 
 // Format a record's date range as "16 May – 20 May (5D)" for display.

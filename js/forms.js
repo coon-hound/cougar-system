@@ -265,7 +265,7 @@ function toggleReportSickPatterns(d4) {
   // Status mix — reveals "always NIL" (malingering signal) vs real MC/LD pattern.
   const statusCounts = {};
   med.forEach(m => { const k = m.status || "—"; statusCounts[k] = (statusCounts[k] || 0) + 1; });
-  const statusOrder = ["MC", "Warded", "LD", "RMJ", "Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb", "Pending", "NIL"];
+  const statusOrder = ["MC", MED_HOSP_LEAVE, "Warded", "LD", "RMJ", "Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb", "Pending", "NIL"];
   const statusRows = statusOrder.filter(s => statusCounts[s]).map(s => [s, statusCounts[s]]);
   const nilPct = med.length ? Math.round((statusCounts["NIL"] || 0) / med.length * 100) : 0;
 
@@ -302,7 +302,7 @@ function toggleReportSickPatterns(d4) {
     muted: cssColor("--muted"), green: cssColor("--green"), dim: cssColor("--dim")
   };
   const statusColor = {
-    "MC": TC.red, "Warded": TC.red,
+    "MC": TC.red, "Warded": TC.red, [MED_HOSP_LEAVE]: TC.red,
     "LD": TC.orange, "RMJ": TC.orange,
     "Excuse Heavy Load": TC.yellow, "Excuse Kneeling": TC.yellow, "Excuse Squatting": TC.yellow, "Excuse Uniform": TC.yellow, "Excuse RMJ": TC.yellow, "Excuse Swimming": TC.yellow, "Excuse Prolonged Standing": TC.yellow, "Excuse Upper Limb": TC.yellow, "Excuse Lower Limb": TC.yellow,
     "Pending": TC.muted, "NIL": TC.green, "—": TC.dim
@@ -511,7 +511,7 @@ function openMedicalForm(id) {
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-custom-save" checked style="width:15px;height:15px"> Save for reuse <span style="color:var(--dim)">(adds it to this dropdown)</span></label>
           <div style="font-size:10px;color:var(--muted)">Custom statuses are in-camp/restricted and don't get +1/+2 recovery tags.</div>
         </div>
-        <label id="f-incamp-wrap" style="display:${(selectedStatus === "MC" || selectedStatus === "Warded") ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, and the parade ATT C line is marked IN)</span></label>
+        <label id="f-incamp-wrap" style="display:${MED_IN_CAMP_STATUSES.indexOf(canonMedStatus(selectedStatus)) >= 0 ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, and the parade ATT C line is marked IN)</span></label>
         <div class="form-row">
           ${formField("f-start", "Start (inclusive)", "date", "", `value="${startVal}" min="2020-01-01" max="2099-12-31"`)}
           ${formField("f-end", "End (inclusive)", "date", "", `value="${endVal}" min="2020-01-01" max="2099-12-31"`)}
@@ -532,7 +532,7 @@ function medStatusSelChanged(v) {
   // everything else is already in camp. Hide + clear it otherwise.
   const inCampWrap = document.getElementById("f-incamp-wrap");
   const inCampBox = document.getElementById("f-incamp");
-  const showInCamp = v === "MC" || v === "Warded";
+  const showInCamp = MED_IN_CAMP_STATUSES.indexOf(canonMedStatus(v)) >= 0;
   if (inCampWrap) inCampWrap.style.display = showInCamp ? "flex" : "none";
   if (inCampBox && !showInCamp) inCampBox.checked = false;
 }
@@ -585,7 +585,7 @@ function submitMedical() {
   // row is already in camp). The checkbox only shows for MC/Warded, so guard on
   // the resolved primary status too in case a stale checked box lingers.
   const inCamp = !!document.getElementById("f-incamp")?.checked
-    && (status === "MC" || status === "Warded");
+    && MED_IN_CAMP_STATUSES.indexOf(canonMedStatus(status)) >= 0;
 
   // First status reuses the edited row's id; each extra status becomes a new
   // sibling row. Siblings group automatically per-recruit in the reports.
@@ -1664,14 +1664,14 @@ function leaveMany(d4s, t) {
 // previously retyped these by hand from chats; now the dashboard generates
 // an editable preview that round-trips to clipboard in one tap.
 
-// Statuses that have their own dedicated section (ATT C = MC, OTHERS = Warded,
-// REPORT SICK = Pending) or are cleared (NIL). STATUS is the catch-all for
+// Statuses that have their own dedicated section (ATT C = MC + Hospitalisation
+// Leave, OTHERS = Warded, REPORT SICK = Pending) or are cleared (NIL). STATUS is the catch-all for
 // every OTHER active restriction — LD, all Excuses, and any custom/one-off
 // status (e.g. "Excuse Jumping") that isn't in the canonical MED_STATUSES list.
 // Using an exclusion predicate instead of a hardcoded allowlist means a new or
 // custom status can never silently fall through the cracks of the report.
-const PARADE_SECTIONED_STATUSES = ["MC", "Warded", "Pending", "NIL"];
-const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(s);
+const PARADE_SECTIONED_STATUSES = ["MC", MED_HOSP_LEAVE, "Warded", "Pending", "NIL"];
+const isMedicalStatusCatchAll = s => !!s && !PARADE_SECTIONED_STATUSES.includes(canonMedStatus(s));
 // A medical record counts as "kept in camp" for the parade when the recruit is
 // consuming it in camp (the record's inCamp flag) OR a commander manually booked
 // them IN today (the day-scoped force-in override). Either way the body is
@@ -1683,7 +1683,7 @@ const medKeptInCamp = (m, dateIso) =>
 // that list is a roll of who is restricted, so an MC being consumed in camp
 // belongs on it even though the parade state files it under ATT C.
 const isMedicalStatusRecord = (m, dateIso) =>
-  isMedicalStatusCatchAll(m.status) || (medKeptInCamp(m, dateIso) && (m.status === "MC" || m.status === "Warded"));
+  isMedicalStatusCatchAll(m.status) || (medKeptInCamp(m, dateIso) && isAwayMedStatus(m.status));
 
 // "2026-05-20" → "200526" — battalion uses DDMMYY everywhere.
 function toDDMMYY(iso) {
@@ -1774,7 +1774,7 @@ function findBorderlineReturnees(dateIso) {
   if (!dateIso) return [];
   const y = new Date(dateIso); y.setDate(y.getDate() - 1);
   const yIso = y.toISOString().slice(0, 10);
-  const awayMc = m => (m.status === "MC" || m.status === "Warded") && !m.inCamp;
+  const awayMc = m => isAwayMedStatus(m.status) && !m.inCamp;
   const seen = new Set();
   return STATE.medical.filter(m =>
     awayMc(m) && displayDateToISO(m.endDate || "") === yIso &&
@@ -1937,7 +1937,19 @@ const PARADE_SECTION_IMPLIES_OUT = { "ATT C": true, "OFF/LEAVE": true, "OTHERS":
 // Leave types that are genuine time off. Everything else we file as leave
 // (Course, Guard Duty, NDP, Other) belongs under OTHERS per the battalion's
 // section table — an exclusion list, so a new leave type can never vanish.
-const PARADE_OFF_LEAVE_TYPES = ["Off-in-Lieu", "Annual Leave", "Compassionate", "Weekend", "Night's Out", "Hospitalisation Leave"];
+//
+// "Hospitalisation Leave" USED to sit in this list, from before it existed as a
+// medical status. It has been removed: it was never a selectable LEAVE_TYPE_OPTIONS
+// entry, and leaving it here would file the same real-world thing under OFF/LEAVE
+// or under ATT C depending only on which layer a commander happened to log it in.
+// A legacy or hand-typed leave row still carrying either spelling is routed to
+// ATT C by paradeLeaveEntries, so it lands in exactly one place.
+const PARADE_OFF_LEAVE_TYPES = ["Off-in-Lieu", "Annual Leave", "Compassionate", "Weekend", "Night's Out"];
+
+// The word a parade line uses for a status. Hospitalisation Leave prints as
+// "HOSP LEAVE" — the battalion's own shorthand, and short enough for a phone
+// line. Everything else prints its own name in caps.
+const paradeStatusWord = v => paradeSafeText(medStatusShortLabel(canonMedStatus(v))).toUpperCase();
 
 // Free text — reasons, locations, leave types, names — comes off a phone
 // keyboard and can carry anything. The line format gives " - ", "(", ")" and
@@ -2038,7 +2050,7 @@ function paradeAwaySet(dateIso) {
 function paradeMedEntries(dateIso, away, status, section) {
   const byD4 = {};
   STATE.medical.forEach(m => {
-    if (medStatusActive(m, dateIso) && m.status === status) (byD4[m.d4] = byD4[m.d4] || []).push(m);
+    if (medStatusActive(m, dateIso) && canonMedStatus(m.status) === status) (byD4[m.d4] = byD4[m.d4] || []).push(m);
   });
   const out = [];
   Object.keys(byD4).forEach(d4 => {
@@ -2046,7 +2058,7 @@ function paradeMedEntries(dateIso, away, status, section) {
       const span = paradeSpanOf(r, medStatusRun(r));
       out.push({
         d4, section,
-        desc: paradeDesc(span.days, String(status).toUpperCase(), r.reason),
+        desc: paradeDesc(span.days, paradeStatusWord(status), r.reason),
         dates: span.text,
         // A consume-in-camp / booked-in MC is still an MC — it stays under
         // ATT C and carries IN, rather than hiding in another section.
@@ -2151,10 +2163,15 @@ function paradeLeaveEntries(dateIso, away) {
     const key = [l.d4, l.type || "", span.startIso, span.endIso].join("|");
     if (seen.has(key)) return;
     seen.add(key);
-    const section = (!l.type || PARADE_OFF_LEAVE_TYPES.indexOf(l.type) >= 0) ? "OFF/LEAVE" : "OTHERS";
+    // A legacy leave row typed as hospitalisation leave is the same real-world
+    // thing as the medical status, so it files in the same section under the
+    // same word rather than splitting across two sections.
+    const isHosp = canonMedStatus(l.type) === MED_HOSP_LEAVE;
+    const section = isHosp ? "ATT C"
+      : (!l.type || PARADE_OFF_LEAVE_TYPES.indexOf(l.type) >= 0) ? "OFF/LEAVE" : "OTHERS";
     out.push({
       d4: l.d4, section,
-      desc: paradeDesc(null, (paradeSafeText(l.type) || "LEAVE").toUpperCase(), l.reason),
+      desc: paradeDesc(null, isHosp ? paradeStatusWord(l.type) : (paradeSafeText(l.type) || "LEAVE").toUpperCase(), l.reason),
       dates: span.text,
       marker: paradeMarker(section, away.has(l.d4)),
       location: ""
@@ -2171,7 +2188,7 @@ function paradeOthersEntries(dateIso, away) {
     const span = paradeSpanOf(m, medStatusRun(m));
     out.push({
       d4: m.d4, section: "OTHERS",
-      desc: paradeDesc(null, "RETURNING FROM MC", m.reason),
+      desc: paradeDesc(null, "RETURNING FROM " + paradeStatusWord(m.status), m.reason),
       dates: span.text,
       marker: paradeMarker("OTHERS", away.has(m.d4)),
       location: ""
@@ -2238,6 +2255,13 @@ function generateParadeStateText(type, dateIso, time) {
   const roster = STATE.roster || [];
   const entries = [].concat(
     paradeMedEntries(dateIso, away, "MC", "ATT C"),
+    // Hospitalisation Leave files under ATT C alongside MC, as its OWN
+    // classification ("14D HOSP LEAVE (…)") rather than as an MC. NOTE: the
+    // battalion template's section table puts hospitalisation leave under
+    // OFF/LEAVE; Cougar files it under ATT C because operationally it is an
+    // MO-issued away-from-camp medical status, not time off. Deliberate
+    // deviation — to be raised with HQ.
+    paradeMedEntries(dateIso, away, MED_HOSP_LEAVE, "ATT C"),
     paradeStatusEntries(dateIso, away),
     paradeReportSickEntries(dateIso, away),
     paradeApptEntries(dateIso, time, away),
@@ -2541,7 +2565,7 @@ function renderBorderlineSection(dateIso, type) {
     </label>`;
   }).join("");
   section.innerHTML = `<div style="font-size:11px;background:rgba(var(--orangeRGB),.07);border:1px solid rgba(var(--orangeRGB),.27);border-radius:6px;padding:8px 10px">
-    <div style="color:var(--orange);font-weight:600;margin-bottom:4px">⚠ Borderline returnees (${candidates.length}) — MC/Warded ended yesterday</div>
+    <div style="color:var(--orange);font-weight:600;margin-bottom:4px">⚠ Borderline returnees (${candidates.length}) — away medical status ended yesterday</div>
     <div style="color:var(--muted);margin-bottom:6px">Tick anyone who hasn't actually booked back in yet. They'll be listed under OTHERS as returning from MC, and counted away.</div>
     ${rows}
   </div>`;
@@ -3056,7 +3080,7 @@ function countCompanyConductsInWindow(startIso, endIso) {
 function countMCDaysInWindow(d4, startIso, endIso) {
   let days = 0;
   STATE.medical
-    .filter(m => m.d4 === d4 && (m.status === "MC" || m.status === "Warded"))
+    .filter(m => m.d4 === d4 && isAwayMedStatus(m.status))
     .forEach(m => {
       const s = displayDateToISO(m.startDate || "");
       const e = displayDateToISO(m.endDate || "");

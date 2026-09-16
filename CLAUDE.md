@@ -95,6 +95,12 @@ The fixture is `test/e2e/fixtures/demo-seed.json`, seeded via `context.addInitSc
 
 Add a spec per frontend feature under `test/e2e/*.spec.js`.
 
+The Playwright static server's port is **derived from the checkout path**, and the server is pinned with `--directory`.
+It used to be a fixed 5599 with `reuseExistingServer`, which meant a worktree's run silently adopted whichever checkout started the server first and tested code it did not contain - a spec passing against the wrong tree, with nothing in the output to say so.
+`PW_PORT` still overrides if you need a specific port.
+
+`js/state.js` is no longer loadable on its own: its read-boundary normalizers call into `js/helpers.js` (`canonMedStatus`), so the node harnesses load `helpers.js` first, exactly as `index.html` does.
+
 ## Conventions
 
 - No em dashes in prose or commit messages. Use a plain dash.

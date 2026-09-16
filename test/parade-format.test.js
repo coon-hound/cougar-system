@@ -141,8 +141,13 @@ const NASTY = [
   "Ré-check (x2)", "A".repeat(120), "1400 review", "-", "()", "@"
 ];
 const RANKS = ["REC", "3SG", "2SG", "2LT", "CPT", "ME3", "MWO", "", "CDT", "??"];
-const STATUSES = ["MC", "Warded", "LD", "Excuse RMJ", "Excuse Heavy Load", "Excuse Kneeling", "Pending", "NIL", "Excuse Jumping"];
-const LEAVE_TYPES = ["Off-in-Lieu", "Annual Leave", "Weekend", "Night's Out", "Course", "Guard Duty", "NDP", "Other", "", "Compassionate"];
+// Both spellings of Hospitalisation Leave are in the pool on purpose: the
+// American one must canonicalise at the read boundary rather than becoming an
+// unknown custom status that silently stops counting the man out of camp.
+const STATUSES = ["MC", "Warded", "LD", "Excuse RMJ", "Excuse Heavy Load", "Excuse Kneeling", "Pending", "NIL", "Excuse Jumping", "Hospitalisation Leave", "Hospitalization Leave"];
+// "Hospitalisation Leave" is a legacy LEAVE type (it predates the medical
+// status and is no longer offered in the form). It must still file cleanly.
+const LEAVE_TYPES = ["Off-in-Lieu", "Annual Leave", "Weekend", "Night's Out", "Course", "Guard Duty", "NDP", "Other", "", "Compassionate", "Hospitalisation Leave"];
 const TIMES = ["0930", "1420", "0700-2100", "930", "", "0800-1200"];
 
 const DATE = "2026-09-15";
