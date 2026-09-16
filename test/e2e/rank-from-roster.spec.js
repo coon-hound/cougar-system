@@ -94,6 +94,57 @@ test.describe("rank comes from the roster", () => {
     await expect(page.locator("#modal-body")).toContainText("REC · 1402");
   });
 
+  test("a whole-company promotion reaches every report, not just the parade state", async ({ page }) => {
+    // The event this is really about: every enlistee in the company is a PTE.
+    // The parade state, the conduct chat message, the Medical Status List and
+    // the MSK report are four separate generators with three different R/N
+    // formatters between them, so one of them agreeing with the roster says
+    // nothing about the other three. "PTE everywhere" is checked everywhere.
+    await seedAndGoto(page);
+
+    const out = await page.evaluate(() => {
+      const today = todayISO();
+      const shown = isoToDisplayDate(today);
+      const man = STATE.roster.find((r) => r.role !== "Commander");
+
+      // Every enlistee promoted; commanders keep whatever rank they hold,
+      // because the split is on role and never on rank.
+      for (const r of STATE.roster) if (r.role !== "Commander") r.rank = "PTE";
+
+      STATE.medical.push({
+        id: "m-promote", d4: man.id, status: "LD", reason: "Ankle",
+        startDate: shown, endDate: shown, inCamp: false, location: "",
+      });
+      STATE.msk.push({
+        id: "msk-promote", d4: man.id, type: "Report", description: "Shin splints",
+        timestamp: new Date().toISOString(), cleared: false,
+      });
+
+      // A conduct with one PX, filed in the same scope as its attendance row,
+      // so the chat message actually names somebody.
+      const att = STATE.attendance[0];
+      STATE.conductDetail.push({
+        id: "cd-promote", d4: man.id, date: att.date, time: att.time,
+        conductId: att.conductId, program: att.program, type: "PX", reason: "MC",
+      });
+
+      return {
+        d4: man.id,
+        parade: generateParadeStateText("FP", today, "0730"),
+        medical: generateMedicalStatusText(today, "0730"),
+        msk: generateMSKReportText(today, "0730"),
+        conduct: buildConductChatFormat(att.id),
+      };
+    });
+
+    for (const [surface, text] of Object.entries(out)) {
+      if (surface === "d4") continue;
+      expect(text, `${surface} produced nothing to check`).toBeTruthy();
+      expect(text, `${surface} still files an enlistee as REC`).not.toMatch(/\bREC\b/);
+      expect(text, `${surface} lost the rank entirely`).toContain("PTE");
+    }
+  });
+
   test("the roster table still renders with ranks present", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));

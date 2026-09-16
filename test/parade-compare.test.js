@@ -301,6 +301,35 @@ module.exports = async function run() {
     eq(d.people.added.length + d.people.removed.length + d.people.changed.length, 0, "promotion is a no-op");
   });
 
+  await test("every rank the app can render is stripped, enlistee ranks included", () => {
+    // The strip list started as the commander ranks plus a few, and it MISSED
+    // PFC, LTE, SLTC, BG and CWO. A missing token is silent: the rank stays
+    // glued to the name, the key becomes "nm:PFC ALPHA TAN", and the man reads
+    // as removed AND added across the exact promotion this stripping absorbs.
+    // So the list is pinned to the rank tables the app renders from.
+    const RANKS = [
+      "REC", "PTE", "PFC", "LCP", "CPL", "CFC", "SCT", "OCT",
+      "3SG", "2SG", "1SG", "SSG", "MSG", "SGT", "3WO", "2WO", "1WO", "MWO", "SWO", "CWO",
+      "2LT", "LTA", "LTE", "CPT", "MAJ", "LTC", "SLTC", "COL", "BG",
+      "ME1", "ME2", "ME3", "ME4", "ME5", "ME6", "ME7", "ME8",
+    ];
+    const unstripped = RANKS.filter((rk) => {
+      const p = rich.parseParadeState(`OTHERS:\nR/N: ${rk} ALPHA TAN\nReason: course`);
+      return p.people[0] && p.people[0].key !== "nm:ALPHA TAN";
+    });
+    eq(unstripped, [], "these ranks stay glued to the name and diff as remove+add");
+  });
+
+  await test("a company-wide REC to PTE promotion is not a hundred changes", () => {
+    // The morning the whole company is posted into unit training: every line
+    // it names changes its rank token at once. If that read as remove+add the
+    // compare would be a wall of noise on the one day it matters.
+    const lines = (rk) => "OTHERS:\n" + ["ALPHA TAN", "BRAVO LIM", "CHARLIE NG"]
+      .map((n, i) => `${i + 1}. 740${i + 1} ${rk} ${n} - Course`).join("\n");
+    const d = rich.diffParadeStates(rich.parseParadeState(lines("REC")), rich.parseParadeState(lines("PTE")), {});
+    eq(d.people.added.length + d.people.removed.length, 0, "nobody arrives or leaves on a promotion");
+  });
+
   await test("MED-only list vs full FP: only shared sections compared", () => {
     const medOnly = "110726(latest version as of 110726 @0730 Hrs)\n\n" +
       "MEDICAL STATUS: 01\n\nS/N: 01\nR/N: REC CHARLIE THREE C1403\nReason: Ankle\nStatus: 5D LD\nDuration: 100726 - 140726";
