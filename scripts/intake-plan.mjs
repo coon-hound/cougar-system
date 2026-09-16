@@ -239,6 +239,11 @@ export function nricKey(nric) {
  * corrupt exactly the numbers the dashboard exists to report — strength,
  * participation, LMS counts — so they archive even for a returnee.
  *
+ * Conducts archives with them. It was "keep" until 0010, on the premise that
+ * conduct names recur; they do not - the company retypes them - so a registry
+ * that is never archived only grows, and it is read on a phone as one flat
+ * <select>.
+ *
  * Commanders are not part of an intake at all. They keep their leave rows
  * because off-in-lieu balances are earned by the person and must not reset when
  * the recruits under them change.
@@ -254,7 +259,12 @@ export const CARRY_RULES = {
   attendance: { table: "attendance", tab: "Attendance", carry: "none" },
   conductDetail: { table: "conductdetail", tab: "ConductDetail", carry: "none" },
   polar: { table: "polarflow", tab: "PolarFlow", carry: "none" },
-  conducts: { table: "conducts", tab: "Conducts", carry: "keep" },
+  // Archived wholesale, like attendance and conductDetail. 0004 assumed conduct
+  // NAMES recur every intake and so left the registry alone; intake 16 disproved
+  // that within two days by typing a fresh "ENDURANCE RUN 1" rather than reusing
+  // the previous cohort's. An un-archived registry only ever grows, and it is
+  // read on a phone as one flat <select>. See 0010_conduct_archive.sql.
+  conducts: { table: "conducts", tab: "Conducts", carry: "none" },
 };
 
 /** Match confidence, most to least trusted. */

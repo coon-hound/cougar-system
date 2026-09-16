@@ -68,11 +68,17 @@ const REV_TABS = [
   "Duty", "Calendar", "OilRules",
 ];
 
-// Tables that get archived at a changeover. Conducts is excluded: it is a
-// vocabulary of conduct names that recur every intake.
+// Tables that get archived at a changeover.
+//
+// Conducts used to be excluded, on 0004's premise that it is a vocabulary of
+// conduct names that recur every intake. It is not: intake 16 created a fresh
+// "ENDURANCE RUN 1" two days in rather than reuse the previous cohort's entry,
+// and the registry had grown to 112 rows in one flat <select>. 0010 gave it the
+// intake stamp and the two archive guards; this list is what keeps the next
+// changeover from having to do it by hand again.
 const COHORT_TABLES = [
   "roster", "medical", "attendance", "ippt", "routemarch", "soc",
-  "polarflow", "conductdetail", "appointments", "leave", "msk",
+  "polarflow", "conductdetail", "appointments", "leave", "msk", "conducts",
   // The duty schedule (0009). These hold commander rows only, and commanders
   // are skipped by the archive step and rolled forward - so they never
   // actually archive. They are here so the ROLL-FORWARD loop picks them up: a
@@ -83,6 +89,11 @@ const COHORT_TABLES = [
   // not a cohort's property, and is not intake-stamped at all.
   "duty", "oil_rule",
 ];
+
+// Cohort tables with no `d4` to re-key: every row belongs to the outgoing
+// cohort's training calendar rather than to a person, so the whole table
+// archives. Roster is special-cased separately (its id IS the 4D).
+const NO_D4_TABLES = new Set(["attendance", "conducts"]);
 
 // ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -184,15 +195,17 @@ async function archiveCohort(tx, prevLabel, newLabel, commanderIds) {
   for (const table of COHORT_TABLES) {
     if (table === "roster") continue;
 
-    if (table === "attendance") {
-      // Attendance rows are per-conduct, not per-person: no d4 to re-key, and
-      // every one of them belongs to the outgoing cohort's training calendar.
+    if (NO_D4_TABLES.has(table)) {
+      // Per-conduct, not per-person: no d4 to re-key, and every row belongs to
+      // the outgoing cohort's training calendar. Attendance is the log;
+      // conducts is the registry of names it points at, and both are retyped by
+      // the incoming cohort rather than reused.
       const rows = await tx`
-        update attendance
+        update ${tx(table)}
            set intake = ${prevLabel}, deleted_at = coalesce(deleted_at, now())
          where intake is distinct from ${prevLabel} or deleted_at is null
          returning "id"`;
-      moved.attendance = rows.length;
+      moved[table] = rows.length;
       continue;
     }
 
@@ -220,7 +233,9 @@ async function archiveCohort(tx, prevLabel, newLabel, commanderIds) {
     update roster set intake = ${newLabel}
      where "id" = any (${commanderIds}) and deleted_at is null`;
   for (const table of COHORT_TABLES) {
-    if (table === "roster" || table === "attendance") continue;
+    // NO_D4_TABLES have no "d4" column at all, so this query does not merely
+    // match nothing there - it fails to parse.
+    if (table === "roster" || NO_D4_TABLES.has(table)) continue;
     await tx`
       update ${tx(table)} set intake = ${newLabel}
        where "d4" = any (${commanderIds}) and deleted_at is null`;
@@ -440,8 +455,8 @@ async function main() {
     console.log("     dropped those phones SHOW the old company.");
     console.log("  2. Redeploy the Edge Function so it picks up the new dropped_fields rows");
     console.log("     (it caches them for the life of a warm instance).");
-    console.log("  3. Re-check the platoon -> program map in the Conducts tab: the new intake");
-    console.log("     may split PTP/BMT across different platoons.");
+    console.log("  3. The Conducts registry archived with everything else, so the new intake");
+    console.log("     starts with an empty conduct list and types its own names in.");
     console.log("  4. Re-issue invites, and reset Telegram registrations so recruits re-register");
     console.log("     against the new 4Ds.");
     console.log("");
