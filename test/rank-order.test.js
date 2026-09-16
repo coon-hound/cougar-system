@@ -34,7 +34,10 @@ function loadHelpers() {
 }
 
 const H = loadHelpers();
+// Rank ordering is a COMMAND BODY rule, so the default fixture is a commander.
 const p = (rank, id, name) => ({ id: id || "", rank, name: name || "", role: "Commander" });
+// An enlistee: the rank is carried, but it must never affect his position.
+const e = (id, rank, name) => ({ id, rank: rank || "PTE", name: name || "", role: "Recruit" });
 const ranksOf = list => list.map(r => r.rank);
 
 module.exports = async function run() {
@@ -98,6 +101,41 @@ module.exports = async function run() {
     // Caller-supplied tie-break: name.
     const byName = (a, b) => String(a.name).localeCompare(String(b.name));
     eq(H.sortByRank(list, byName).map(r => r.name).join(" "), "ALPHA BRAVO CHARLIE DELTA");
+  });
+
+  suite("helpers: rank orders the command body, enlistees keep 4D order");
+
+  // The whole company holds one rank now, so ordering the men by it destroys
+  // the only ordering they can actually be scanned in. The 4D is a seat:
+  // digit 1 is the platoon, digit 2 the section.
+  await test("enlistees sort by 4D, whatever rank they carry", () => {
+    const list = [e("7204"), e("7101"), e("8103", "CFC"), e("7103"), e("7102", "REC")];
+    eq(H.sortByRank(list).map(r => r.id).join(" "), "7101 7102 7103 7204 8103",
+      "4D order, and the CFC did not jump the queue");
+  });
+
+  await test("a caller tie-break cannot reorder the men either", () => {
+    // The tie-break exists to break ties WITHIN a rank. There is no rank
+    // dimension among the men, so 4D order stands.
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+    const list = [e("7102", "PTE", "ALPHA"), e("7101", "PTE", "ZULU")];
+    eq(H.sortByRank(list, byName).map(r => r.id).join(" "), "7101 7102", "still 4D");
+  });
+
+  await test("commanders lead the list even with no rank on the roster", () => {
+    // A blank rank sorts past the bottom among commanders, but must never drop
+    // a commander below the men - his row would be lost in the middle of a
+    // platoon otherwise.
+    const list = [e("7101"), { id: "0007", rank: "", name: "NO RANK", role: "Commander" }, e("7102")];
+    eq(H.sortByRank(list).map(r => r.id).join(" "), "0007 7101 7102");
+  });
+
+  await test("a full company list: command body by rank, then the men by 4D", () => {
+    const list = [
+      e("8103"), p("3SG", "0003", "CHARLIE"), e("7101"), p("CPT", "0001", "ALPHA"),
+      e("7102", "CFC"), p("MSG", "0002", "BRAVO"),
+    ];
+    eq(H.sortByRank(list).map(r => r.id).join(" "), "0001 0002 0003 7101 7102 8103");
   });
 
   await test("sortByRank never reorders the caller's array", () => {

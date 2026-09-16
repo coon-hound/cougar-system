@@ -232,6 +232,109 @@ async function main() {
     ok(near > far * 3, `near=${near} far=${far}`);
   });
 
+  suite("reseat — a two-man seat swap");
+
+  // Why this mode exists: re-dealing the whole platoon assigns 4Ds by POSITION
+  // in the list, so "these two exchange sections" would re-number every man
+  // below them as well - re-issuing invites and busting caches for men who did
+  // not move. A swap is the exact expression of the real-world change.
+  const swap = (P, a, b, opts = {}) =>
+    P.planSwap({ roster: opts.roster ?? ROSTER, a, b, plt: opts.plt });
+
+  await test("two men exchange their existing 4Ds, and nobody else moves", () => {
+    const p = swap(P, "5101", "5202");
+    ok(p.ok, "planned: " + JSON.stringify(p.issues));
+    eq(p.moves.length, 2, "exactly two moves");
+    eq(moveMap(p)["5101"], "5202", "first man takes the second man's seat");
+    eq(moveMap(p)["5202"], "5101", "and the second takes the first's");
+  });
+
+  await test("the pair is a clean permutation, which is what the rename needs", () => {
+    // The apply path renames through a temporary key precisely because the set
+    // overlaps itself. That is only safe if the new ids ARE the old ids.
+    const p = swap(P, "5101", "5202");
+    const olds = p.moves.map((m) => m.oldId).sort();
+    const news = p.moves.map((m) => m.newId).sort();
+    eq(String(news), String(olds), "the same two seats, exchanged");
+  });
+
+  await test("each man can be named by 4D or by name, and the pid comes with him", () => {
+    const p = swap(P, "ALPHA TAN", "5202");
+    ok(p.ok, "mixed 4D and name: " + JSON.stringify(p.issues));
+    eq(moveMap(p)["5101"], "5202");
+    // people.last_d4 / d4_history follow the pid, so losing it would leave the
+    // person registry pointing at the seat the other man now holds.
+    eq(p.moves.find((m) => m.oldId === "5101").pid, "P-ALPHA", "pid carried");
+  });
+
+  await test("a name that matches nobody BLOCKS, with ranked candidates", () => {
+    const p = swap(P, "ALFA TAN", "5202");
+    ok(!p.ok, "blocked");
+    const issue = p.issues.find((i) => /nobody on the roster/.test(i.message));
+    ok(issue, "says nobody is named that: " + JSON.stringify(p.issues));
+    eq(issue.candidates[0].id, "5101", "ranks the man he probably meant first");
+  });
+
+  await test("an ambiguous name BLOCKS rather than picking one", () => {
+    const twins = ROSTER.concat([{ id: "5203", name: "ALPHA TAN", role: "Recruit", pid: "P-TWIN" }]);
+    const p = swap(P, "ALPHA TAN", "5202", { roster: twins });
+    ok(!p.ok, "blocked");
+    ok(p.issues.some((i) => /matches 2 men/.test(i.message)), JSON.stringify(p.issues));
+  });
+
+  await test("swapping a man with himself is refused", () => {
+    const p = swap(P, "5101", "ALPHA TAN");
+    ok(!p.ok, "blocked");
+    ok(p.issues.some((i) => /same man/.test(i.message)), JSON.stringify(p.issues));
+  });
+
+  await test("a commander has no section seat to exchange", () => {
+    const withCmd = ROSTER.concat([{ id: "0012", name: "ZULU COMMANDER", role: "Commander", pid: "P-CMD" }]);
+    const p = swap(P, "0012", "5202", { roster: withCmd });
+    ok(!p.ok, "blocked");
+    ok(p.issues.some((i) => /not an enlistee/.test(i.message)), JSON.stringify(p.issues));
+  });
+
+  await test("--plt is a guard: a name resolving into another platoon BLOCKS", () => {
+    // The failure it catches: a name typed for platoon 5 that happens to match
+    // a man in platoon 6, swapped without anyone noticing the platoon changed.
+    const wider = ROSTER.concat([{ id: "6101", name: "FOXTROT KOH", role: "Recruit", pid: "P-FOX" }]);
+    const p = swap(P, "5101", "6101", { roster: wider, plt: 5 });
+    ok(!p.ok, "blocked");
+    ok(p.issues.some((i) => /is in platoon 6, not 5/.test(i.message)), JSON.stringify(p.issues));
+    // Without the guard the same swap is allowed: platoons do exchange men.
+    ok(swap(P, "5101", "6101", { roster: wider }).ok, "allowed with no --plt");
+  });
+
+  await test("the report names nobody unless --names is asked for", () => {
+    const p = swap(P, "5101", "5202");
+    const quiet = P.formatSwapReport(p);
+    ok(/5101 -> 5202/.test(quiet), "shows the seats: " + quiet);
+    ok(!/ALPHA TAN/.test(quiet), "but not the men, so it is safe to paste into a chat");
+    ok(/ALPHA TAN/.test(P.formatSwapReport(p, { names: true })), "--names opts in");
+  });
+
+  suite("reseat — the runner is wired to the planner");
+
+  // The bug this pins, found by running the thing rather than testing it: the
+  // planner was exported and unit-tested, the runner called planSwap, and
+  // nobody imported it. Every unit test passed because they all import the
+  // PLANNER directly - the one path never exercised was the runner's own
+  // import line, which is the only path an operator ever takes.
+  await test("every planner function the runner calls is actually imported", () => {
+    const src = fs.readFileSync(path.join(ROOT, "scripts/reseat.mjs"), "utf8");
+    const line = src.match(/import\s*\{([^}]*)\}\s*from\s*"\.\/reseat-plan\.mjs"/);
+    ok(line, "reseat.mjs imports from reseat-plan.mjs");
+    const imported = new Set(line[1].split(",").map((t) => t.trim()).filter(Boolean));
+
+    // Everything the planner offers, as actually called in the runner body.
+    const body = src.slice(line.index + line[0].length);
+    const used = new Set();
+    for (const m of body.matchAll(/\b(plan[A-Z]\w*|format\w*Report|parseSections)\s*\(/g)) used.add(m[1]);
+    ok(used.size >= 4, "found the call sites: " + [...used].join(", "));
+    for (const name of used) ok(imported.has(name), `${name}() is called but not imported`);
+  });
+
   suite("reseat — no real name may reach this public repository");
 
   // Walk the tree, not just the files above: a SECTION block appearing anywhere

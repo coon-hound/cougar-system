@@ -1,4 +1,4 @@
-// Feature spec: people read highest rank first, lowest at the bottom.
+// Feature spec: the command body reads highest rank first; the men keep 4D order.
 //
 // Drives the REAL Roster screen and the REAL person pickers. The demo fixture
 // is six RECs and one 3SG, which cannot tell a rank sort from a 4D sort, so
@@ -18,16 +18,17 @@ const MIXED = [
   { id: "0002", name: "COMD LEE", role: "Commander", rank: "CPT" },
 ];
 
-// Roster order after seeding: officers, then WOSPEC, then the men, then the
-// person whose rank column is empty.
-const EXPECTED = ["0002", "0003", "0004", "0001", "1401",
-                  "1402", "1403", "2401", "2402", "2403", "0005"];
+// Roster order after seeding: the command body senior-first (the blank-rank
+// commander last of THEM, but still ahead of the men), then every enlistee in
+// 4D order regardless of the rank he carries.
+const EXPECTED = ["0002", "0003", "0004", "0001", "0005",
+                  "1401", "1402", "1403", "2401", "2402", "2403"];
 
 async function seedMixed(page) {
   await page.evaluate((extra) => {
     STATE.roster.push(...extra);
-    // One recruit promoted, so the enlistee tier is ordered too and not just
-    // one flat block of RECs.
+    // One man given a higher rank than the rest. He must NOT move: rank
+    // ordering stops at the command body, and 1401 is already first by 4D.
     STATE.roster.find((r) => r.id === "1401").rank = "CFC";
     saveLocal();
     render();
@@ -44,7 +45,7 @@ const optionValues = (page, sel) =>
   page.$$eval(`${sel} option`, (els) => els.map((e) => e.value).filter(Boolean));
 
 test.describe("people list by rank, highest first", () => {
-  test("the Roster table is ordered by rank, 4D inside a rank", async ({ page }) => {
+  test("the Roster lists the command body by rank, then the men by 4D", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await seedAndGoto(page);
@@ -53,10 +54,10 @@ test.describe("people list by rank, highest first", () => {
 
     expect(await rosterIds(page)).toEqual(EXPECTED);
 
-    // The tie-break is the point of this assertion: 1402/1403/2401/2402/2403
-    // are all REC and still read in 4D order, exactly as they used to.
-    const recs = (await rosterIds(page)).slice(5, 10);
-    expect(recs).toEqual([...recs].sort());
+    // The point of this assertion: the men read in 4D order, and the promoted
+    // CFC (1401) sits where his 4D puts him rather than at the head of them.
+    const men = (await rosterIds(page)).slice(5);
+    expect(men).toEqual([...men].sort());
 
     await page.screenshot({ path: "test-results/rank-ordering-roster.png", fullPage: true });
     expect(errors).toEqual([]);
@@ -79,7 +80,8 @@ test.describe("people list by rank, highest first", () => {
     const labels = await page.$$eval("#f-d4 option", (els) =>
       els.map((e) => e.textContent.trim()).filter((t) => t !== "Select..."));
     expect(labels[0]).toBe("CPT COMD LEE");
-    expect(labels[labels.length - 1]).toBe("COMD UNKNOWN");   // no rank, still listed
+    // The blank-rank commander is last of the command body, not last overall.
+    expect(labels[4]).toBe("COMD UNKNOWN");
 
     await page.evaluate(() => closeModal());
     expect(errors).toEqual([]);
