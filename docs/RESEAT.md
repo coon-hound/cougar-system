@@ -59,6 +59,37 @@ Read the report, then work the blocking list until it is empty.
 When it ends in `READY`, run it again with `--apply`.
 It is one transaction: if anything fails, nothing is committed.
 
+## When only two men trade places
+
+A re-section deals the whole platoon, and the 4Ds come out in **list order** -
+so a man who did not move sections still changes seat if the men above him did.
+When the real change is "these two swap", that churn is noise: it re-issues
+invites and drops the cache for men who never moved.
+
+Swap them directly instead. Nobody else is touched.
+
+```bash
+node scripts/reseat.mjs --swap 8101 8408 --plt 8          # by 4D
+node scripts/reseat.mjs --swap "ALPHA TAN" 8408 --plt 8   # or by name
+```
+
+Preview first, exactly as above, then add `--apply`.
+
+Each side is a 4D or a name that resolves to **one** man, under the same
+matching rules as a list: an ambiguous or unrecognised name stops the run and
+is reported with ranked candidates rather than guessed at. `--plt` is an
+optional guard - name it and both men must be in that platoon, so a name that
+quietly resolved into a different one stops the run. Leave it out to swap across
+platoons, which is a real thing that happens.
+
+The apply path is shared with a re-section: the same two-phase rename through a
+temporary key, the same child tables discovered from the catalogue, the same
+single transaction, the same `people` history and `intake_log` entries (logged
+as `swap`), and the same rev bump.
+
+The same two follow-ups apply afterwards: bump `STORAGE_KEY` and `?v=`, and
+re-issue invites for both men.
+
 ## What it refuses to do
 
 The list must account for **the whole platoon, one-to-one**.
