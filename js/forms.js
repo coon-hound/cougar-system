@@ -20,7 +20,8 @@ function openPerson(d4) {
   // PTE on posting into unit training), so a commander checking a man against
   // the battalion's nominal roll can see it without opening the parade state.
   let html = p.role === "Commander"
-    ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`
+    ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander · ${getPlt(p) ? "PL " + getPlt(p) : "COY HQ"}${p.status ? ` — ${statusBadge(p.status)}` : ""}
+        <button class="btn btn-icon" style="margin-left:6px" onclick="openCommanderForm('${p.id}')" title="Edit commander (rank, name, platoon)">✎</button></div>`
     : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} — ${statusBadge(p.status)}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ────────
@@ -1535,6 +1536,16 @@ function deleteCombined(name) {
   openGroupsForm(); render();
 }
 
+// Platoon choices for the commander form: every platoon the recruits are
+// actually in, plus this commander's own current platoon so an edit can never
+// silently drop a tag pointing at a platoon that has emptied out. "" = COY HQ.
+function commanderPltOptions(e) {
+  const plts = new Set(STATE.roster.filter(r => r.role !== "Commander").map(getPlt).filter(Boolean));
+  if (e && e.plt) plts.add(String(e.plt));
+  const sorted = [...plts].sort((a, b) => (+a || 0) - (+b || 0) || String(a).localeCompare(String(b)));
+  return [["", "COY HQ (no platoon)"]].concat(sorted.map(p => [p, "Platoon " + p]));
+}
+
 // Lightweight roster-add form scoped to commanders. Recruits are added via
 // the Google Sheet directly (their data is sourced from pre-enlistment
 // nominal rolls); commanders are added ad-hoc in-app so the user doesn't
@@ -1552,6 +1563,8 @@ function openCommanderForm(id) {
           ${formField("f-rank", "Rank", "text", "3SG / 2LT / CPT…", `required maxlength="10" value="${escapeAttr(e?.rank)}"`)}
         </div>
         ${formField("f-name", "Name", "text", "Nicholas Eng", `required maxlength="100" value="${escapeAttr(e?.name)}"`)}
+        ${formSelect("f-plt", "Platoon", commanderPltOptions(e), false, e?.plt ?? "")}
+        <div style="font-size:11px;color:var(--muted);margin-top:-4px">Files this commander under their platoon on the parade state. Leave as COY HQ for company HQ.</div>
         ${formField("f-quota", "Off-in-Lieu Quota (days)", "number", "14", `min="0" max="365" step="1" value="${e?.leaveQuota ?? 14}"`)}
         ${formField("f-phone", "Phone (optional)", "text", "9123 4567", `maxlength="20" value="${escapeAttr(e?.phone)}"`)}
         <button type="submit" class="btn btn-primary">${e ? "Save" : "Add Commander"}</button>
@@ -1571,7 +1584,9 @@ function submitCommander() {
     leaveQuota: +gv("f-quota") || 0,
     phone: gv("f-phone") || "",
     status: "",
-    plt: "",
+    // A commander's platoon is explicit: their 00xx 4D carries no platoon
+    // digit, so getPlt reads this field and nothing else. "" = COY HQ.
+    plt: gv("f-plt"),
     sect: ""
   };
   if (editId) {

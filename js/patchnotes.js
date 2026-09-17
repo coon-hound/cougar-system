@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 144;
+const APP_VERSION = 145;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 145,
+    date: "17 Sep 2026",
+    title: "Commanders stand with their platoon",
+    intro: "Every commander used to be filed under COY HQ on the parade state, no matter which platoon he actually runs. A PC or PS can now be tagged to his platoon, and he is counted in that platoon's block instead.",
+    items: [
+      { t: "🎖️ Tag a commander to a platoon", d: "Roster → + Commander (or ✎ on a commander's profile) now has a Platoon picker. Leave it on COY HQ for company HQ - the OC, the CSM and anyone else who is not with one platoon." },
+      { t: "🪖 He appears in his platoon's block", d: "On the parade state a tagged commander is filed under PL 7 / PL 8 / PL 9 and counted on that block's OFFICER or WOSPEC line - never on the ENLISTEE line, so the platoon's man count stays exactly what it was." },
+      { t: "🔍 And in his platoon's view", d: "Filtering the app to a platoon now shows that platoon's commanders alongside its men, instead of hiding every commander." },
+      { t: "➕ Adding a commander is back in reach", d: "The Add Commander form had no button anywhere in the app. It is on the Roster toolbar now." },
+    ],
+  },
   {
     v: 144,
     date: "16 Sep 2026",
