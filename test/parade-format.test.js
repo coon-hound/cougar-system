@@ -181,7 +181,12 @@ function randomState(seed) {
     const id = `00${String(int(1, 60)).padStart(2, "0")}`;
     if (used.has(id)) continue;
     used.add(id);
-    roster.push({ id, role: "Commander", rank: pick(RANKS), name: r() < 0.1 ? "" : `Cmd ${id}` });
+    const cmd = { id, role: "Commander", rank: pick(RANKS), name: r() < 0.1 ? "" : `Cmd ${id}` };
+    // Most commanders are tagged to a platoon and file under its block; some
+    // are coy-level and stay in COY HQ. Both must keep the block/rank sums
+    // honest, and a commander may be tagged to a platoon holding no recruits.
+    if (r() < 0.75) cmd.plt = String(int(1, 9));
+    roster.push(cmd);
   }
   const anyId = () => roster.length ? pick(roster).id : "9999";
   const medical = [];

@@ -556,24 +556,33 @@ function rankCategory(r) {
 }
 
 // The parade-state block a person is filed under. Cougar files COY HQ first
-// (the whole command body — our commanders hold no platoon 4D) then one block
-// per platoon, labelled "PL 7" … "PL 9". A recruit with no resolvable platoon
-// also lands in COY HQ rather than a phantom block, so the blocks always sum
-// to the company strength.
+// (company HQ plus any untagged commander) then one block per platoon,
+// labelled "PL 7" … "PL 9".
+//
+// Platoon comes from getPlt for EVERYONE, commanders included: a commander
+// carries no platoon in their 00xx 4D, so theirs is the explicit `plt` field,
+// set in the Add/Edit Commander form. A PC/PS belongs on parade with the
+// platoon they command, not in a coy-level lump — battalion reads the block as
+// "who is with this platoon today". An untagged commander (and a recruit with
+// no resolvable platoon) still lands in COY HQ rather than a phantom block, so
+// every body is filed exactly once and the blocks always sum to the company
+// strength. rankCategory then splits them onto the OFFICER/WOSPEC line within
+// that block, so a tagged commander never inflates the platoon's ENLISTEE count.
 const PARADE_COY_HQ = "COY HQ";
 const paradePltLabel = plt => "PL " + plt;
 function paradeBlockOf(r) {
-  if (!r || r.role === "Commander") return PARADE_COY_HQ;
+  if (!r) return PARADE_COY_HQ;
   const plt = getPlt(r);
   return plt ? paradePltLabel(plt) : PARADE_COY_HQ;
 }
 
 // Every block in filing order: COY HQ, then the platoons present in the
-// roster, numerically ascending.
+// roster, numerically ascending. Commanders count towards which blocks exist:
+// a platoon whose recruits are all struck off but whose command team remains
+// must still be filed, or their strength would vanish from the state.
 function paradeBlocks() {
   const plts = new Set();
   (STATE.roster || []).forEach(r => {
-    if (r.role === "Commander") return;
     const p = getPlt(r);
     if (p) plts.add(p);
   });
