@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 143;
+const APP_VERSION = 145;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 143,
+    v: 145,
     date: "17 Sep 2026",
     title: "Commanders stand with their platoon",
     intro: "Every commander used to be filed under COY HQ on the parade state, no matter which platoon he actually runs. A PC or PS can now be tagged to his platoon, and he is counted in that platoon's block instead.",
@@ -30,6 +30,17 @@ const PATCH_NOTES = [
       { t: "🪖 He appears in his platoon's block", d: "On the parade state a tagged commander is filed under PL 7 / PL 8 / PL 9 and counted on that block's OFFICER or WOSPEC line - never on the ENLISTEE line, so the platoon's man count stays exactly what it was." },
       { t: "🔍 And in his platoon's view", d: "Filtering the app to a platoon now shows that platoon's commanders alongside its men, instead of hiding every commander." },
       { t: "➕ Adding a commander is back in reach", d: "The Add Commander form had no button anywhere in the app. It is on the Roster toolbar now." },
+    ],
+  },
+  {
+    v: 144,
+    date: "16 Sep 2026",
+    title: "Four men changed bunks",
+    intro: "Two pairs swapped seats - one in platoon 8, one in platoon 9 - so four 4Ds changed hands. Your phone drops its cached copy once on opening and pulls a fresh one, because a phone holding the old seating can write a record against a number that now belongs to somebody else.",
+    items: [
+      { t: "\ud83d\udd01 Platoon 8", d: "Toh Jia Le moves to section 1 and Francis Cheng to section 4. They exchanged 4Ds, so nobody else in the platoon changed number." },
+      { t: "\ud83d\udd01 Platoon 9", d: "Toh Wen Ho and Muhammad Farheen Bin Rosli exchanged 4Ds the same way." },
+      { t: "\ud83d\udcf1 Nothing of yours is lost", d: "Only the local cache is dropped. Every record follows the man to his new number, and unsaved changes are pushed first as usual." },
     ],
   },
   {

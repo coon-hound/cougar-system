@@ -522,12 +522,30 @@ function rankIndex(r) {
   return i === undefined ? RANK_UNKNOWN : i;
 }
 
-// The comparator every senior-first list uses. Rank is the PRIMARY key; the
-// caller's existing order (4D, then name) stays as the tie-breaker, so two
-// 3SGs still read in the stable order they always did.
+// The comparator every senior-first list uses.
+//
+// Rank orders the COMMAND BODY only. Enlistees are deliberately left in 4D
+// order: the whole company holds one rank, so sorting them by it does nothing
+// but destroy the ordering people actually navigate by - the 4D is a seat, and
+// digit 1 is the platoon, digit 2 the section. A list that reads 7101, 7102,
+// 7103 is a nominal roll; the same list "sorted by rank" is the same men in an
+// order nobody can scan.
+//
+// Commanders always lead, whatever their rank string says, so a commander whose
+// rank column is blank still sits above the men rather than falling past them
+// to the bottom of the unknown bucket.
 function byRank(tie) {
   const fallback = typeof tie === "function" ? tie : byD4ThenName;
-  return (a, b) => (rankIndex(a) - rankIndex(b)) || fallback(a, b);
+  const isCmd = r => !!r && r.role === "Commander";
+  return (a, b) => {
+    const ca = isCmd(a), cb = isCmd(b);
+    if (ca !== cb) return ca ? -1 : 1;
+    // Enlistees: 4D order, never rank. The caller's tie-break is not consulted
+    // either - it exists to break ties WITHIN a rank, and there is no rank
+    // dimension here to tie on.
+    if (!ca) return byD4ThenName(a, b);
+    return (rankIndex(a) - rankIndex(b)) || fallback(a, b);
+  };
 }
 
 // The default tie-break: 4D order, falling back to name for the roster rows
