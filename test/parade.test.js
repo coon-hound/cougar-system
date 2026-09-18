@@ -142,9 +142,61 @@ module.exports = async function run() {
     const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
     ok(/2201/.test(section(out, "ATT C")), "on MC → ATT C");
     ok(!/2201/.test(section(out, "OTHERS")), "accidental book-out suppressed from OTHERS");
-    // The leave record is real data, so it is still filed — but the body is
-    // counted away exactly once, which is what the strength line proves.
+    // ATT C and OFF/LEAVE both say "out of camp", so the leave must not list
+    // them a second time — the MC is the reason they are away.
+    ok(!/2201/.test(section(out, "OFF/LEAVE")), "leave not listed alongside ATT C: " + section(out, "OFF/LEAVE"));
     ok(/^COMPANY: 2\/3$/m.test(out), "still one body away: " + out);
+  });
+
+  await test("a STATUS holder on OFF is listed under STATUS and OFF/LEAVE", () => {
+    // STATUS says nothing about where someone is, so it stacks with an absence.
+    const st = state();
+    st.leave.push({ id: 5, d4: "3405", type: "Off-in-Lieu", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "" });
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/3405 REC LD GUY - 4D LD \(Ankle\) \(290626-020726\) OUT/.test(section(out, "STATUS")), "LD still under STATUS, marked OUT: " + section(out, "STATUS"));
+    ok(/3405 REC LD GUY - OFF-IN-LIEU \(290626\)/.test(section(out, "OFF/LEAVE")), "OFF under OFF/LEAVE: " + section(out, "OFF/LEAVE"));
+    ok(/^COMPANY: 1\/3$/m.test(out), "counted away once: " + out);
+  });
+
+  await test("a report sick or appointment on OFF keeps both lines", () => {
+    const st = state();
+    st.medical.push({ d4: "1303", status: "Pending", reason: "Cough", startDate: "29 Jun 2026", location: "" });
+    st.appointments.push({ id: 32, d4: "3405", reason: "Dental", date: "30 Jun 2026", time: "0900", location: "", outOfCamp: false, resolved: false });
+    st.leave.push(
+      { id: 6, d4: "1303", type: "Off-in-Lieu", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "" },
+      { id: 7, d4: "3405", type: "Weekend", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "" }
+    );
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/1303/.test(section(out, "REPORT SICK")) && /1303/.test(section(out, "OFF/LEAVE")), "report sick + OFF: " + out);
+    ok(/3405/.test(section(out, "MA")) && /3405/.test(section(out, "OFF/LEAVE")), "MA + weekend: " + out);
+  });
+
+  await test("only one out-of-camp section per person: ATT C > OFF/LEAVE > OTHERS", () => {
+    const st = state();
+    // 2201: away MC + a course → ATT C only.
+    st.leave.push({ id: 8, d4: "2201", type: "Course", startDate: "29 Jun 2026", endDate: "30 Jun 2026", reason: "" });
+    // 3405: OFF + guard duty + a manual book-out → OFF/LEAVE only.
+    st.leave.push(
+      { id: 9, d4: "3405", type: "Off-in-Lieu", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "" },
+      { id: 10, d4: "3405", type: "Guard Duty", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "" }
+    );
+    Object.assign(st.roster.find(x => x.id === "3405"), { outOfCamp: true, outSince: DATE, outReason: "Errand" });
+    // 2201 is warded as well → the ATT C MC wins over the OTHERS Warded too.
+    st.medical.push({ d4: "2201", status: "Warded", reason: "Dengue", startDate: "29 Jun 2026", endDate: "30 Jun 2026", location: "" });
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/2201/.test(section(out, "ATT C")) && !/2201/.test(section(out, "OTHERS")), "MC beats course: " + out);
+    ok(/3405/.test(section(out, "OFF/LEAVE")) && !/3405/.test(section(out, "OTHERS")), "OFF beats guard duty + book-out: " + out);
+    ok(/3405/.test(section(out, "STATUS")), "LD still listed under STATUS");
+  });
+
+  await test("a consume-in-camp MC never hides a real absence", () => {
+    // 1303's MC is consumed in camp, so its ATT C line doesn't say they are out;
+    // the OFF they also hold is the absence, and both lines stay.
+    const st = state();
+    st.leave.push({ id: 11, d4: "1303", type: "Off-in-Lieu", startDate: "29 Jun 2026", endDate: "29 Jun 2026", reason: "" });
+    const out = loadParade(st).generateParadeStateText("FP", DATE, "0730");
+    ok(/1303/.test(section(out, "ATT C")), "MC still listed: " + section(out, "ATT C"));
+    ok(/1303/.test(section(out, "OFF/LEAVE")), "OFF still listed: " + section(out, "OFF/LEAVE"));
   });
 
   await test("borderline returnee (MC ended yesterday, ticked) is filed once", () => {
@@ -160,6 +212,7 @@ module.exports = async function run() {
     const others = section(out, "OTHERS");
     ok(/2201 REC AWAY GUY - RETURNING FROM MC/.test(others), "returning from MC files under OTHERS: " + others);
     ok(!/2201/.test(section(out, "ATT C")), "the ended MC is no longer an ATT C entry");
+    ok(!/2201/.test(section(out, "OFF/LEAVE")), "not double-filed under OFF/LEAVE: " + section(out, "OFF/LEAVE"));
     ok(/^COMPANY: 2\/3$/m.test(out), "ticked returnee counts away: " + out);
   });
 
