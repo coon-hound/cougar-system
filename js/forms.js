@@ -1935,7 +1935,11 @@ function outsideApptsForParade(dateIso) {
 // Two invariants hold the format together:
 //   1. A person is filed in exactly ONE block (their platoon, or COY HQ), but
 //      may hold several records and so appear on several LINES — an MC plus an
-//      excuse is two facts, not two bodies.
+//      excuse is two facts, not two bodies. The exception is the out-of-camp
+//      sections (ATT C, OFF/LEAVE, OTHERS): a person is away for ONE reason, so
+//      they are listed under only one of them (see paradeOneAbsence). STATUS,
+//      REPORT SICK and MA say nothing about where someone is, so they stack
+//      freely with an absence — an LD recruit on OFF is listed under both.
 //   2. Strength is computed only from outOfCampMap + the ticked borderline
 //      returnees, never by counting section lines, so listing a fact twice can
 //      never move a number. The blocks therefore always add up to COMPANY.
@@ -2078,7 +2082,10 @@ function paradeMedEntries(dateIso, away, status, section) {
         // A consume-in-camp / booked-in MC is still an MC — it stays under
         // ATT C and carries IN, rather than hiding in another section.
         marker: paradeMarker(section, away.has(d4)),
-        location: r.location || ""
+        location: r.location || "",
+        // Consumed in camp (or booked in today), the line records the MC but
+        // doesn't say they are out, so it never crowds out a real absence.
+        absence: medKeptInCamp(r, dateIso) ? null : PARADE_ABSENCE_MEDICAL
       });
     });
   });
@@ -2189,7 +2196,8 @@ function paradeLeaveEntries(dateIso, away) {
       desc: paradeDesc(null, isHosp ? paradeStatusWord(l.type) : (paradeSafeText(l.type) || "LEAVE").toUpperCase(), l.reason),
       dates: span.text,
       marker: paradeMarker(section, away.has(l.d4)),
-      location: ""
+      location: "",
+      absence: isHosp ? PARADE_ABSENCE_MEDICAL : PARADE_ABSENCE_LEAVE
     });
   });
   return out;
@@ -2206,7 +2214,8 @@ function paradeOthersEntries(dateIso, away) {
       desc: paradeDesc(null, "RETURNING FROM " + paradeStatusWord(m.status), m.reason),
       dates: span.text,
       marker: paradeMarker("OTHERS", away.has(m.d4)),
-      location: ""
+      location: "",
+      absence: PARADE_ABSENCE_MEDICAL
     });
   });
   for (const [d4, info] of outOfCampMap(dateIso)) {
@@ -2222,7 +2231,8 @@ function paradeOthersEntries(dateIso, away) {
       desc: paradeDesc(null, (paradeSafeText(info.reason) || "OUT OF CAMP").toUpperCase(), ""),
       dates: toDDMMYY(dateIso),
       marker: paradeMarker("OTHERS", away.has(d4)),
-      location: ""
+      location: "",
+      absence: PARADE_ABSENCE_BOOKOUT
     });
   }
   return out;
@@ -2264,11 +2274,34 @@ function paradeCommandTeamLines(dateIso, blocks) {
   });
 }
 
+// Why an out-of-camp line says someone is away, strongest first — the same
+// precedence outOfCampMap uses to count them (medical > leave > book-out).
+const PARADE_ABSENCE_MEDICAL = 0, PARADE_ABSENCE_LEAVE = 1, PARADE_ABSENCE_BOOKOUT = 2;
+
+// ATT C, OFF/LEAVE and OTHERS each say "this person is out of camp", so listing
+// one person under two of them reads as two bodies away (an MC recruit who also
+// had an OFF logged would otherwise appear under ATT C *and* OFF/LEAVE). Keep
+// only the section holding their strongest reason — ties go to the earlier
+// section — and drop their lines in the others. Lines in STATUS / REPORT SICK /
+// MA are untouched: those sections don't say whether someone is in camp. Nor is
+// a line with no absence (a consume-in-camp MC): it is kept whatever else holds.
+function paradeOneAbsence(entries) {
+  const best = new Map();
+  const order = s => PARADE_SECTION_ORDER.indexOf(s);
+  const claimsOut = e => PARADE_SECTION_IMPLIES_OUT[e.section] && e.absence != null;
+  entries.forEach(e => {
+    if (!claimsOut(e)) return;
+    const cur = best.get(e.d4);
+    if (!cur || e.absence < cur.absence || (e.absence === cur.absence && order(e.section) < order(cur.section))) best.set(e.d4, e);
+  });
+  return entries.filter(e => !claimsOut(e) || best.get(e.d4).section === e.section);
+}
+
 function generateParadeStateText(type, dateIso, time) {
   const away = paradeAwaySet(dateIso);
   const blocks = paradeBlocks();
   const roster = STATE.roster || [];
-  const entries = [].concat(
+  const entries = paradeOneAbsence([].concat(
     paradeMedEntries(dateIso, away, "MC", "ATT C"),
     // Hospitalisation Leave files under ATT C alongside MC, as its OWN
     // classification ("14D HOSP LEAVE (…)") rather than as an MC. NOTE: the
@@ -2285,7 +2318,7 @@ function generateParadeStateText(type, dateIso, time) {
     // explicit about it, and HQ collates on those section names.
     paradeMedEntries(dateIso, away, "Warded", "OTHERS"),
     paradeOthersEntries(dateIso, away)
-  );
+  ));
   const byId = new Map(roster.map(r => [r.id, r]));
   // Someone with a record but no roster row (a deleted recruit, a stale sheet)
   // still has to appear somewhere, so they file under COY HQ rather than
