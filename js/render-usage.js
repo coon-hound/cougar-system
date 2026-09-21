@@ -254,7 +254,7 @@ function usageTaskCostCard(summary) {
               <tr>
                 <td style="text-align:left">${escapeAttr(t.label)}</td>
                 <td>${t.starts}</td>
-                <td>${t.completed === null ? `<span style="color:var(--dim)">—</span>` : t.completed}</td>
+                <td>${t.completed === null ? `<span style="color:var(--dim)" title="Recorded before the task funnel was fixed, so the outcome is not known">&mdash;</span>` : t.completed}</td>
                 <td style="color:${t.avgClicks >= 6 ? "var(--orange)" : "var(--muted)"}">${t.avgClicks || "—"}</td>
                 <td class="mono">${t.cost}</td>
                 <td>${usageAbandonBadge(t.abandonRate, t.ended)}</td>
