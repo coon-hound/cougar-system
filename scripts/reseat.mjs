@@ -49,7 +49,7 @@ import { formatReseatReport, formatSwapReport, parseSections, planReseat, planSw
 // Exactly REV_TABS (Edge Function). A re-section can touch any of them, and a
 // tab whose rev did not move is a tab every phone in the field still believes
 // its stale cache of — which it will then push back over the top of this.
-const REV_TABS = [
+export const REV_TABS = [
   "Roster", "Medical", "Attendance", "IPPT", "RouteMarch", "SOC",
   "PolarFlow", "ConductDetail", "Appointments", "Leave", "MSK", "Conducts",
 ];
@@ -57,7 +57,7 @@ const REV_TABS = [
 // The temporary key the rename passes through. "~" sorts above every digit and
 // letter and is not legal in any 4D, so a half-finished run is obvious rather
 // than plausible.
-const TEMP = "~";
+export const TEMP = "~";
 
 export function parseArgs(argv) {
   const out = { apply: false, names: false, plt: "", file: "", swap: null };
@@ -84,22 +84,27 @@ export function parseArgs(argv) {
  * record of what was written at the time, and rewriting history to match the
  * present is the one thing an audit log must never do.
  */
-async function d4Tables(sql) {
+export async function d4Tables(sql) {
   const rows = await sql`
     select c.relname                                         as table,
            a.attname                                         as col,
-           exists (select 1 from information_schema.columns ic
-                    where ic.table_schema = 'public'
-                      and ic.table_name   = c.relname
-                      and ic.column_name  = 'intake')        as has_intake
+           bool_or(a2.attname = 'intake')                    as has_intake,
+           -- depart.mjs builds its archive UPDATE from these two: not every
+           -- d4-keyed table carries a deleted_at (auth_tokens and invites are
+           -- revoked instead), and a SET list naming a column that is not
+           -- there fails the whole transaction.
+           bool_or(a2.attname = 'deleted_at')                as has_deleted,
+           bool_or(a2.attname = 'revoked_at')                as has_revoked
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
       join pg_attribute a on a.attrelid = c.oid
+      join pg_attribute a2 on a2.attrelid = c.oid and a2.attnum > 0 and not a2.attisdropped
      where n.nspname = 'public'
        and c.relkind = 'r'
        and a.attnum > 0 and not a.attisdropped
        and lower(a.attname) = 'd4'
        and c.relname <> 'audit'
+     group by c.relname, a.attname
      order by c.relname`;
   return rows;
 }

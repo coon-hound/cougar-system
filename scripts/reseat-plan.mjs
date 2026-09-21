@@ -379,14 +379,18 @@ export function formatReseatReport(plan, { names = false } = {}) {
 // named by his 4D, or by a name that resolves to exactly ONE roster row. A near
 // miss is ranked and reported, never accepted: the cost of being wrong here is
 // two men swapping each other's medical history.
-export function planSwap({ plt, roster, a, b }) {
-  const issues = [];
-  const pltStr = plt === undefined || plt === null || plt === "" ? "" : String(plt);
-
-  // Commanders hold an administrative 00xx id and no section seat, so there is
-  // no seat for them to exchange.
+/**
+ * Index the roster once, the way both the swap and the departure matcher need
+ * it: by 4D and by name key, over the men who actually hold a seat.
+ *
+ * Commanders hold an administrative 00xx id and no section seat, so they are
+ * out by default — a re-section or a swap cannot involve them. A departure
+ * can: a commander gets posted out like anybody else, he simply has no seat to
+ * free. That is the whole reason this takes an option.
+ */
+export function rosterIndex(roster, { commanders = false } = {}) {
   const members = roster
-    .filter((r) => /^\d{4}$/.test(padD4(r.id)) && String(r.role ?? "") !== "Commander")
+    .filter((r) => /^\d{4}$/.test(padD4(r.id)) && (commanders || String(r.role ?? "") !== "Commander"))
     .map((r) => ({ ...r, id: padD4(r.id) }));
 
   const byId = new Map(members.map((m) => [m.id, m]));
@@ -396,49 +400,67 @@ export function planSwap({ plt, roster, a, b }) {
     if (!byKey.has(k)) byKey.set(k, []);
     byKey.get(k).push(m);
   }
+  return { members, byId, byKey };
+}
 
-  const resolve = (raw, side) => {
-    const want = String(raw ?? "").trim();
-    if (!want) {
-      issues.push({ level: "error", message: `${side}: no man given` });
+/**
+ * Name one man, exactly. A 4D, or a name that resolves to exactly ONE roster
+ * row; anything else pushes an issue and returns null.
+ *
+ * Shared by the swap and the departure on purpose. Both operations re-key a
+ * primary key on the strength of this answer, and the cost of a near miss —
+ * one man inheriting another's medical history, or the wrong man being posted
+ * out — is identical. Two copies of a matcher this load-bearing would drift.
+ */
+export function resolveMan(index, raw, side, issues) {
+  const want = String(raw ?? "").trim();
+  if (!want) {
+    issues.push({ level: "error", message: `${side}: no man given` });
+    return null;
+  }
+
+  // A bare 4D is unambiguous, so it wins outright and skips name matching.
+  if (/^[A-Za-z]?\d{3,4}$/.test(want)) {
+    const id = padD4(want);
+    const hit = index.byId.get(id);
+    if (!hit) {
+      issues.push({ level: "error", message: `${side}: ${id} is not an enlistee on the current roster` });
       return null;
     }
+    return { ...hit, how: "4d" };
+  }
 
-    // A bare 4D is unambiguous, so it wins outright and skips name matching.
-    if (/^[A-Za-z]?\d{3,4}$/.test(want)) {
-      const id = padD4(want);
-      const hit = byId.get(id);
-      if (!hit) {
-        issues.push({ level: "error", message: `${side}: ${id} is not an enlistee on the current roster` });
-        return null;
-      }
-      return { ...hit, how: "4d" };
-    }
-
-    const hits = byKey.get(nameKey(want)) ?? [];
-    if (hits.length === 1) return { ...hits[0], how: "name" };
-    if (hits.length > 1) {
-      issues.push({
-        level: "error",
-        message:
-          `${side}: "${want}" matches ${hits.length} men (${hits.map((h) => h.id).join(", ")}). ` +
-          `Name him by 4D instead.`,
-      });
-      return null;
-    }
-
-    const ranked = members
-      .map((m) => ({ id: m.id, name: m.name, score: rankScore(want, m.name) }))
-      .sort((x, y) => y.score - x.score)
-      .slice(0, 3);
+  const hits = index.byKey.get(nameKey(want)) ?? [];
+  if (hits.length === 1) return { ...hits[0], how: "name" };
+  if (hits.length > 1) {
     issues.push({
       level: "error",
-      message: `${side}: nobody on the roster is named "${want}".`,
-      candidates: ranked,
-      fix: ranked.length ? ranked[0].id : "",
+      message:
+        `${side}: "${want}" matches ${hits.length} men (${hits.map((h) => h.id).join(", ")}). ` +
+        `Name him by 4D instead.`,
     });
     return null;
-  };
+  }
+
+  const ranked = index.members
+    .map((m) => ({ id: m.id, name: m.name, score: rankScore(want, m.name) }))
+    .sort((x, y) => y.score - x.score)
+    .slice(0, 3);
+  issues.push({
+    level: "error",
+    message: `${side}: nobody on the roster is named "${want}".`,
+    candidates: ranked,
+    fix: ranked.length ? ranked[0].id : "",
+  });
+  return null;
+}
+
+export function planSwap({ plt, roster, a, b }) {
+  const issues = [];
+  const pltStr = plt === undefined || plt === null || plt === "" ? "" : String(plt);
+
+  const index = rosterIndex(roster);
+  const resolve = (raw, side) => resolveMan(index, raw, side, issues);
 
   const ma = resolve(a, "first man");
   const mb = resolve(b, "second man");
