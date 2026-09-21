@@ -38,6 +38,26 @@ const TELEMETRY = (function () {
   const FLUSH_MS = 60000;          // timer flush cadence
   const NAME_CAP = 48;             // max characters in any recorded name
 
+  // First day whose task OUTCOMES can be believed.
+  //
+  // Before this, closeModal ended every task as an abandonment, so a submit
+  // that succeeded and a form someone backed out of were filed identically —
+  // see the closeModal hook below. The counters from that window are not
+  // recoverable: the split between the two is simply not in the data, and the
+  // audit trail cannot supply it either, because one bulk book-out writes
+  // dozens of rows and one medical edit writes one.
+  //
+  // What IS still sound from that window is everything the bug never touched:
+  // starts, total clicks, dwell, and the count of ENDED sessions (both
+  // outcomes were counted, just under the wrong name). So the click-cost
+  // ranking — the entire point of this feature — reads those days normally,
+  // and only the completed/abandoned split is withheld.
+  //
+  // Set this to the first day on which every device is running the fixed
+  // collector. The uniform `?v=` bump forces that reload, which is what makes
+  // a single date honest here.
+  const OUTCOMES_VALID_FROM = "2026-09-22";
+
   // ── The task registry ─────────────────────────────────────────────────────
   //
   // A task is a named unit of intent with a start and a terminal. These names
@@ -583,9 +603,12 @@ const TELEMETRY = (function () {
         v.opens += d.views[n].n; v.ms += d.views[n].ms;
       }
       for (const n of Object.keys(d.tasks || {})) {
-        const t = tasks[n] || (tasks[n] = { starts: 0, done: 0, aban: 0, clicks: 0, ms: 0 });
+        const t = tasks[n] || (tasks[n] = { starts: 0, done: 0, aban: 0, clicks: 0, ms: 0, stale: 0 });
         const s = d.tasks[n];
         t.starts += s.starts; t.done += s.done; t.aban += s.aban; t.clicks += s.clicks; t.ms += s.ms;
+        // Ended sessions from the pre-fix window, whose outcome was recorded
+        // but whose outcome cannot be believed.
+        if (day < OUTCOMES_VALID_FROM) t.stale += (s.done || 0) + (s.aban || 0);
       }
     }
 
@@ -614,14 +637,19 @@ const TELEMETRY = (function () {
     const spec = TASKS[key] || {};
     const ended = (c.done || 0) + (c.aban || 0);
     const avgClicks = ended ? +(c.clicks / ended).toFixed(1) : 0;
-    const abandonRate = ended ? +((c.aban / ended) * 100).toFixed(0) : 0;
+    // An outcome recorded before the funnel was fixed says nothing, so the
+    // rate is withheld rather than shown as a number that reads as measured.
+    // `ended`, and therefore avgClicks and cost, stay valid either way.
+    const outcomesKnown = !(c.stale > 0);
+    const abandonRate = !outcomesKnown ? null : (ended ? +((c.aban / ended) * 100).toFixed(0) : 0);
     return {
       key,
       label: spec.label || key,
       starts: c.starts || 0,
-      completed: c.done || 0,
-      abandoned: c.aban || 0,
+      completed: outcomesKnown ? (c.done || 0) : null,
+      abandoned: outcomesKnown ? (c.aban || 0) : null,
       ended,
+      outcomesKnown,
       avgClicks,
       abandonRate,
       avgMs: ended ? Math.round((c.ms || 0) / ended) : 0,
@@ -645,7 +673,7 @@ const TELEMETRY = (function () {
     for (const t of ranked) {
       const frequent = t.starts >= Math.max(2, medFreq);
       const expensive = t.avgClicks >= Math.max(3, medCost);
-      const leaky = t.ended >= 3 && t.abandonRate >= 30;
+      const leaky = t.outcomesKnown !== false && t.ended >= 3 && t.abandonRate >= 30;
       if (!frequent && !leaky) continue;
       let verdict, why;
       // Leak first. A form a third of people back out of is a broken form, and

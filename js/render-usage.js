@@ -94,6 +94,11 @@ function usageDuration(ms) {
 
 function usageAbandonBadge(rate, ended) {
   if (!ended) return `<span style="color:var(--dim)">—</span>`;
+  // Withheld rather than zero: these sessions ended, but in a window where a
+  // completion and a give-up were recorded identically. See OUTCOMES_VALID_FROM.
+  if (rate === null || rate === undefined) {
+    return `<span style="color:var(--dim)" title="Recorded before the task funnel was fixed, so the outcome is not known">not measured</span>`;
+  }
   const cls = rate >= 40 ? "badge-red" : rate >= 20 ? "badge-orange" : "badge-green";
   return `<span class="badge ${cls}">${rate}%</span>`;
 }
@@ -117,8 +122,12 @@ function renderUsage(el) {
   const totalClicks = summary.features.reduce((s, f) => s + f.count, 0);
   const totalTasks = summary.tasks.reduce((s, t) => s + t.starts, 0);
   const totalEnded = summary.tasks.reduce((s, t) => s + t.ended, 0);
-  const totalAban = summary.tasks.reduce((s, t) => s + t.abandoned, 0);
-  const overallAban = totalEnded ? Math.round((totalAban / totalEnded) * 100) : 0;
+  // Only tasks whose outcome is knowable contribute to the company-wide rate;
+  // otherwise a pre-fix window drags the headline figure toward a false 100%.
+  const rated = summary.tasks.filter(t => t.outcomesKnown !== false);
+  const ratedEnded = rated.reduce((s, t) => s + t.ended, 0);
+  const totalAban = rated.reduce((s, t) => s + t.abandoned, 0);
+  const overallAban = ratedEnded ? Math.round((totalAban / ratedEnded) * 100) : null;
   const totalTaps = summary.tasks.reduce((s, t) => s + t.cost, 0);
   const hasData = totalClicks > 0 || totalTasks > 0 || summary.views.length > 0;
 
@@ -178,7 +187,7 @@ function renderUsage(el) {
       <div class="stat"><label>Taps recorded</label><div class="val" style="color:var(--accent)">${totalClicks}</div></div>
       <div class="stat"><label>Tasks started</label><div class="val" style="color:var(--teal)">${totalTasks}</div></div>
       <div class="stat"><label>Taps spent on tasks</label><div class="val" style="color:var(--orange)">${totalTaps}</div></div>
-      <div class="stat"><label>Abandoned</label><div class="val" style="color:${overallAban >= 30 ? "var(--red)" : "var(--green)"}">${overallAban}%</div></div>
+      <div class="stat"><label>Abandoned</label><div class="val" style="color:${overallAban === null ? "var(--dim)" : overallAban >= 30 ? "var(--red)" : "var(--green)"}">${overallAban === null ? "&mdash;" : overallAban + "%"}</div>${overallAban === null ? `<div class="sub">not measured before the funnel fix</div>` : ""}</div>
     </div>
     <p style="font-size:11px;color:var(--dim);margin:8px 0 16px">${scopeNote} · last ${USAGE_VIEW.days} days</p>
 
@@ -245,7 +254,7 @@ function usageTaskCostCard(summary) {
               <tr>
                 <td style="text-align:left">${escapeAttr(t.label)}</td>
                 <td>${t.starts}</td>
-                <td>${t.completed}</td>
+                <td>${t.completed === null ? `<span style="color:var(--dim)">—</span>` : t.completed}</td>
                 <td style="color:${t.avgClicks >= 6 ? "var(--orange)" : "var(--muted)"}">${t.avgClicks || "—"}</td>
                 <td class="mono">${t.cost}</td>
                 <td>${usageAbandonBadge(t.abandonRate, t.ended)}</td>

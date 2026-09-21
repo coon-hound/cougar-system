@@ -208,6 +208,11 @@ test("the insights view is honest when there is nothing to show", async ({ page 
 test("the insights view ranks cost and states a recommendation", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
+  // Pin the page clock past OUTCOMES_VALID_FROM. Task outcomes are withheld for
+  // days recorded before the funnel fix, so without this the leak verdict below
+  // would depend on what day the suite happens to run — passing tomorrow and
+  // failing today. Timers still run on real time; only the date is fixed.
+  await page.clock.setFixedTime(new Date("2026-10-01T09:00:00Z"));
   await gotoWithTelemetry(page);
 
   // Real usage, recorded through the real collector: open and abandon Book Out
@@ -306,6 +311,35 @@ test("a submit that fails validation is not counted as completed", async ({ page
   });
   expect(afterClose.done).toBe(0);
   expect(afterClose.aban).toBe(1);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("outcomes recorded before the funnel fix render as not measured", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  // A day inside the broken window. The same three abandoned Book Outs that
+  // produce a leak verdict above must not produce one here, because back then
+  // a successful submit and a give-up were recorded identically.
+  await page.clock.setFixedTime(new Date("2026-09-16T09:00:00Z"));
+  await gotoWithTelemetry(page);
+
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(() => openBookOutForm({}));
+    await page.locator('.modal [onclick^="setBookOutMode("]').first().click();
+    await page.locator(".modal-close").click();
+  }
+
+  await page.evaluate(() => renderUsage(document.getElementById("content")));
+  const content = page.locator("#content");
+
+  await expect(content).toContainText("not measured");
+  await expect(content).not.toContainText("the form is losing people");
+  // The click cost is unaffected by the bug and must still be ranked and shown.
+  await expect(content).toContainText("Book Out");
+  await expect(content).toContainText("Clicks per task");
+  const taps = await content.locator("table tbody tr", { hasText: "Book Out" }).first().innerText();
+  expect(taps).toMatch(/\d/);
 
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });

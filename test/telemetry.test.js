@@ -194,7 +194,7 @@ module.exports = async function run() {
 
   await test("the recommendation says what to do, in words", () => {
     const days = {
-      "2026-09-15": {
+      "2026-09-25": {
         features: {}, views: {},
         tasks: {
           book_out:  { starts: 47, done: 45, aban: 2, clicks: 282, ms: 900000 },
@@ -214,6 +214,37 @@ module.exports = async function run() {
     ok(/67% of 12 attempts/.test(leaky.why), "states the leak in words: " + leaky.why);
     eq(recs[0].key, "log_leave", "a broken funnel outranks a promotion candidate");
     ok(!recs.some(r => r.key === "soc_entry"), "a once-used task is not a finding");
+  });
+
+  await test("outcomes from before the funnel was fixed are withheld, not shown", () => {
+    // 15 Sep predates OUTCOMES_VALID_FROM. Back then closeModal filed a
+    // successful submit and a give-up identically, so the split is not in the
+    // data and no honest rate can be derived from it — but the taps, the
+    // starts and the count of ended sessions were never affected.
+    const stale = T.summarize({
+      "2026-09-15": { features: {}, views: {},
+        tasks: { log_leave: { starts: 12, done: 0, aban: 12, clicks: 60, ms: 200000 } } }
+    }, { days: 3650 });
+    const t = stale.tasks[0];
+    eq(t.outcomesKnown, false);
+    eq(t.abandonRate, null, "no rate rather than a made-up 100%");
+    eq(t.completed, null);
+    eq(t.abandoned, null);
+    eq(t.ended, 12, "ended is still true: both outcomes were counted, just misnamed");
+    eq(t.avgClicks, 5, "click cost is unaffected and still ranks");
+    eq(t.cost, 60);
+    ok(!T.recommend(stale).some(r => r.verdict === "investigate"),
+       "a 100% abandonment rate that is an artefact is not a finding");
+
+    // The same counters on a day after the fix are reported normally.
+    const fresh = T.summarize({
+      "2026-09-25": { features: {}, views: {},
+        tasks: { log_leave: { starts: 12, done: 0, aban: 12, clicks: 60, ms: 200000 } } }
+    }, { days: 3650 });
+    eq(fresh.tasks[0].outcomesKnown, true);
+    eq(fresh.tasks[0].abandonRate, 100);
+    ok(T.recommend(fresh).some(r => r.verdict === "investigate"),
+       "a real 100% abandonment rate is still flagged");
   });
 
   await test("no data yields no recommendation rather than a made-up one", () => {
