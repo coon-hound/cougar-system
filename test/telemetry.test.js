@@ -317,6 +317,41 @@ module.exports = async function run() {
     ok(missing.length === 0, "registry names with no matching function: " + JSON.stringify(missing));
   });
 
+  await test("keepsModalOpen matches whether the terminal really closes its modal", () => {
+    // This flag decides how a clean return from a `done` terminal is read: the
+    // finish, or a validation bail-out with the form still up. Getting it wrong
+    // is silent — the counters keep incrementing, they just describe something
+    // that did not happen — so it is pinned to the function's own source.
+    const src = ["js/forms.js", "js/render.js", "js/helpers.js", "js/sync.js"]
+      .map(f => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n");
+
+    // The body of `function name(...)`, by brace matching from its opening {.
+    function bodyOf(name) {
+      const m = new RegExp("(?:^|\\n)\\s*(?:async\\s+)?function\\s+" + name + "\\s*\\(").exec(src);
+      if (!m) return null;
+      const open = src.indexOf("{", m.index);
+      let depth = 0;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === "{") depth++;
+        else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+      }
+      return null;
+    }
+
+    const wrong = [];
+    for (const key of Object.keys(T.TASKS)) {
+      const spec = T.TASKS[key];
+      if (!spec.start) continue;            // instant tasks have no modal at all
+      const body = bodyOf(spec.done);
+      if (body === null) continue;          // the test above owns missing names
+      const closes = /\bcloseModal\s*\(/.test(body);
+      if (closes === !!spec.keepsModalOpen) {
+        wrong.push(key + ": closes=" + closes + " keepsModalOpen=" + !!spec.keepsModalOpen);
+      }
+    }
+    ok(wrong.length === 0, "keepsModalOpen disagrees with the source: " + JSON.stringify(wrong));
+  });
+
   suite("telemetry: load-time safety for the un-wired scripts");
 
   await test("telemetry.js + render-usage.js parse into the shared global scope", () => {

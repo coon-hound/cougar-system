@@ -240,3 +240,72 @@ test("the insights view ranks cost and states a recommendation", async ({ page }
   await page.screenshot({ path: "test-results/telemetry.png", fullPage: true });
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
+
+test("a successful submit counts as completed, not abandoned", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  await gotoWithTelemetry(page);
+
+  // The whole point of the funnel is to tell a finished job from an abandoned
+  // one. Every submit in this app closes its own modal on the way out, so if
+  // closeModal is what ends the task, a success is indistinguishable from a
+  // give-up — and the click-cost ranking is built on exactly that distinction.
+  await page.evaluate(() => openBookOutForm({ d4: "1401" }));
+  await expect(page.locator("#modal-overlay")).toBeVisible();
+  await page.locator("#f-bo-submit").click();
+  await expect(page.locator("#modal-overlay")).toBeHidden();
+
+  const task = await page.evaluate(() => {
+    const days = TELEMETRY.localDays();
+    for (const d of Object.values(days)) if (d.tasks.book_out) return d.tasks.book_out;
+    return null;
+  });
+  expect(task).not.toBeNull();
+  expect(task.starts).toBe(1);
+  expect(task.done).toBe(1);
+  expect(task.aban).toBe(0);
+
+  // The record really landed. Worth asserting: bookOutToggle no-ops silently
+  // on an id that is not on the roster, and a submit that wrote nothing would
+  // otherwise still close its modal and report itself completed.
+  const isOut = await page.evaluate(() => !!outOfCampMap(todayISO()).get("1401"));
+  expect(isOut).toBe(true);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("a submit that fails validation is not counted as completed", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  page.on("dialog", (d) => d.accept());
+  await gotoWithTelemetry(page);
+
+  // Bailing out on a missing field leaves the modal open and nothing saved.
+  // That is not a completed task, and counting it as one would hide precisely
+  // the forms that are hardest to fill in.
+  await page.evaluate(() => openBookOutForm({}));
+  await expect(page.locator("#modal-overlay")).toBeVisible();
+  await page.locator("#f-bo-submit").click();
+  await expect(page.locator("#modal-overlay")).toBeVisible();
+
+  const afterBail = await page.evaluate(() => {
+    const days = TELEMETRY.localDays();
+    for (const d of Object.values(days)) if (d.tasks.book_out) return d.tasks.book_out;
+    return null;
+  });
+  expect(afterBail.done).toBe(0);
+  expect(afterBail.aban).toBe(0, "still in the form, so neither finished nor given up");
+
+  // Giving up afterwards is the abandonment, and it is counted once.
+  await page.locator(".modal-close").click();
+  await expect(page.locator("#modal-overlay")).toBeHidden();
+  const afterClose = await page.evaluate(() => {
+    const days = TELEMETRY.localDays();
+    for (const d of Object.values(days)) if (d.tasks.book_out) return d.tasks.book_out;
+    return null;
+  });
+  expect(afterClose.done).toBe(0);
+  expect(afterClose.aban).toBe(1);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});

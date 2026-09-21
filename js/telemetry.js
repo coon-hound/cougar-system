@@ -48,6 +48,14 @@ const TELEMETRY = (function () {
   //
   // `start: null` means an instant task: a one-tap action with no funnel, so
   // it is always a completed task of cost 1.
+  //
+  // `keepsModalOpen: true` marks the few terminals that finish their job
+  // WITHOUT closing the modal — you can copy a report twice without reopening
+  // it. That distinction decides how a clean return is read: for these, it is
+  // the finish; for every other terminal, a return that closed nothing means
+  // the submit bailed out on a validation error and the form is still up. The
+  // unit suite checks each flag against the function's own source, so the two
+  // cannot drift apart silently.
   const TASKS = {
     book_out:        { start: "openBookOutForm",        done: "submitBookOut",        label: "Book Out" },
     book_in:         { start: null,                     done: "markPresentToday",     label: "Book In" },
@@ -59,12 +67,12 @@ const TELEMETRY = (function () {
     attendance:      { start: "openAttendanceForm",     done: "submitAttendance",     label: "Attendance" },
     conduct_detail:  { start: "openConductDetailForm",  done: "submitConductDetail",  label: "Conduct Detail" },
     ippt_entry:      { start: "openIPPTForm",           done: "submitIPPT",           label: "IPPT Entry" },
-    report:          { start: "openReportModal",        done: "copyReportToClipboard", label: "Generate Report" },
-    parade_compare:  { start: "openCompareModal",       done: "copyCompareSummary",   label: "Compare Parade States" },
+    report:          { start: "openReportModal",        done: "copyReportToClipboard", keepsModalOpen: true, label: "Generate Report" },
+    parade_compare:  { start: "openCompareModal",       done: "copyCompareSummary",   keepsModalOpen: true, label: "Compare Parade States" },
     person_lookup:   { start: null,                     done: "openPerson",           label: "Person Lookup" },
     groups:          { start: "openGroupsForm",         done: "submitGroupNames",     label: "Edit Groups" },
     group_members:   { start: "openGroupMembersForm",   done: "submitGroupMembers",   label: "Group Members" },
-    combined_group:  { start: "openCombinedForm",       done: "submitCombined",       label: "Combined Group" },
+    combined_group:  { start: "openCombinedForm",       done: "submitCombined",       keepsModalOpen: true, label: "Combined Group" },
     commander:       { start: "openCommanderForm",      done: "submitCommander",      label: "Add Commander" }
   };
 
@@ -337,6 +345,13 @@ const TELEMETRY = (function () {
 
   let openTask = null;   // { key, t0, clicks }
 
+  // How many `done` terminals are currently executing. Every submit in this
+  // app closes its own modal on the way out, so closeModal firing while this
+  // is non-zero is the SUCCESS signal, not a give-up. Async submits keep it
+  // raised until their promise settles, which is when their wrapper's `after`
+  // runs, so the sync and async paths need no special-casing.
+  let doneDepth = 0;
+
   // `clicks` starts at 1, not 0: the tap that opened the form is part of what
   // the task cost. The capture listener runs BEFORE the inline handler, so at
   // that instant there was no open task to attribute it to.
@@ -402,17 +417,43 @@ const TELEMETRY = (function () {
         const instant = !spec.start;
         const ok = wrapGlobal(
           scope, spec.done,
-          instant ? () => beginTask(key) : null,
-          (success) => endTask(success ? "completed" : "error")
+          () => { if (instant) beginTask(key); doneDepth += 1; },
+          (success) => {
+            doneDepth = Math.max(0, doneDepth - 1);
+            // A terminal that closed its own modal has already been recorded
+            // as completed, by the closeModal hook below.
+            if (!openTask) return;
+            if (!success) { endTask("error"); return; }
+            // It returned cleanly having closed nothing. For an instant task
+            // and for the keepsModalOpen terminals that IS the finish. For
+            // anyone else it is a validation bail-out — `alert(...); return;`
+            // with the form still on screen — so the task is still running and
+            // the next thing to happen to it decides its outcome.
+            if (instant || spec.keepsModalOpen) endTask("completed");
+          }
         );
         if (!ok) missing.push(spec.done);
       }
     }
-    // A closing modal with a task still open is an abandonment — a form people
-    // open and back out of is a form with a problem, and that is as interesting
-    // as click cost. The `done` wrappers detach the task BEFORE the original
-    // runs, so a submit that closes its own modal is never miscounted here.
-    wrapGlobal(scope, "closeModal", () => { if (openTask) endTask("abandoned"); }, null);
+    // closeModal is the terminal for nearly every task in this app, and which
+    // outcome it means depends entirely on who called it.
+    //
+    // Called from inside a `done` terminal, it is the submit finishing: the
+    // record is written and the form is being torn down. Called from anywhere
+    // else — the ✕, the backdrop, Escape — the form is being walked away from,
+    // and a form people open and back out of is a form with a problem, which
+    // is as interesting as click cost.
+    //
+    // This used to read `abandoned` unconditionally, on the stated assumption
+    // that the `done` wrappers detached the task before the original ran. They
+    // did not: `after` runs once the original RETURNS, so every successful
+    // submit closed its own modal first and was filed as a give-up, while the
+    // completion that followed found no open task and was dropped. Seven days
+    // of production data came back 0% completion on every modal form.
+    wrapGlobal(scope, "closeModal", () => {
+      if (!openTask) return;
+      endTask(doneDepth > 0 ? "completed" : "abandoned");
+    }, null);
     return missing;
   }
 
