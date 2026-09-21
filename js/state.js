@@ -37,12 +37,13 @@ const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 // case: the men are the same, so nothing looks stale, but a phone holding the
 // old seating will happily write a row against a 4D that now belongs to
 // someone else. The rev bumps stop it overwriting; only dropping the cache
-// stops it acting on the wrong man. See scripts/reseat.mjs.
+// stops it acting on the wrong man. See scripts/reseat.mjs and scripts/depart.mjs.
 //   v1 "cougar-data"     - contained a hardcoded personnel fallback
 //   v2 "cougar-data-v2"  - the BMT cohort, archived at intake 16
 //   v3 "cougar-data-v3"  - intake 16 before platoon 9 was re-sectioned
-const STORAGE_KEY = "cougar-data-v5";
-const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4"];
+//   v5 "cougar-data-v5"  - before section 9-4 closed up behind a departure
+const STORAGE_KEY = "cougar-data-v6";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
