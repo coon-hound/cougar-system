@@ -20,7 +20,20 @@ port="${2:-8080}"
 node -e '
 const fs = require("fs");
 const seed = require("./test/e2e/fixtures/demo-seed.json");
+
+// The data cache key is VERSIONED and gets bumped at every change of intake,
+// and every older key is on STORAGE_KEY_LEGACY - which loadLocal() does not
+// merely ignore, it DELETES. So seeding the fixture under its own key handed
+// the app a cache it wiped on the way in, and the preview opened on an empty
+// roster with nothing to say why. test/e2e/support.js already re-keys for
+// exactly this reason; this is the same fix for the manual-test step.
+const src = fs.readFileSync("./js/state.js", "utf8");
+const m = src.match(/const STORAGE_KEY\s*=\s*"([^"]+)"/);
+if (!m) { console.error("could not read STORAGE_KEY out of js/state.js"); process.exit(1); }
+const DATA_KEY = m[1];
+
 const sets = Object.entries(seed)
+  .map(([k, v]) => [/^cougar-data(-v\d+)?$/.test(k) ? DATA_KEY : k, v])
   .map(([k, v]) => `  localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(JSON.stringify(v))});`)
   .join("\n");
 fs.writeFileSync("__preview.html",

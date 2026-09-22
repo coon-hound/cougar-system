@@ -42,6 +42,7 @@ function render() {
     case "medical": renderMedical(el); break;
     case "ippt": renderIPPT(el); break;
     case "leave": renderLeave(el); break;
+    case "duty": renderDuty(el); break;
     case "mskAnalytics": renderMSKAnalytics(el); break;
     case "conducts": renderConducts(el); break;
     case "usage": renderUsage(el); break;
@@ -2413,4 +2414,402 @@ function copyInviteLink() {
   // a working fallback rather than a dead end.
   navigator.clipboard?.writeText(input.value).catch(() => {});
   input.focus(); input.select();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Duty schedule
+//
+// TWO DIFFERENT SCREENS, not one screen with the buttons taken out.
+//
+// Almost everybody who opens this is a commander asking one question: when am
+// I next on, and how many offs have I got left. Handing him the planner - a
+// month of coverage pips, a fairness spread, an issues list - buries that
+// answer under work that is not his. So a non-admin gets a short read-only
+// screen that leads with his own next duty, and the admin gets the planner.
+//
+// canEditDuty() is presentation only. The Edge Function refuses a write to
+// Duty / Calendar / OilRules from a non-admin token whatever this renders.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Name order as the tie-break inside a rank, matching the parade-state picker.
+const dutyByName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""));
+
+const DUTY_ROLE_COLOR = { PDS: "accent", CDS: "accent2", COS: "teal",
+                          SENTRY: "pink", GD: "orange", CDO: "accentLift" };
+const dutyRoleTint = role => `var(--${DUTY_ROLE_COLOR[role] || "muted"})`;
+
+// "TUE 6 OCT". Short enough for a row, unambiguous enough for a roster.
+function dutyDayLabel(iso) {
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return iso || "";
+  const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const MONS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONS[d.getMonth()]}`;
+}
+function dutyShiftISO(iso, n) {
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return iso;
+  d.setDate(d.getDate() + n);
+  const p = x => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+const dutyIsWeekend = iso => {
+  const d = new Date(iso + "T00:00:00");
+  return !isNaN(d) && (d.getDay() === 0 || d.getDay() === 6);
+};
+// How far away a date is, in the words a person would use.
+function dutyWhen(iso, today) {
+  if (iso === today) return "today";
+  if (iso === dutyShiftISO(today, 1)) return "tomorrow";
+  const a = new Date(today + "T00:00:00"), b = new Date(iso + "T00:00:00");
+  const n = Math.round((b - a) / 86400000);
+  return n > 0 ? `in ${n} days` : `${Math.abs(n)} days ago`;
+}
+
+// Who is holding this phone. STATE.me.d4 comes from the backend; the local
+// pick is the fallback for a device that has one token shared by several
+// people, which is how a few of these phones are actually used.
+const DUTY_ME_KEY = "cougar-duty-me";
+function dutyMeD4() {
+  if (STATE.me && STATE.me.d4) return padD4(STATE.me.d4);
+  try { return localStorage.getItem(DUTY_ME_KEY) || ""; } catch { return ""; }
+}
+function setDutyMe(d4) {
+  try { d4 ? localStorage.setItem(DUTY_ME_KEY, d4) : localStorage.removeItem(DUTY_ME_KEY); }
+  catch { /* private mode - the picker just asks again next time */ }
+  render();
+}
+
+let _dutyMode = "today";      // admin only: today | month | people
+let _dutyCursor = "";         // the date the day view is showing
+let _dutyMonth = "";          // YYYY-MM the month view is showing
+
+function renderDuty(el) {
+  const today = todayISO();
+  if (!_dutyCursor) _dutyCursor = today;
+  if (!_dutyMonth) _dutyMonth = today.slice(0, 7);
+  el.innerHTML = canEditDuty() ? dutyAdminHtml(today) : dutyReaderHtml(today);
+}
+
+// ── The reader's screen ────────────────────────────────────────────────────
+// One scroll, four things, in the order he needs them.
+function dutyReaderHtml(today) {
+  const me = dutyMeD4();
+  const r = me ? STATE.roster.find(x => x.id === me) : null;
+  return `
+    <div class="dty-head"><h2>Duty</h2>
+      <span class="dty-sub">${dutyDayLabel(today)}</span></div>
+    ${r && r.role === "Commander" ? dutyMineHtml(me, today) : dutyWhoAreYouHtml(me)}
+    ${dutyTodayCardHtml(today, false)}
+    <div class="dty-foot">Built by the company admin. Ask them for a change.</div>`;
+}
+
+function dutyWhoAreYouHtml(me) {
+  const cmdrs = sortByRank(STATE.roster.filter(x => x.role === "Commander"), dutyByName);
+  if (!cmdrs.length) return "";
+  return `<div class="card"><div class="pad">
+      <div class="dty-ask">Which of these are you?</div>
+      <div class="dty-asksub">Saved on this phone only, so your own duties come up first.</div>
+      <select class="dty-mepick" onchange="setDutyMe(this.value)">
+        <option value="">Choose your name</option>
+        ${cmdrs.map(c => `<option value="${escapeAttr(c.id)}"${c.id === me ? " selected" : ""}>${escapeHtml(displayPersonLabel(c.id))}</option>`).join("")}
+      </select></div></div>`;
+}
+
+// The answer to "when am I next on", given the space it deserves.
+function dutyMineHtml(d4, today) {
+  const next = dutyNextFor(d4, today, 2);
+  const bal = commanderBalances(d4);
+  const n0 = next[0];
+
+  const strip = Array.from({ length: 7 }, (_, i) => {
+    const iso = dutyShiftISO(today, i);
+    const mine = (STATE.duty || []).find(x =>
+      x && x.d4 === d4 && x.date === iso && (!x.status || x.status === "published"));
+    const out = outOfCampMap(iso).get(d4);
+    const code = mine ? mine.role + (mine.slot || "")
+      : out ? (out.kind === "medical" ? "MC" : "OFF")
+      : dutyIsWeekend(iso) ? "" : "-";
+    const tint = mine ? dutyRoleTint(mine.role)
+      : out ? (out.kind === "medical" ? "var(--red)" : "var(--purple)") : "var(--dim)";
+    const d = new Date(iso + "T00:00:00");
+    return `<div class="dty-strip-day${iso === today ? " is-today" : ""}${dutyIsWeekend(iso) ? " is-week" : ""}">
+        <span class="dty-strip-dow">${["S","M","T","W","T","F","S"][d.getDay()]}</span>
+        <span class="dty-strip-num mono">${d.getDate()}</span>
+        <span class="dty-strip-code mono" style="color:${tint}">${escapeHtml(code)}</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="card dty-mine">
+      <div class="dty-mine-top">
+        <div class="dty-mine-who">${escapeHtml(displayPersonLabel(d4))}</div>
+        <button class="btn btn-icon dty-mine-swap" onclick="setDutyMe('')" title="Not you?">&#9998;</button>
+      </div>
+      ${n0 ? `
+        <div class="dty-mine-next">
+          <span class="dty-mine-role mono" style="color:${dutyRoleTint(n0.role)}">${escapeHtml(n0.role + (n0.slot || ""))}</span>
+          <span class="dty-mine-when">${escapeHtml(dutyDayLabel(n0.date))}
+            <small>${escapeHtml(dutyWhen(n0.date, today))}</small></span>
+        </div>
+        ${next[1] ? `<div class="dty-mine-then">then ${escapeHtml(next[1].role + (next[1].slot || ""))} on ${escapeHtml(dutyDayLabel(next[1].date))}</div>` : ""}
+      ` : `<div class="dty-mine-none">No duty scheduled.</div>`}
+      <div class="dty-strip">${strip}</div>
+      ${bal ? `
+        <div class="dty-mine-bal">
+          <span class="oil">Off in lieu <b class="mono">${dutyNum(bal.oil.remaining)}</b> left<small> of ${dutyNum(bal.oil.entitled)}</small></span>
+          <span class="al">Annual leave <b class="mono">${dutyNum(bal.al.remaining)}</b> left<small> of ${dutyNum(bal.al.entitled)}</small></span>
+        </div>` : ""}
+    </div>`;
+}
+const dutyNum = n => Number.isInteger(n) ? String(n) : (Math.round(n * 10) / 10).toFixed(1);
+
+// Today's team. The reader gets it flat and unclickable; the admin gets the
+// same card with every row a control.
+function dutyTodayCardHtml(iso, editable) {
+  const cov = dutyCoverage(iso, editable);
+  const out = outOfCampMap(iso);
+  const cal = dutyCalendarFor(iso);
+
+  if (!cov.demanded) {
+    return `<div class="card"><header class="dty-cardhead"><h3>ON DUTY</h3></header>
+      <div class="pad dty-quiet">${dutyIsWeekend(iso) ? "Weekend - no duties." :
+        cal.some(c => c.code === "PH") ? "Public holiday - no duties." : "No duties today."}</div></div>`;
+  }
+
+  const rows = cov.slots.map(s => {
+    const d4 = cov.held[s.key];
+    const o = d4 ? out.get(d4) : null;
+    const cls = !d4 ? "gap" : o ? "clash" : "";
+    const body = `
+      <span class="dty-slot-role mono" style="color:${d4 && !o ? dutyRoleTint(s.role) : ""}">${escapeHtml(s.key)}</span>
+      <span class="dty-slot-who">${d4 ? escapeHtml(displayPersonLabel(d4)) : "not assigned"}
+        ${o ? `<small>${escapeHtml(o.reason || o.kind)}</small>` : ""}</span>
+      ${editable ? '<span class="dty-chev">&rsaquo;</span>' : ""}`;
+    return editable
+      ? `<button class="dty-slot ${cls}" onclick="openDutySlot('${escapeAttr(iso)}','${escapeAttr(s.key)}')">${body}</button>`
+      : `<div class="dty-slot ${cls}">${body}</div>`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <header class="dty-cardhead"><h3>ON DUTY</h3>
+        <span class="right mono" style="color:${cov.gaps.length ? "var(--red)" : "var(--dim)"}">
+          ${cov.filled}/${cov.demanded}</span></header>
+      ${rows}
+      ${cal.length ? `<div class="pad dty-calline">${cal.map(c =>
+        `<span class="mono">${escapeHtml(c.code)}</span> ${escapeHtml(c.label || "")}`).join(" &middot; ")}</div>` : ""}
+    </div>`;
+}
+
+// ── The admin's screen ─────────────────────────────────────────────────────
+function dutyAdminHtml(today) {
+  return `
+    <div class="dty-head"><h2>Duty</h2>
+      <span class="dty-sub">${escapeHtml(dutyMonthLabel(_dutyMonth))}</span></div>
+    <div class="dty-seg" role="tablist">
+      ${[["today", "TODAY"], ["month", "MONTH"], ["people", "PEOPLE"]].map(([k, t]) =>
+        `<button role="tab" aria-selected="${_dutyMode === k}" onclick="setDutyMode('${k}')">${t}</button>`).join("")}
+    </div>
+    ${_dutyMode === "today" ? dutyAdminToday(today)
+      : _dutyMode === "month" ? dutyAdminMonth(today) : dutyAdminPeople()}`;
+}
+function setDutyMode(m) {
+  _dutyMode = m;
+  const el = document.getElementById("content");
+  if (el) el.scrollTop = 0;
+  render();
+}
+function dutyMonthLabel(ym) {
+  const MONS = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE",
+                "JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
+  const [y, m] = String(ym || "").split("-");
+  return m ? `${MONS[+m - 1]} ${y}` : "";
+}
+function dutyMonthDays(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  if (!y || !m) return [];
+  const last = new Date(y, m, 0).getDate();
+  const p = x => String(x).padStart(2, "0");
+  return Array.from({ length: last }, (_, i) => `${y}-${p(m)}-${p(i + 1)}`);
+}
+function dutyStepDay(n) { _dutyCursor = dutyShiftISO(_dutyCursor, n); render(); }
+function dutyStepMonth(n) {
+  const [y, m] = _dutyMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  _dutyMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  render();
+}
+function dutyOpenDay(iso) { _dutyCursor = iso; _dutyMode = "today"; render(); }
+
+function dutyAdminToday(today) {
+  const iso = _dutyCursor;
+  const cov = dutyCoverage(iso, true);
+  const out = outOfCampMap(iso);
+  const cmdrs = STATE.roster.filter(r => r.role === "Commander");
+  const away = cmdrs.filter(c => out.has(c.id));
+
+  return `
+    <div class="dty-daynav">
+      <button onclick="dutyStepDay(-1)" aria-label="Previous day">&lsaquo;</button>
+      <span class="dty-daylabel">${dutyDayLabel(iso)}${iso === today ? '<span class="dty-now mono">TODAY</span>' : ""}</span>
+      <button onclick="dutyStepDay(1)" aria-label="Next day">&rsaquo;</button>
+    </div>
+    <div class="stats-row dty-tiles">
+      <div class="stat"><label>IN CAMP</label>
+        <div class="val mono">${cmdrs.length - away.length}<small>/${cmdrs.length}</small></div></div>
+      <div class="stat"><label>ON DUTY</label>
+        <div class="val mono" style="color:${cov.gaps.length ? "var(--red)" : ""}">${cov.filled}<small>/${cov.demanded}</small></div></div>
+      <div class="stat"><label>AWAY</label>
+        <div class="val mono" style="color:${away.length ? "var(--orange)" : ""}">${away.length}</div></div>
+    </div>
+    ${dutyTodayCardHtml(iso, true)}
+    <div class="card">
+      <header class="dty-cardhead"><h3>OUT OF CAMP</h3><span class="right mono" style="color:var(--dim)">${away.length}</span></header>
+      ${away.length ? away.map(c => {
+        const o = out.get(c.id);
+        return `<div class="dty-slot">
+          <span class="dty-slot-role mono" style="color:${o.kind === "medical" ? "var(--red)" : "var(--purple)"}">${o.kind === "medical" ? "MC" : "AWAY"}</span>
+          <span class="dty-slot-who">${escapeHtml(displayPersonLabel(c.id))}
+            <small>${escapeHtml(o.reason || o.kind)}</small></span></div>`;
+      }).join("") : '<div class="pad dty-quiet">Everyone is in camp.</div>'}
+    </div>
+    <div class="dty-foot">Who is out is read from the medical and leave records, so this
+      can never disagree with the strength board.</div>`;
+}
+
+// The month. A 24 x 31 grid does not fit a phone, so it is never drawn: the
+// month is a vertical list of days, and coverage rides on pips. One hollow
+// red pip is one unfilled duty, which is the whole month readable in a scroll.
+function dutyAdminMonth(today) {
+  const days = dutyMonthDays(_dutyMonth);
+  const problems = [];
+  let demanded = 0, filled = 0;
+  // A month with no rows at all has not been planned; it is not 110 problems.
+  const planned = days.some(iso => dutyRowsOn(iso).length);
+
+  const rows = days.map(iso => {
+    const cov = dutyCoverage(iso, true);
+    // Only a day that has not happened yet can be acted on. Counting the ones
+    // behind us buried the handful that matter under eighty that do not, and
+    // nobody is going back to fill last Tuesday's COS.
+    //
+    // The headline counts the same window as the list, deliberately: showing
+    // coverage for the whole month beside a forward-looking problem count gave
+    // two figures that did not reconcile, and a reader has to trust the sum.
+    if (iso >= today) {
+      demanded += cov.demanded; filled += cov.filled;
+      cov.gaps.forEach(g => problems.push({ kind: "gap", iso, slot: g }));
+      cov.clashes.forEach(c => problems.push({ kind: "clash", iso, slot: c }));
+    }
+
+    const cal = dutyCalendarFor(iso);
+    const pips = cov.slots.map(s => {
+      const d4 = cov.held[s.key];
+      if (!d4) return '<span class="dty-pip is-gap"></span>';
+      if (outOfCampMap(iso).has(d4)) return '<span class="dty-pip is-clash"></span>';
+      return `<span class="dty-pip" style="background:${dutyRoleTint(s.role)}"></span>`;
+    }).join("");
+
+    const lead = cov.slots.find(s => cov.held[s.key]);
+    const summary = !cov.demanded
+      ? (dutyIsWeekend(iso) ? "weekend" : cal.some(c => c.code === "PH") ? "public holiday" : "no duties")
+      : lead ? `${lead.key} ${escapeHtml(displayPersonLabel(cov.held[lead.key]))}${cov.filled > 1 ? ` +${cov.filled - 1}` : ""}`
+             : "nothing assigned";
+    const d = new Date(iso + "T00:00:00");
+    return `<button class="dty-dayrow${dutyIsWeekend(iso) || cal.some(c => c.code === "PH") ? " is-week" : ""}${iso === today ? " is-today" : ""}"
+        onclick="dutyOpenDay('${escapeAttr(iso)}')">
+      <span class="dty-dnum mono">${["SUN","MON","TUE","WED","THU","FRI","SAT"][d.getDay()]}<b>${d.getDate()}</b></span>
+      <span class="dty-pips">${pips || '<span class="dty-quiet">&mdash;</span>'}</span>
+      <span class="dty-daysum">${summary}${cal.length ? ` <span class="dty-ctx mono">${escapeHtml(cal[0].code)}</span>` : ""}</span>
+      <span class="dty-chev">&rsaquo;</span></button>`;
+  }).join("");
+
+  const gaps = problems.filter(p => p.kind === "gap");
+  const clashes = problems.filter(p => p.kind === "clash");
+
+  return `
+    <div class="dty-daynav">
+      <button onclick="dutyStepMonth(-1)" aria-label="Previous month">&lsaquo;</button>
+      <span class="dty-daylabel">${escapeHtml(dutyMonthLabel(_dutyMonth))}</span>
+      <button onclick="dutyStepMonth(1)" aria-label="Next month">&rsaquo;</button>
+    </div>
+    ${!demanded ? "" : !planned ? `
+      <div class="dty-cover">
+        <b class="mono">${demanded}</b> duties to fill
+        <span>this month has not been planned yet</span>
+      </div>` : `
+      <div class="dty-cover ${gaps.length || clashes.length ? "is-bad" : "is-ok"}">
+        <b class="mono">${filled}/${demanded}</b> covered from today
+        ${gaps.length || clashes.length
+          ? `<span>${gaps.length ? `${gaps.length} still to fill` : ""}${gaps.length && clashes.length ? " &middot; " : ""}${clashes.length ? `${clashes.length} on someone away` : ""}</span>`
+          : "<span>nothing outstanding</span>"}
+      </div>`}
+    ${problems.length ? `
+      <div class="card">
+        <header class="dty-cardhead"><h3>NEEDS A LOOK</h3><span class="right mono" style="color:var(--orange)">${problems.length}</span></header>
+        ${problems.slice(0, 5).map(p => `
+          <button class="dty-issue ${p.kind}" onclick="dutyOpenDay('${escapeAttr(p.iso)}')">
+            <span class="dty-issue-kind mono">${p.kind === "gap" ? "GAP" : "CLASH"}</span>
+            <span class="dty-issue-txt">${p.kind === "gap"
+              ? `${escapeHtml(p.slot.key)} unassigned`
+              : `${escapeHtml(displayPersonLabel(p.slot.d4))} is away`}
+              <small>${escapeHtml(dutyDayLabel(p.iso))}${p.kind === "clash" ? ` &middot; holds ${escapeHtml(p.slot.key)}` : ""}</small></span>
+            <span class="dty-chev">&rsaquo;</span></button>`).join("")}
+        ${problems.length > 5 ? `<div class="pad dty-quiet">and ${problems.length - 5} more</div>` : ""}
+        <div class="pad dty-quiet">From ${escapeHtml(dutyDayLabel(today))} onwards. Days already
+          past are left alone.</div>
+      </div>` : ""}
+    <div class="card"><div class="dty-monthlist">${rows}</div></div>`;
+}
+
+// Fairness and the two off ledgers. The four commanders who are in the
+// schedule but not in the OFF system get one line saying so - a row of zeros
+// would read as "he has taken everything".
+function dutyAdminPeople() {
+  const t = dutyTallies(true);
+  const cmdrs = STATE.roster.filter(r => r.role === "Commander");
+  const max = Math.max(1, ...cmdrs.map(c => dutyTallyOf(t, c.id).total));
+  const spread = (() => {
+    const v = cmdrs.filter(c => dutyEligibleRoles(c).includes("PDS")).map(c => dutyTallyOf(t, c.id).PDS);
+    return v.length ? Math.max(...v) - Math.min(...v) : 0;
+  })();
+  const tracked = cmdrs.filter(c => commanderBalances(c.id));
+
+  const byPlt = {};
+  sortByRank(cmdrs, dutyByName).forEach(c => {
+    const k = getPlt(c) || "HQ";
+    (byPlt[k] = byPlt[k] || []).push(c);
+  });
+
+  const groups = Object.keys(byPlt).sort().map(k => `
+    <div class="dty-grp">${k === "HQ" ? "COY HQ" : "PLATOON " + k}</div>
+    <div class="card">${byPlt[k].map(c => {
+      const x = dutyTallyOf(t, c.id), bal = commanderBalances(c.id);
+      const seg = (n, col) => n ? `<span style="flex:${n};background:${col}"></span>` : "";
+      return `<button class="dty-bal" onclick="openDutyPerson('${escapeAttr(c.id)}')">
+        <span class="dty-bal-top">
+          <span class="dty-bal-nm">${escapeHtml(displayPersonLabel(c.id))}</span>
+          ${c.appt ? `<span class="dty-bal-appt mono">${escapeHtml(c.appt)}</span>` : ""}</span>
+        <span class="dty-bar" style="width:${Math.max(12, (x.total / max) * 100)}%">
+          ${seg(x.PDS, "var(--accent)")}${seg(x.CDS, "var(--accent2)")}${seg(x.COS, "var(--teal)")}${seg(x.GD, "var(--orange)")}${seg(x.CDO, "var(--accentLift)")}</span>
+        <span class="dty-bal-nums mono">PDS <b>${x.PDS}</b> &middot; CDS <b>${x.CDS}</b> &middot; COS <b>${x.COS}</b> &middot; total <b>${x.total}</b></span>
+        ${bal ? `<span class="dty-bal-led">
+            <span class="oil">OIL <b class="mono">${dutyNum(bal.oil.remaining)}</b>/${dutyNum(bal.oil.entitled)}</span>
+            <span class="al">AL <b class="mono">${dutyNum(bal.al.remaining)}</b>/${dutyNum(bal.al.entitled)}</span></span>`
+          : `<span class="dty-bal-untracked">not in the off system</span>`}
+      </button>`;
+    }).join("")}</div>`).join("");
+
+  return `
+    <div class="stats-row dty-tiles">
+      <div class="stat"><label>PDS SPREAD</label><div class="val mono"
+        style="color:${spread <= 2 ? "var(--teal)" : spread <= 4 ? "var(--orange)" : "var(--red)"}">&plusmn;${spread}</div></div>
+      <div class="stat"><label>TRACKED</label><div class="val mono">${tracked.length}<small>/${cmdrs.length}</small></div></div>
+      <div class="stat"><label>COMMANDERS</label><div class="val mono">${cmdrs.length}</div></div>
+    </div>
+    ${groups || '<div class="card"><div class="pad dty-quiet">No commanders in the roster yet.</div></div>'}
+    <div class="dty-foot">Balances are worked out from the entitlement rules and the leave
+      records. Nothing here is typed in, so nothing can drift.</div>`;
 }

@@ -18,13 +18,7 @@ const REV_TABS = ["Roster", "Medical", "Attendance", "IPPT", "RouteMarch", "SOC"
 //   RouteMarch / SOC / PolarFlow  dropped from the frontend when those
 //                                 programs were retired; the backend still
 //                                 serves and revs them.
-//   Duty                          0009 adds the tab, but STATE.duty is still
-//                                 the per-device command-team MAP. Pointing a
-//                                 pull at that key replaces the map with an
-//                                 array and takes the parade state's command
-//                                 team with it, so the frontend picks this tab
-//                                 up in the same change that promotes the map.
-const FRONTEND_IGNORED_TABS = ["RouteMarch", "SOC", "PolarFlow", "Duty"];
+const FRONTEND_IGNORED_TABS = ["RouteMarch", "SOC", "PolarFlow"];
 
 module.exports = async function run() {
   suite("static: load-time guards");

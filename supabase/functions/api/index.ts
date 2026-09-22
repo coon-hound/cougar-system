@@ -85,6 +85,19 @@ const ENCRYPTED = new Set([
 // Neither holds encrypted columns, which appendOne relies on.
 const NO_ID = new Set(["MSK", "Config"]);
 
+// Tabs only an admin may WRITE. Everyone reads them - a commander has to see
+// the roster he is on - but building it is the company admin's job.
+//
+// This is the protection, not the hidden nav button. js/* is public code, so a
+// commander can unhide any control or call the action straight from a console;
+// the UI gate only spares 25 people a button that would tell them no. The
+// capability is `can_invite`, deliberately: in this company the person who
+// hands out access is the person who builds the roster, and a second flag
+// nobody has a way to grant is a permission that exists only on paper. If the
+// two ever need to part company, give auth_tokens its own column and read it
+// here - every call site is this one line.
+const ADMIN_WRITE_TABS = new Set(["Duty", "Calendar", "OilRules"]);
+
 let DENIED: Record<string, Set<string>> | null = null;
 async function deniedFields(tab: string): Promise<Set<string>> {
   if (!DENIED) {
@@ -887,6 +900,9 @@ Deno.serve(async (req) => {
         d4: me?.d4 ?? null,
         device: me?.device_label ?? null,
         canInvite: !!me?.can_invite,
+        // Same flag today (see ADMIN_WRITE_TABS), but named for what the duty
+        // screen asks, so the two can diverge without touching the frontend.
+        canEditDuty: !!me?.can_invite,
         expiresAt: me?.expires_at ?? null,
       });
     }
@@ -919,6 +935,14 @@ Deno.serve(async (req) => {
       if (!table) return json({ error: `Tab '${tab}' not found` });
       const [r] = await sql`select count(*)::int as n from ${sql(table)} where deleted_at is null`;
       return json({ ok: true, tab, dataRows: r.n });
+    }
+
+    // Everything past this point mutates, so the admin tabs are gated here
+    // rather than per-action - a new write action cannot forget to ask.
+    if (ADMIN_WRITE_TABS.has(tab) && !(await canInvite(auth.token))) {
+      await sql`select log_audit(${auth.token}, ${action}, ${tab}, null, false,
+                                 ${sql.json({ reason: "not an admin" })})`;
+      return forbidden();
     }
 
     const baseRev = body.baseRev;

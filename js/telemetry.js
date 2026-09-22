@@ -74,6 +74,7 @@ const TELEMETRY = (function () {
     dashboard: "Dashboard", roster: "Roster", attendance: "Attendance",
     detail: "Conduct Detail", medical: "Medical", ippt: "IPPT",
     leave: "Out / Leave",
+  duty: "Duty Schedule",
     mskAnalytics: "MSK Analytics", conducts: "Conducts", sync: "Sync & I/O",
     usage: "Usage Insights"
   };

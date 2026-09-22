@@ -73,12 +73,9 @@ const TAB_TO_STATE = {
   "Leave": "leave",
   "MSK": "msk",
   "Conducts": "conducts",
-  // Duty schedule support tables (0009). `Duty` itself is deliberately NOT
-  // here yet: STATE.duty is still the per-device command-team map below, and
-  // pointing a pull at that key would replace the map with an array and take
-  // the parade state's command team down with it. The promotion lands with the
-  // rest of the duty rewrite; until then Duty is backend-tracked and
-  // frontend-ignored, exactly as RouteMarch / SOC / PolarFlow already are.
+  // The duty schedule (0009). STATE.duty was a per-device map until the
+  // promotion above; it is rows now, like every other tab.
+  "Duty": "duty",
   "Calendar": "calendar",
   "OilRules": "oilRule"
 };
@@ -139,51 +136,162 @@ function saveCombinedGroups() {
   localStorage.setItem(COMBINED_KEY, JSON.stringify(STATE.combinedGroups || []));
 }
 
-// Duty appointment holders, per date. The command team (CDO / CDS / COS and a
-// PDS per platoon) heads every parade state and ROTATES daily, so it is stored
-// per ISO date rather than as a roster attribute:
-//   { "2026-09-15": { "CDO": "0001", "PDS 7": "0004", ... } }
-// Values are commander 4Ds; an unset appointment renders as the battalion's
-// "<RANK> <NAME>" placeholder so a half-filled command team is visible rather
-// than silently wrong. Per-device for now (own localStorage key, no sheet tab)
-// — dutyForDate is the single read point, so promoting it to a synced tab
-// later touches nothing else.
-function loadDutyRoster() {
-  try {
-    const d = JSON.parse(localStorage.getItem(DUTY_KEY) || "{}");
-    if (!d || typeof d !== "object") return {};
-    const out = {};
-    Object.keys(d).forEach(date => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !d[date] || typeof d[date] !== "object") return;
-      const day = {};
-      Object.keys(d[date]).forEach(role => { if (d[date][role]) day[role] = String(d[date][role]); });
-      out[date] = day;
+// ── The duty schedule ───────────────────────────────────────────────────────
+//
+// STATE.duty is an ARRAY of rows now, synced like every other tab:
+//   { id, date, role, d4, slot, status, source, note }
+// The command team (CDO / CDS / COS and a PDS per platoon) heads every parade
+// state and ROTATES daily, which is why this is keyed per ISO date rather than
+// held as a roster attribute. It used to live in localStorage, per device; the
+// comment that stood here promised the promotion would touch nothing outside
+// dutyForDate and setDutyHolder, and it did not.
+//
+// The id IS the natural key - duty-<date>-<role><slot> - so two phones editing
+// the same slot converge on one row instead of minting two, with no unique
+// index and therefore no failing write for js/sync.js to retry forever.
+const DUTY_ROLES = ["CDO", "CDS", "COS", "PDS", "GD", "SENTRY"];
+const dutyRowId = (dateIso, role, slot) => `duty-${dateIso}-${role}${slot || ""}`;
+// "PDS 7" <-> role PDS + slot 7. Only PDS carries a slot in the command team;
+// SENTRY numbers its 9 places, everything else is bare.
+const dutyRoleKey = (role, slot) => (slot ? `${role} ${slot}` : role);
+function dutyParseRoleKey(key) {
+  const m = /^([A-Z]+)\s*(.*)$/.exec(String(key || "").trim());
+  return m ? { role: m[1], slot: m[2] } : { role: String(key || ""), slot: "" };
+}
+
+const dutyRowsOn = dateIso =>
+  (STATE.duty || []).filter(r => r && r.date === dateIso);
+
+// The rows literally recorded for a date, with NO carry-forward.
+//
+// This is the planner's read, and the distinction matters: dutyForDate below
+// inherits the most recent earlier team, which is right for a parade state
+// (most appointments carry over) and wrong for coverage. Counting an inherited
+// value as a filled slot would report a month as covered when not one row of
+// it had been written, and the gap it hid is a duty nobody turns up for.
+function dutyExactForDate(dateIso, opts) {
+  const draft = !!(opts && opts.includeDraft);
+  const out = {};
+  dutyRowsOn(dateIso).forEach(r => {
+    if (!draft && r.status && r.status !== "published") return;
+    if (!r.d4) return;
+    out[dutyRoleKey(r.role, r.slot)] = String(r.d4);
+  });
+  return out;
+}
+
+// The command team for a date, as { roleKey: d4 } - the shape every existing
+// caller already expects.
+//
+// `opts.includeDraft` is OFF by default, and that is a safety property rather
+// than a preference: a draft month must never reach a filed parade state.
+//
+// An unrecorded date inherits the most recent EARLIER date's team as a
+// starting point - most appointments carry over and the PDS corrects whichever
+// rotated - and never a later one: tomorrow's plan must not rewrite what
+// yesterday actually filed. Unchanged by the promotion, deliberately.
+//
+// Use dutyExactForDate for anything measuring COVERAGE. An inherited team is a
+// convenience for whoever is filing a parade state, not evidence that the day
+// has been rostered.
+function dutyForDate(dateIso, opts) {
+  const draft = !!(opts && opts.includeDraft);
+  const here = dutyExactForDate(dateIso, opts);
+  if (Object.keys(here).length) return here;
+  const earlier = (STATE.duty || [])
+    .filter(r => r && r.date && r.date < dateIso && r.d4
+                 && (draft || !r.status || r.status === "published"))
+    .map(r => r.date).sort();
+  const prev = earlier.length ? earlier[earlier.length - 1] : null;
+  return prev ? dutyExactForDate(prev, opts) : {};
+}
+
+// The single write point. Signature unchanged, so the parade-state picker did
+// not have to learn anything.
+function setDutyHolder(dateIso, roleKey, d4, opts) {
+  if (!dateIso || !roleKey) return;
+  STATE.duty = STATE.duty || [];
+  const status = (opts && opts.status) || "published";
+  const source = (opts && opts.source) || "manual";
+
+  // Materialise the inherited team on first edit, so changing one appointment
+  // does not drop the five that were only being inherited.
+  if (!dutyRowsOn(dateIso).length) {
+    const inherited = dutyForDate(dateIso);
+    Object.keys(inherited).forEach(k => {
+      if (k === roleKey) return;
+      const { role, slot } = dutyParseRoleKey(k);
+      dutyWriteRow(dateIso, role, slot, inherited[k], status, "inherited");
     });
-    return out;
-  } catch { return {}; }
+  }
+
+  const { role, slot } = dutyParseRoleKey(roleKey);
+  dutyWriteRow(dateIso, role, slot, d4, status, source);
 }
-function saveDutyRoster() {
-  try { localStorage.setItem(DUTY_KEY, JSON.stringify(STATE.duty || {})); }
-  catch { /* quota — the parade state still generates, just unremembered */ }
+
+// Upsert or soft-delete one slot, and push it. Surgical row writes only: a
+// full-tab push from one phone would clobber a month another phone just built.
+function dutyWriteRow(dateIso, role, slot, d4, status, source) {
+  const id = dutyRowId(dateIso, role, slot);
+  const i = (STATE.duty || []).findIndex(r => r && r.id === id);
+  if (!d4) {
+    if (i >= 0) STATE.duty.splice(i, 1);
+    saveLocal();
+    if (typeof autoSync === "function") autoSync("Duty", { type: "delete", id });
+    return;
+  }
+  const row = { id, date: dateIso, role, slot: slot || "", d4: String(d4),
+                status: status || "published", source: source || "manual", note: "" };
+  if (i >= 0) STATE.duty[i] = { ...STATE.duty[i], ...row }; else STATE.duty.push(row);
+  saveLocal();
+  if (typeof autoSync === "function") autoSync("Duty", { type: "upsert", row });
 }
-// The command team for a date. An unrecorded date inherits the most recent
-// EARLIER date's team as a starting point (most appointments carry over; the
-// PDS corrects whichever rotated), and never a later date's — tomorrow's plan
-// must not rewrite what yesterday actually filed.
-function dutyForDate(dateIso) {
-  const all = STATE.duty || {};
-  if (all[dateIso]) return { ...all[dateIso] };
-  const prev = Object.keys(all).filter(d => d < dateIso).sort().pop();
-  return prev ? { ...all[prev] } : {};
-}
-function setDutyHolder(dateIso, role, d4) {
-  if (!dateIso || !role) return;
-  const all = (STATE.duty = STATE.duty || {});
-  // Materialise the inherited team on first edit so changing one appointment
-  // doesn't drop the five that were only being inherited.
-  const day = (all[dateIso] = all[dateIso] || dutyForDate(dateIso));
-  if (d4) day[role] = String(d4); else delete day[role];
-  saveDutyRoster();
+
+// One-time promotion of the per-device command team (DUTY_KEY) into the synced
+// tab. The map on this phone is the only copy of what was actually filed on
+// those dates, so it is converted rather than dropped.
+//
+// MERGE, never replace: anything the server already has wins, because it has
+// been through a device that ran this migration before. The ids are
+// deterministic, so two phones promoting their own overlapping maps produce
+// the SAME ids and the upserts converge instead of doubling.
+//
+// The old key is RENAMED rather than deleted - one reload of undo, and the
+// rename is its own idempotence guard. It deliberately does NOT go on the
+// legacy-key list, which triggers a destructive drop of the dirty markers.
+function migrateLegacyDutyRoster() {
+  let raw;
+  try { raw = localStorage.getItem(DUTY_KEY); } catch { return; }
+  if (!raw) return;
+  let map;
+  try { map = JSON.parse(raw); } catch { map = null; }
+  if (map && typeof map === "object") {
+    STATE.duty = STATE.duty || [];
+    const have = new Set(STATE.duty.map(r => r && r.id));
+    Object.keys(map).forEach(date => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !map[date] || typeof map[date] !== "object") return;
+      Object.keys(map[date]).forEach(roleKey => {
+        const d4 = map[date][roleKey];
+        if (!d4) return;
+        const { role, slot } = dutyParseRoleKey(roleKey);
+        const id = dutyRowId(date, role, slot);
+        if (have.has(id)) return;                 // the server already knows
+        have.add(id);
+        // These dates were FILED, so they are published, and they are marked
+        // `legacy` so the import and the generator can tell them apart.
+        STATE.duty.push({ id, date, role, slot: slot || "", d4: String(d4),
+                          status: "published", source: "legacy", note: "" });
+      });
+    });
+    if (STATE.duty.length) {
+      if (STATE.dirty && typeof STATE.dirty.add === "function") STATE.dirty.add("Duty");
+      if (typeof saveDirty === "function") saveDirty();
+    }
+  }
+  try {
+    localStorage.setItem(DUTY_KEY + "-migrated-v1", raw);
+    localStorage.removeItem(DUTY_KEY);
+  } catch { /* a full quota is not worth failing the launch over */ }
 }
 
 // Parade-state snapshots (Compare feature): every FP/LP "Copy to Clipboard"
@@ -305,9 +413,9 @@ const STATE = {
   // Saved combined-group formulas (see loadCombinedGroups). Surfaced in the
   // group filter dropdown and the book-out picker alongside plain groups.
   combinedGroups: loadCombinedGroups(),
-  // Per-date duty appointment holders (see loadDutyRoster) — the CDO/CDS/COS/PDS
+  // The duty schedule, as rows (see dutyForDate) — the CDO/CDS/COS/PDS
   // block at the head of every parade state.
-  duty: loadDutyRoster(),
+  duty: [],
   // IPPT stats aggregation: "latest" (most recent attempt per recruit) or
   // "best" (highest-scoring attempt). Drives the IPPT tab's stats row, charts,
   // and leaderboard. Does NOT affect the underlying table — that always
@@ -433,6 +541,29 @@ function normalizeLeave(records) {
     if ("id" in out) out.id = normId(out.id);
     if (out.type === "Leave") out.type = "Annual Leave";
     return out;
+  });
+}
+
+// Duty rows. The d4 is padded like every other join key, and the full schema
+// is emitted on every row because the frontend assumes a uniform shape.
+// `slot` must stay a STRING - a PDS slot of "7" that arrives as the number 7
+// would rebuild its id as duty-<date>-PDS7 either way, but every ===
+// comparison against the platoon would then be false.
+function normalizeDuty(records) {
+  return (records || []).map(r => {
+    if (!r) return r;
+    const out = { ...r };
+    if ("id" in out) out.id = normId(out.id);
+    return {
+      id: out.id ?? "", date: out.date ?? "", role: out.role ?? "",
+      d4: out.d4 != null ? padD4(out.d4) : "",
+      slot: out.slot == null ? "" : String(out.slot),
+      status: out.status || "published", source: out.source ?? "", note: out.note ?? "",
+      ...out,
+      // after the spread, so a stale cached row cannot reintroduce a number
+      d4: out.d4 != null ? padD4(out.d4) : "",
+      slot: out.slot == null ? "" : String(out.slot),
+    };
   });
 }
 
@@ -591,8 +722,10 @@ function loadLocal() {
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const d = JSON.parse(raw);
+    // No cache is not an early return any more: the duty promotion below has
+    // to run on a device that has the old command-team key but has never
+    // cached data (a fresh install pointed at an existing account).
+    const d = raw ? JSON.parse(raw) : {};
     STATE.roster = normalizeRoster(d.roster);
     STATE.medical = normalizeMedical(d.medical);
     STATE.attendance = normalizeAttendance(d.attendance);
@@ -600,12 +733,14 @@ function loadLocal() {
     STATE.conductDetail = normalizeConductDetail(d.conductDetail);
     STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
+    STATE.duty = normalizeDuty(d.duty);
     STATE.calendar = normalizeCalendar(d.calendar);
     STATE.oilRule = normalizeOilRule(d.oilRule);
     STATE.msk = normalizeMSK(d.msk);
     STATE.conducts = padD4OnLayer(Array.isArray(d.conducts) ? d.conducts : []);
     STATE.rev = (d.rev && typeof d.rev === "object") ? d.rev : {};
   } catch { /* fall through to empty state */ }
+  migrateLegacyDutyRoster();
 }
 
 function setAuthToken(token) {

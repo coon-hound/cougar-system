@@ -59,6 +59,7 @@ const PULL_ASSIGN = {
   leave:         d => STATE.leave = normalizeLeave(d),
   msk:           d => STATE.msk = normalizeMSK(d),
   conducts:      d => STATE.conducts = padD4OnLayer(d),
+  duty:          d => STATE.duty = normalizeDuty(d),
   calendar:      d => STATE.calendar = normalizeCalendar(d),
   oilRule:       d => STATE.oilRule = normalizeOilRule(d)
 };

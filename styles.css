@@ -433,7 +433,189 @@ tbody tr:last-child td{border-bottom:none}
    hamburger. Backdrop catches taps outside the menu to close. Topbar
    reflows so search + scope selectors stack instead of overflowing. Tables,
    modals, and stat cards all scale down for phone use. */
+
+/* ── Duty schedule ─────────────────────────────────────────
+   Prefix is `dty-`, not `duty-`: .duty-row / .duty-role already belong to the
+   parade-state command-team picker and this file's contract says names are
+   fixed. Two screens share these classes - the reader's short one and the
+   admin planner - because the pieces they have in common (a slot row, a day
+   label, a balance line) should not drift apart.
+
+   A 24 x 31 grid is never drawn. Every job here reads one DAY or one PERSON,
+   the month is a vertical list whose coverage rides on pips, and a person's
+   month folds into 7 columns, which is the only way a month fits 390px at a
+   legal tap target. */
+.dty-head{display:flex;align-items:baseline;gap:9px;margin-bottom:12px}
+.dty-head h2{font-size:18px;font-weight:700;letter-spacing:-.02em}
+.dty-sub{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:var(--dim);letter-spacing:.04em}
+.dty-quiet{color:var(--dim);font-size:12px}
+.dty-cardhead{display:flex;align-items:center;gap:8px;padding:11px 13px;border-bottom:1px solid var(--border)}
+.dty-cardhead h3{font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--muted)}
+.dty-cardhead .right{margin-left:auto;font-size:11px}
+.dty-mine-swap{flex:0 0 auto;opacity:.7}
+
+.dty-foot{font-size:11px;color:var(--dim);padding:2px 2px 10px;line-height:1.5}
+.dty-chev{flex:0 0 12px;color:var(--dim);font-size:12px}
+
+.dty-seg{display:flex;background:var(--field);border:1px solid var(--border);border-radius:var(--r2);padding:3px;margin-bottom:12px}
+.dty-seg button{flex:1 1 0;min-width:0;min-height:40px;border:0;border-radius:var(--r1);background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background-color var(--d2) var(--ez),color var(--d2) var(--ez)}
+.dty-seg button[aria-selected="true"]{background:var(--surface2);color:var(--text);box-shadow:var(--sh1),var(--lift)}
+.dty-seg button:focus-visible{outline:none;box-shadow:var(--ring)}
+
+/* The arrows are the control, so they are real 46px targets, not glyphs. */
+.dty-daynav{display:flex;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:12px;box-shadow:var(--sh1),var(--lift)}
+.dty-daynav button{flex:0 0 46px;min-height:46px;border:0;background:transparent;color:var(--accent);font-size:17px;border-radius:var(--r2);cursor:pointer}
+.dty-daylabel{flex:1 1 auto;min-width:0;text-align:center;font-size:13.5px;font-weight:700}
+.dty-now{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;letter-spacing:.09em;color:var(--red);margin-left:7px}
+.dty-tiles{margin-bottom:12px}
+
+/* One duty slot. The whole row is the target when it is editable. */
+.dty-slot{display:flex;align-items:center;gap:10px;width:100%;min-height:56px;padding:8px 13px;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;text-align:left}
+.dty-slot:last-of-type{border-bottom:0}
+button.dty-slot{cursor:pointer}
+.dty-slot.gap{background:rgba(var(--redRGB),.06)}
+.dty-slot.clash{background:rgba(var(--orangeRGB),.06)}
+.dty-slot-role{flex:0 0 58px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.03em}
+.dty-slot-who{flex:1 1 auto;min-width:0;font-size:12.5px;font-weight:600}
+.dty-slot-who small{display:block;font-size:10.5px;font-weight:400;color:var(--dim);margin-top:1px}
+.dty-slot.gap .dty-slot-who{color:var(--red);font-weight:500}
+.dty-slot.clash .dty-slot-who{color:var(--orange)}
+.dty-calline{font-size:11px;color:var(--muted);border-top:1px solid var(--border)}
+.dty-calline .mono{color:var(--yellow);font-size:10px;letter-spacing:.06em}
+
+/* The reader's card: his own next duty, given the room to be read at a glance. */
+.dty-mine{padding:13px}
+.dty-mine-top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.dty-mine-who{flex:1 1 auto;min-width:0;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dty-mine-swap{flex:0 0 auto}
+.dty-mine-next{display:flex;align-items:baseline;gap:11px}
+.dty-mine-role{font-size:22px;font-weight:700;letter-spacing:-.02em}
+.dty-mine-when{font-size:14px;font-weight:600}
+.dty-mine-when small{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:1px}
+.dty-mine-then{font-size:11.5px;color:var(--dim);margin-top:5px}
+.dty-mine-none{font-size:14px;font-weight:600;color:var(--muted)}
+.dty-mine-bal{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted)}
+.dty-mine-bal b{font-size:13px}
+.dty-mine-bal small{color:var(--dim)}
+.dty-mine-bal .oil b{color:var(--purple)}
+.dty-mine-bal .al b{color:var(--yellow)}
+
+/* His week, seven columns, no scrolling. */
+.dty-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:12px}
+.dty-strip-day{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 1px;background:var(--field);border:1px solid var(--border);border-radius:var(--r1)}
+.dty-strip-day.is-week{background:var(--surface2)}
+.dty-strip-day.is-today{border-color:var(--red)}
+.dty-strip-dow{font-size:9px;color:var(--dim)}
+.dty-strip-num{font-size:12px;font-weight:700}
+.dty-strip-code{font-size:8.5px;font-weight:700;letter-spacing:.02em;min-height:12px}
+
+.dty-ask{font-size:13px;font-weight:600;margin-bottom:3px}
+.dty-asksub{font-size:11.5px;color:var(--dim);margin-bottom:9px}
+.dty-mepick{width:100%;min-height:44px}
+
+/* Month list. Full-bleed, because the row needs every pixel of 364. */
+.dty-monthlist{margin:0 -13px}
+.dty-monthlist .dty-grp{padding:0 13px}
+.dty-dayrow{display:flex;align-items:center;gap:11px;width:100%;min-height:54px;padding:8px 13px;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.dty-dayrow:last-child{border-bottom:0}
+.dty-dayrow.is-week{background:var(--surface2)}
+.dty-dayrow.is-today{box-shadow:inset 3px 0 0 var(--red)}
+.dty-dnum{flex:0 0 56px;font-size:10.5px;color:var(--muted);line-height:1.25}
+.dty-dnum b{display:block;font-size:15px;color:var(--text);letter-spacing:-.02em}
+/* The pips ARE the month view. Filled is covered, a hollow red ring is an
+   unfilled duty, amber is someone who has since gone away. The ROW is the tap
+   target - a 9px dot never is, and an ::after hit-extension would be clipped
+   by the card's overflow anyway. */
+.dty-pips{flex:0 0 auto;display:flex;gap:4px}
+.dty-pip{width:9px;height:9px;border-radius:var(--rp);background:var(--accent)}
+.dty-pip.is-gap{background:transparent;box-shadow:inset 0 0 0 1.5px var(--red)}
+.dty-pip.is-clash{background:var(--orange)}
+.dty-daysum{flex:1 1 auto;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dty-ctx{font-size:9.5px;letter-spacing:.06em;color:var(--yellow)}
+
+.dty-cover{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;padding:10px 13px;border-radius:var(--r3);margin-bottom:12px;font-size:12px;border:1px solid var(--border);background:var(--surface);box-shadow:var(--sh1),var(--lift)}
+.dty-cover b{font-size:15px}
+.dty-cover span{color:var(--muted)}
+.dty-cover.is-ok b{color:var(--teal)}
+.dty-cover.is-bad b{color:var(--orange)}
+
+.dty-issue{display:flex;gap:10px;align-items:flex-start;width:100%;min-height:60px;padding:11px 13px;border:0;border-bottom:1px solid var(--border);border-left:3px solid var(--dim);background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.dty-issue:last-of-type{border-bottom:0}
+.dty-issue.gap{border-left-color:var(--red)}
+.dty-issue.clash{border-left-color:var(--orange)}
+.dty-issue-kind{flex:0 0 42px;font-size:9px;font-weight:700;letter-spacing:.09em;color:var(--muted);padding-top:2px}
+.dty-issue-txt{flex:1 1 auto;min-width:0;font-size:12.5px;line-height:1.4}
+.dty-issue-txt small{display:block;color:var(--dim);font-size:10.5px;margin-top:2px}
+
+.dty-grp{display:flex;align-items:center;gap:9px;margin:16px 0 7px;font-size:9.5px;font-weight:700;letter-spacing:.11em;color:var(--dim)}
+.dty-grp::after{content:"";flex:1 1 auto;height:1px;background:var(--border)}
+
+/* Fairness bars are plain divs, deliberately: Chart.js is CDN-loaded and
+   simply absent on mobile data in a dead spot, and "is this fair" is exactly
+   the question asked away from wifi. */
+.dty-bal{display:block;width:100%;padding:11px 13px;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.dty-bal:last-child{border-bottom:0}
+.dty-bal-top{display:flex;align-items:baseline;gap:8px}
+.dty-bal-nm{flex:1 1 auto;min-width:0;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dty-bal-appt{flex:0 0 auto;font-size:9.5px;font-weight:700;color:var(--dim);letter-spacing:.06em}
+.dty-bar{display:flex;height:9px;gap:1px;margin:8px 0 6px;border-radius:var(--rp);overflow:hidden;background:var(--field);min-width:12%}
+.dty-bar>span{height:100%}
+.dty-bal-nums{display:block;font-size:10.5px;color:var(--muted)}
+.dty-bal-nums b{color:var(--text)}
+.dty-bal-led{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;margin-top:4px}
+.dty-bal-led .oil b{color:var(--purple)}
+.dty-bal-led .al b{color:var(--yellow)}
+.dty-bal-untracked{display:block;font-size:10.5px;color:var(--dim);margin-top:4px}
+
+/* Picker. Unavailable commanders are SHOWN with the reason rather than
+   hidden: the admin sometimes knows the record is wrong, and a missing name
+   reads as the app being broken. */
+.dty-picklist{margin:0 -14px}
+.dty-pick{display:flex;align-items:center;gap:10px;width:100%;min-height:62px;padding:9px 15px;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.dty-pick-main{flex:1 1 auto;min-width:0}
+.dty-pick-nm{display:block;font-size:12.5px;font-weight:600}
+.dty-pick-meta{display:block;font-size:10.5px;color:var(--dim);margin-top:2px}
+.dty-pick-cnt{flex:0 0 auto;font-size:11px;color:var(--muted)}
+.dty-pick.is-unavail .dty-pick-nm{color:var(--muted)}
+.dty-pick.is-unavail .dty-pick-meta{color:var(--orange)}
+.dty-pick.is-sel{background:rgba(var(--accentRGB),.12)}
+.dty-pickgrp{padding:9px 15px 5px;font-size:9.5px;font-weight:700;letter-spacing:.09em;color:var(--muted);background:var(--surface2)}
+
+/* A person's month: 7 x 46px + gaps fits the 364px a 390 phone leaves. */
+.dty-person-top{font-size:12px;color:var(--muted);margin-bottom:11px}
+.dty-person-next{font-size:13px;color:var(--text);margin-top:5px}
+.dty-person-bal{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;margin-top:7px}
+.dty-person-bal .oil b{color:var(--purple)}
+.dty-person-bal .al b{color:var(--yellow)}
+.dty-person-foot{font-size:11px;color:var(--dim);margin-top:11px;line-height:1.5}
+.dty-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.dty-cal-head{font-size:9.5px;color:var(--dim);text-align:center;font-weight:600;padding-bottom:2px}
+.dty-cell{min-height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--field);border:1px solid var(--border);border-radius:var(--r1);padding:2px}
+.dty-cell.is-blank{background:transparent;border-color:transparent}
+.dty-cell.is-week{background:var(--surface2)}
+.dty-cell-d{font-size:9.5px;color:var(--muted);line-height:1}
+.dty-cell-c{font-size:8.5px;font-weight:700;line-height:1.3}
+
+@media (hover:hover){
+  button.dty-slot:hover,.dty-dayrow:hover,.dty-pick:hover,.dty-issue:hover,.dty-bal:hover{background:var(--surface3)}
+  .dty-seg button:not([aria-selected="true"]):hover{color:var(--text)}
+}
+
 @media(max-width:768px){
+  /* Duty: this IS the design target, so mobile grows the targets a step
+     rather than reflowing. The person calendar is the one thing pinned -
+     7 x 46 plus gaps is 346 of the 364 a 390px phone leaves after #content's
+     gutters, so a wider cell would push the last day off-screen. */
+  .dty-seg button{min-height:44px;font-size:12.5px}
+  .dty-daynav button{min-height:50px}
+  .dty-daylabel{font-size:14px}
+  .dty-slot{min-height:60px}
+  .dty-slot-who{font-size:13px}
+  .dty-dayrow{min-height:56px}
+  .dty-pick{min-height:64px}
+  .dty-cell{min-height:48px}
+  .dty-mine-role{font-size:20px}
+
   body{font-size:14px}
 
   /* Sidebar: hidden by default, slides in when .open is added.
