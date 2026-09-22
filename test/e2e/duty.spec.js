@@ -41,8 +41,10 @@ const SEED_DUTY = () => {
   for (let n = -2; n < 6; n++) {
     const date = iso(n);
     if (weekend(date)) continue;
-    [["CDO", "", "0001"], ["CDS", "", "0002"], ["COS", "", "0003"],
-     ["PDS", "1", "0002"], ["PDS", "2", "0003"]].forEach(([role, slot, d4]) => {
+    // 0002 and 0004 are the 2SGs: CDS is theirs and PDS is not. Seeding a 2SG
+    // onto a PDS slot would have the screen contradict the rule it enforces.
+    [["CDO", "", "0004"], ["CDS", "", "0002"], ["COS", "", "0004"],
+     ["PDS", "1", "0001"], ["PDS", "2", "0003"]].forEach(([role, slot, d4]) => {
       // One COS left unfilled a couple of days out, so the coverage figure and
       // the gap pip have something real to report.
       if (role === "COS" && n === 2) return;
@@ -71,21 +73,45 @@ async function gotoDuty(page, who) {
   await expect(page.locator("#content")).toBeVisible();
 }
 
-test("a commander sees his own next duty, not the planner", async ({ page }) => {
+test("a commander sees the WHOLE schedule, with his own duty leading it", async ({ page }) => {
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
   await gotoDuty(page, asReader);
 
-  // His own duty leads the screen - that is the only question most people
-  // ever bring to this tab.
+  // His own duty leads the screen - that is the question most people bring to
+  // this tab - but it does not replace the schedule. He has to be able to see
+  // the roster he is on and who has the platoon tomorrow.
   await expect(page.locator(".dty-mine")).toBeVisible();
   await expect(page.locator(".dty-strip-day")).toHaveCount(7);
+  await expect(page.locator(".dty-seg")).toBeVisible();
+  await expect(page.locator(".dty-ro")).toHaveText("READ ONLY");
 
-  // And none of the planner is there.
-  await expect(page.locator(".dty-seg")).toHaveCount(0);
-  await expect(page.locator(".dty-monthlist")).toHaveCount(0);
-  await expect(page.locator(".dty-bal")).toHaveCount(0);
+  await page.evaluate(() => setDutyMode("month"));
+  await expect(page.locator(".dty-monthlist")).toBeVisible();
+  expect(await page.locator(".dty-dayrow").count()).toBeGreaterThan(27);
+
+  await page.evaluate(() => setDutyMode("people"));
+  expect(await page.locator(".dty-bal").count()).toBeGreaterThan(0);
   expect(errs).toEqual([]);
+});
+
+test("duty counts are open to everyone; another man's leave balance is not", async ({ page }) => {
+  // How the load is shared out is the fairness question, and hiding it is how
+  // a roster stops being trusted. How much leave another man has left is
+  // personnel data - the rest of this app encrypts that class of column.
+  await gotoDuty(page, asReader);
+  await page.evaluate(() => setDutyMode("people"));
+
+  const body = await page.locator("#content").innerText();
+  expect(body).toContain("PDS");                       // tallies are visible
+  // 0001 is who this token says we are, so his own balance shows.
+  const ledgers = await page.locator(".dty-bal-led").count();
+  expect(ledgers).toBe(1);
+
+  // The admin sees every one of them.
+  await page.evaluate(asAdmin);
+  await page.evaluate(() => setDutyMode("people"));
+  expect(await page.locator(".dty-bal-led").count()).toBeGreaterThan(1);
 });
 
 test("identity comes from the access code, with no way to claim someone else", async ({ page }) => {

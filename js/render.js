@@ -2489,24 +2489,32 @@ let _dutyMode = "today";      // admin only: today | month | people
 let _dutyCursor = "";         // the date the day view is showing
 let _dutyMonth = "";          // YYYY-MM the month view is showing
 
+// EVERYONE sees the whole schedule. Only the admin can change it.
+//
+// An earlier cut gave a commander a short screen of his own duties and nothing
+// else, which was the wrong reading of "do not overflood the average user".
+// The two are not in tension: lead with the answer he came for - his own next
+// duty - and let him browse the rest. He has to be able to see the roster he
+// is on, check who has the platoon tomorrow, and see that duties are shared
+// out fairly. What he cannot do is edit it, and that is enforced by the Edge
+// Function (ADMIN_WRITE_TABS), not by hiding the controls.
 function renderDuty(el) {
   const today = todayISO();
   if (!_dutyCursor) _dutyCursor = today;
   if (!_dutyMonth) _dutyMonth = today.slice(0, 7);
-  el.innerHTML = canEditDuty() ? dutyAdminHtml(today) : dutyReaderHtml(today);
-}
-
-// ── The reader's screen ────────────────────────────────────────────────────
-// One scroll, four things, in the order he needs them.
-function dutyReaderHtml(today) {
-  const me = dutyMeD4();
-  const r = me ? STATE.roster.find(x => x.id === me) : null;
-  return `
+  const admin = canEditDuty();
+  el.innerHTML = `
     <div class="dty-head"><h2>Duty</h2>
-      <span class="dty-sub">${dutyDayLabel(today)}</span></div>
-    ${r && r.role === "Commander" ? dutyMineHtml(me, today) : dutyNoIdentityHtml()}
-    ${dutyTodayCardHtml(today, false)}
-    <div class="dty-foot">Built by the company admin. Ask them for a change.</div>`;
+      <span class="dty-sub">${_dutyMode === "today" ? dutyDayLabel(_dutyCursor)
+        : escapeHtml(dutyMonthLabel(_dutyMonth))}</span>
+      ${admin ? "" : '<span class="dty-ro mono" title="Only the company admin can edit">READ ONLY</span>'}</div>
+    <div class="dty-seg" role="tablist">
+      ${[["today", "TODAY"], ["month", "MONTH"], ["people", "PEOPLE"]].map(([k, t]) =>
+        `<button role="tab" aria-selected="${_dutyMode === k}" onclick="setDutyMode('${k}')">${t}</button>`).join("")}
+    </div>
+    ${_dutyMode === "today" ? dutyTodayView(today, admin)
+      : _dutyMode === "month" ? dutyMonthView(today, admin)
+      : dutyPeopleView(admin)}`;
 }
 
 // Shown when the access code on this device does not resolve to a commander
@@ -2605,18 +2613,6 @@ function dutyTodayCardHtml(iso, editable) {
     </div>`;
 }
 
-// ── The admin's screen ─────────────────────────────────────────────────────
-function dutyAdminHtml(today) {
-  return `
-    <div class="dty-head"><h2>Duty</h2>
-      <span class="dty-sub">${escapeHtml(dutyMonthLabel(_dutyMonth))}</span></div>
-    <div class="dty-seg" role="tablist">
-      ${[["today", "TODAY"], ["month", "MONTH"], ["people", "PEOPLE"]].map(([k, t]) =>
-        `<button role="tab" aria-selected="${_dutyMode === k}" onclick="setDutyMode('${k}')">${t}</button>`).join("")}
-    </div>
-    ${_dutyMode === "today" ? dutyAdminToday(today)
-      : _dutyMode === "month" ? dutyAdminMonth(today) : dutyAdminPeople()}`;
-}
 function setDutyMode(m) {
   _dutyMode = m;
   const el = document.getElementById("content");
@@ -2645,14 +2641,17 @@ function dutyStepMonth(n) {
 }
 function dutyOpenDay(iso) { _dutyCursor = iso; _dutyMode = "today"; render(); }
 
-function dutyAdminToday(today) {
+function dutyTodayView(today, admin) {
   const iso = _dutyCursor;
+  const me = dutyMeD4();
+  const mine = me && STATE.roster.find(x => x.id === me && x.role === "Commander");
   const cov = dutyCoverage(iso, true);
   const out = outOfCampMap(iso);
   const cmdrs = STATE.roster.filter(r => r.role === "Commander");
   const away = cmdrs.filter(c => out.has(c.id));
 
   return `
+    ${mine ? dutyMineHtml(me, today) : (me ? "" : dutyNoIdentityHtml())}
     <div class="dty-daynav">
       <button onclick="dutyStepDay(-1)" aria-label="Previous day">&lsaquo;</button>
       <span class="dty-daylabel">${dutyDayLabel(iso)}${iso === today ? '<span class="dty-now mono">TODAY</span>' : ""}</span>
@@ -2666,7 +2665,7 @@ function dutyAdminToday(today) {
       <div class="stat"><label>AWAY</label>
         <div class="val mono" style="color:${away.length ? "var(--orange)" : ""}">${away.length}</div></div>
     </div>
-    ${dutyTodayCardHtml(iso, true)}
+    ${dutyTodayCardHtml(iso, admin)}
     <div class="card">
       <header class="dty-cardhead"><h3>OUT OF CAMP</h3><span class="right mono" style="color:var(--dim)">${away.length}</span></header>
       ${away.length ? away.map(c => {
@@ -2677,14 +2676,15 @@ function dutyAdminToday(today) {
             <small>${escapeHtml(o.reason || o.kind)}</small></span></div>`;
       }).join("") : '<div class="pad dty-quiet">Everyone is in camp.</div>'}
     </div>
-    <div class="dty-foot">Who is out is read from the medical and leave records, so this
-      can never disagree with the strength board.</div>`;
+    <div class="dty-foot">${admin
+      ? "Who is out is read from the medical and leave records, so this can never disagree with the strength board."
+      : "Built by the company admin. Ask them for a change."}</div>`;
 }
 
 // The month. A 24 x 31 grid does not fit a phone, so it is never drawn: the
 // month is a vertical list of days, and coverage rides on pips. One hollow
 // red pip is one unfilled duty, which is the whole month readable in a scroll.
-function dutyAdminMonth(today) {
+function dutyMonthView(today, admin) {
   const days = dutyMonthDays(_dutyMonth);
   const problems = [];
   let demanded = 0, filled = 0;
@@ -2769,7 +2769,14 @@ function dutyAdminMonth(today) {
 // Fairness and the two off ledgers. The four commanders who are in the
 // schedule but not in the OFF system get one line saying so - a row of zeros
 // would read as "he has taken everything".
-function dutyAdminPeople() {
+function dutyPeopleView(admin) {
+  // How duties are shared out is everybody's business - it is the fairness
+  // question, and hiding it is how a roster stops being trusted. How much
+  // leave another man has left is not: it is personnel data, and the rest of
+  // this app encrypts that class of column at rest. So the tallies are open
+  // and the balances are the admin's, plus your own.
+  const me = dutyMeD4();
+  const showBal = (d4) => admin || d4 === me;
   const t = dutyTallies(true);
   const cmdrs = STATE.roster.filter(r => r.role === "Commander");
   const max = Math.max(1, ...cmdrs.map(c => dutyTallyOf(t, c.id).total));
@@ -2797,7 +2804,8 @@ function dutyAdminPeople() {
         <span class="dty-bar" style="width:${Math.max(12, (x.total / max) * 100)}%">
           ${seg(x.PDS, "var(--accent)")}${seg(x.CDS, "var(--accent2)")}${seg(x.COS, "var(--teal)")}${seg(x.GD, "var(--orange)")}${seg(x.CDO, "var(--accentLift)")}</span>
         <span class="dty-bal-nums mono">PDS <b>${x.PDS}</b> &middot; CDS <b>${x.CDS}</b> &middot; COS <b>${x.COS}</b> &middot; total <b>${x.total}</b></span>
-        ${bal ? `<span class="dty-bal-led">
+        ${!showBal(c.id) ? ""
+          : bal ? `<span class="dty-bal-led">
             <span class="oil">OIL <b class="mono">${dutyNum(bal.oil.remaining)}</b>/${dutyNum(bal.oil.entitled)}</span>
             <span class="al">AL <b class="mono">${dutyNum(bal.al.remaining)}</b>/${dutyNum(bal.al.entitled)}</span></span>`
           : `<span class="dty-bal-untracked">not in the off system</span>`}
@@ -2808,10 +2816,13 @@ function dutyAdminPeople() {
     <div class="stats-row dty-tiles">
       <div class="stat"><label>PDS SPREAD</label><div class="val mono"
         style="color:${spread <= 2 ? "var(--teal)" : spread <= 4 ? "var(--orange)" : "var(--red)"}">&plusmn;${spread}</div></div>
-      <div class="stat"><label>TRACKED</label><div class="val mono">${tracked.length}<small>/${cmdrs.length}</small></div></div>
-      <div class="stat"><label>COMMANDERS</label><div class="val mono">${cmdrs.length}</div></div>
+      <div class="stat"><label>${admin ? "TRACKED" : "COMMANDERS"}</label><div class="val mono">${
+        admin ? `${tracked.length}<small>/${cmdrs.length}</small>` : cmdrs.length}</div></div>
+      <div class="stat"><label>DUTIES</label><div class="val mono">${
+        Object.values(t).reduce((n, x) => n + x.total, 0)}</div></div>
     </div>
     ${groups || '<div class="card"><div class="pad dty-quiet">No commanders in the roster yet.</div></div>'}
-    <div class="dty-foot">Balances are worked out from the entitlement rules and the leave
-      records. Nothing here is typed in, so nothing can drift.</div>`;
+    <div class="dty-foot">${admin
+      ? "Balances are worked out from the entitlement rules and the leave records. Nothing here is typed in, so nothing can drift."
+      : "Duty counts are open so everyone can see the load is shared. Off balances are your own; ask the company admin about anyone else's."}</div>`;
 }

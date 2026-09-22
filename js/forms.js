@@ -5003,7 +5003,10 @@ function openDutyPerson(d4) {
   const c = STATE.roster.find(r => r.id === d4);
   if (!c) return;
   const t = dutyTallyOf(dutyTallies(true), d4);
-  const bal = commanderBalances(d4);
+  // Same rule as the people list: the duty tallies are open, another man's
+  // leave balance is not.
+  const maySeeBal = canEditDuty() || d4 === dutyMeD4();
+  const bal = maySeeBal ? commanderBalances(d4) : null;
   const days = dutyMonthDays(_dutyMonth);
   if (!days.length) return;
 
@@ -5034,7 +5037,8 @@ function openDutyPerson(d4) {
         <div class="dty-person-next">${next
           ? `Next: <b>${escapeHtml(next.role + (next.slot || ""))}</b> on ${escapeHtml(dutyDayLabel(next.date))}`
           : "No duty scheduled."}</div>
-        ${bal ? `<div class="dty-person-bal">
+        ${!maySeeBal ? ""
+          : bal ? `<div class="dty-person-bal">
             <span class="oil">OIL <b class="mono">${dutyNum(bal.oil.remaining)}</b> of ${dutyNum(bal.oil.entitled)} left</span>
             <span class="al">AL <b class="mono">${dutyNum(bal.al.remaining)}</b> of ${dutyNum(bal.al.entitled)} left</span>
             <div class="dty-quiet">Entitlement is the sum of the rules that apply to him, not a stored number.</div></div>`
