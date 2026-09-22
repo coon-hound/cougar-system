@@ -235,4 +235,46 @@ module.exports = async function run() {
       "CI runs `node test/run.js` with no node_modules, so this fails there " +
       "and passes here: " + JSON.stringify(offenders, null, 1));
   });
+
+  suite("static: no personnel workbook reaches this public repository");
+
+  await test("no spreadsheet is tracked in the repo", () => {
+    // This repo is PUBLIC, and scripts/ship.sh runs `git add -A`. The blanket
+    // *.csv rule in .gitignore exists because a real nominal roll must never
+    // land here; a spreadsheet carries the same personnel data and hides it
+    // better. A workbook is a zip, so a reviewer skimming the diff sees one
+    // binary blob, not the names, platoons, ranks and leave balances inside.
+    //
+    // The duty schedule workbooks are the live example: they sat untracked but
+    // un-ignored in the working tree, one `ship.sh` away from public history.
+    // gitignore alone is not the guard, because a `git add -f` or a rule
+    // regression silently re-opens it, and git history is forever (PR #42
+    // scrubbed leaked names from the files and they are still in the log).
+    //
+    // Tools read workbooks from a path argument. None is ever copied in.
+    const tracked = require("child_process")
+      .execSync("git ls-files -z", { cwd: ROOT, maxBuffer: 1 << 24 })
+      .toString("utf8").split("\0").filter(Boolean);
+    const offenders = tracked.filter((f) => /\.(xlsx|xlsm|xlsb|xls|ods|numbers)$/i.test(f));
+    ok(offenders.length === 0,
+      "a spreadsheet is tracked in a public repo and almost certainly carries " +
+      "real personnel data; remove it from the index and keep it out of the " +
+      "tree: " + JSON.stringify(offenders, null, 1));
+  });
+
+  await test(".gitignore keeps personnel data out by extension, not by filename", () => {
+    // A rule naming one workbook (`cougar_fitness_tracker.xlsx`) protected
+    // exactly that filename and nothing else. The next workbook someone drops
+    // in the root is unprotected, which is how this was found. Blanket rules
+    // only; the two deliberate exceptions stay pinned so a future edit that
+    // drops them is visible here rather than at review time.
+    const gi = fs.readFileSync(path.join(ROOT, ".gitignore"), "utf8");
+    const rules = gi.split("\n").map((l) => l.trim());
+    for (const need of ["*.csv", "*.xlsx", "*.xls"]) {
+      ok(rules.includes(need), `.gitignore must carry the blanket rule ${need}`);
+    }
+    for (const keep of ["!sample_polar.csv", "!docs/nominal-roll-template.csv"]) {
+      ok(rules.includes(keep), `.gitignore lost its deliberate exception ${keep}`);
+    }
+  });
 };

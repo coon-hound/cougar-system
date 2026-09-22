@@ -3,10 +3,19 @@
 *.txt
 *.md.bak
 *.csv
+# Spreadsheets carry personnel data too, and they hide it better: a workbook is
+# a zip, so a reviewer skimming a diff sees one binary blob rather than the
+# names, platoons, ranks and leave balances actually inside it. The duty
+# schedule workbooks are the live example. This repo is PUBLIC and ship.sh runs
+# `git add -A`, so an un-ignored workbook in the tree is one ship away from
+# being in public history permanently. Tools read these from a path argument;
+# they are never copied into the repo.
+*.xlsx
+*.xls
 # ...except the two files that are deliberately tracked: the import fixture,
 # and the nominal-roll template (entirely invented names, and the thing a new
-# operator is pointed at). The blanket *.csv rule above exists to keep REAL
-# personnel rolls out of the repo, and it still does.
+# operator is pointed at). The blanket rules above exist to keep REAL
+# personnel data out of the repo, and they still do.
 !sample_polar.csv
 !docs/nominal-roll-template.csv
 
@@ -68,7 +77,7 @@ __preview.html
 .gnhf/
 
 # ── Local reference data ───────────────────────────
-cougar_fitness_tracker.xlsx
+# (Workbooks are covered by the blanket *.xlsx rule at the top of this file.)
 
 # Backend-connected demo entry pages (scripts/demo.sh, and the live-backend one)
 __demo.html
