@@ -514,23 +514,52 @@ button.dty-slot{cursor:pointer}
 .dty-asksub{font-size:11.5px;color:var(--dim);margin-bottom:9px}
 
 /* Month list. Full-bleed, because the row needs every pixel of 364. */
-.dty-monthlist{margin:0 -13px}
-.dty-monthlist .dty-grp{padding:0 13px}
-.dty-dayrow{display:flex;align-items:center;gap:11px;width:100%;min-height:54px;padding:8px 13px;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
-.dty-dayrow:last-child{border-bottom:0}
-.dty-dayrow.is-week{background:var(--surface2)}
-.dty-dayrow.is-today{box-shadow:inset 3px 0 0 var(--red)}
-.dty-dnum{flex:0 0 56px;font-size:10.5px;color:var(--muted);line-height:1.25}
-.dty-dnum b{display:block;font-size:15px;color:var(--text);letter-spacing:-.02em}
+/* The month as a CALENDAR. 7 columns x ~48px sits inside the 364px a 390px
+   phone leaves after #content's gutters, so the whole month is one glance with
+   no scrolling in either axis.
+
+   A cell cannot name five duty holders and does not try. It carries the SHAPE
+   of the day: a pip per demanded slot (filled = covered, hollow red = unfilled,
+   amber = held by someone since gone away), plus your own duty code if you are
+   on. The names live one tap away, in the day itself. */
+.dty-monthcard{padding:11px 10px 10px}
+.dty-mgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.dty-mhead{margin-bottom:4px}
+.dty-mdow{font-size:9.5px;color:var(--dim);text-align:center;font-weight:600}
+.dty-mcell{min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
+  gap:3px;padding:5px 1px 4px;background:var(--field);border:1px solid var(--border);
+  border-radius:var(--r1);color:var(--text);font:inherit;cursor:pointer;
+  transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez)}
+.dty-mcell.is-blank{background:transparent;border-color:transparent;cursor:default;min-height:0}
+/* A weekend or public holiday demands nothing. That is not an unfilled day, so
+   it recedes rather than reading as a hole in the roster. */
+.dty-mcell.is-quiet{background:transparent;border-color:transparent}
+.dty-mcell.is-quiet .dty-mnum{color:var(--dim)}
+.dty-mcell.is-today{border-color:var(--red)}
+.dty-mcell.is-mine{border-color:var(--accent);background:rgba(var(--accentRGB),.10)}
+.dty-mcell:focus-visible{outline:none;box-shadow:var(--ring)}
+.dty-mnum{font-size:12px;font-weight:700;line-height:1}
+.dty-mpips{display:flex;gap:2px;min-height:5px;flex-wrap:wrap;justify-content:center;max-width:100%}
+.dty-mpip{width:5px;height:5px;border-radius:var(--rp);background:var(--accent);flex:0 0 auto}
+.dty-mpip.is-gap{background:transparent;box-shadow:inset 0 0 0 1px var(--red)}
+.dty-mpip.is-clash{background:var(--orange)}
+.dty-mcode{font-size:7.5px;font-weight:700;letter-spacing:.02em;line-height:1.2;color:var(--accentLift);
+  min-height:9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dty-mcell:not(.is-mine) .dty-mcode{color:var(--yellow)}
+/* Legend. Colour is never the sole carrier - every entry is labelled - but the
+   swatch is what makes the grid above readable at a glance. */
+.dty-legend{display:flex;flex-wrap:wrap;gap:5px 11px;font-size:9.5px;color:var(--muted);
+  margin-top:10px;padding-top:9px;border-top:1px solid var(--border)}
+.dty-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.dty-legend i{width:7px;height:7px;border-radius:var(--rp);flex:0 0 auto}
+.dty-legend i.is-gap{background:transparent;box-shadow:inset 0 0 0 1.5px var(--red)}
+/* Today is marked on the NUMBER, not only the border: a day you are on already
+   owns the border, and today must not disappear because of it. */
+.dty-mcell.is-today .dty-mnum{color:var(--red)}
 /* The pips ARE the month view. Filled is covered, a hollow red ring is an
    unfilled duty, amber is someone who has since gone away. The ROW is the tap
    target - a 9px dot never is, and an ::after hit-extension would be clipped
    by the card's overflow anyway. */
-.dty-pips{flex:0 0 auto;display:flex;gap:4px}
-.dty-pip{width:9px;height:9px;border-radius:var(--rp);background:var(--accent)}
-.dty-pip.is-gap{background:transparent;box-shadow:inset 0 0 0 1.5px var(--red)}
-.dty-pip.is-clash{background:var(--orange)}
-.dty-daysum{flex:1 1 auto;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dty-ctx{font-size:9.5px;letter-spacing:.06em;color:var(--yellow)}
 
 .dty-cover{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;padding:10px 13px;border-radius:var(--r3);margin-bottom:12px;font-size:12px;border:1px solid var(--border);background:var(--surface);box-shadow:var(--sh1),var(--lift)}
@@ -597,7 +626,7 @@ button.dty-slot{cursor:pointer}
 .dty-cell-c{font-size:8.5px;font-weight:700;line-height:1.3}
 
 @media (hover:hover){
-  button.dty-slot:hover,.dty-dayrow:hover,.dty-pick:hover,.dty-issue:hover,.dty-bal:hover{background:var(--surface3)}
+  button.dty-slot:hover,.dty-mcell:hover,.dty-pick:hover,.dty-issue:hover,.dty-bal:hover{background:var(--surface3)}
   .dty-seg button:not([aria-selected="true"]):hover{color:var(--text)}
 }
 
@@ -611,7 +640,7 @@ button.dty-slot{cursor:pointer}
   .dty-daylabel{font-size:14px}
   .dty-slot{min-height:60px}
   .dty-slot-who{font-size:13px}
-  .dty-dayrow{min-height:56px}
+  .dty-mcell{min-height:54px}
   .dty-pick{min-height:64px}
   .dty-cell{min-height:48px}
   .dty-mine-role{font-size:20px}

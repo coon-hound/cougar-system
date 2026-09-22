@@ -2681,25 +2681,36 @@ function dutyTodayView(today, admin) {
       : "Built by the company admin. Ask them for a change."}</div>`;
 }
 
-// The month. A 24 x 31 grid does not fit a phone, so it is never drawn: the
-// month is a vertical list of days, and coverage rides on pips. One hollow
-// red pip is one unfilled duty, which is the whole month readable in a scroll.
+// The month, as a calendar.
+//
+// A 24 x 31 grid of commanders against days genuinely does not fit a phone -
+// at a legal tap target it is over 1300px wide with the platoon headings
+// scrolling away on the other axis. A 7-wide MONTH grid is a different shape
+// and fits easily: 7 x ~48px inside the 364px a 390px phone leaves. The person
+// sheet already uses exactly this.
+//
+// A cell cannot name five duty holders, and does not try. It carries the shape
+// of the day - how much of it is covered, and whether YOU are on - and tapping
+// it opens the day itself, which is where the names live.
 function dutyMonthView(today, admin) {
   const days = dutyMonthDays(_dutyMonth);
+  const me = dutyMeD4();
   const problems = [];
   let demanded = 0, filled = 0;
   // A month with no rows at all has not been planned; it is not 110 problems.
   const planned = days.some(iso => dutyRowsOn(iso).length);
 
-  const rows = days.map(iso => {
+  const cells = [];
+  // Lead the grid with blanks so the 1st lands under its real weekday.
+  const lead = new Date(days[0] + "T00:00:00").getDay();
+  for (let i = 0; i < lead; i++) cells.push('<div class="dty-mcell is-blank"></div>');
+
+  days.forEach(iso => {
     const cov = dutyCoverage(iso, true);
     // Only a day that has not happened yet can be acted on. Counting the ones
     // behind us buried the handful that matter under eighty that do not, and
-    // nobody is going back to fill last Tuesday's COS.
-    //
-    // The headline counts the same window as the list, deliberately: showing
-    // coverage for the whole month beside a forward-looking problem count gave
-    // two figures that did not reconcile, and a reader has to trust the sum.
+    // nobody is going back to fill last Tuesday's COS. The headline counts the
+    // same window as the list so the two figures reconcile.
     if (iso >= today) {
       demanded += cov.demanded; filled += cov.filled;
       cov.gaps.forEach(g => problems.push({ kind: "gap", iso, slot: g }));
@@ -2707,26 +2718,28 @@ function dutyMonthView(today, admin) {
     }
 
     const cal = dutyCalendarFor(iso);
-    const pips = cov.slots.map(s => {
-      const d4 = cov.held[s.key];
-      if (!d4) return '<span class="dty-pip is-gap"></span>';
-      if (outOfCampMap(iso).has(d4)) return '<span class="dty-pip is-clash"></span>';
-      return `<span class="dty-pip" style="background:${dutyRoleTint(s.role)}"></span>`;
+    const ph = cal.some(c => c.code === "PH");
+    const quiet = !cov.demanded;
+    const mineSlot = cov.slots.find(sl => cov.held[sl.key] === me);
+    const out = outOfCampMap(iso);
+
+    const pips = cov.slots.map(sl => {
+      const d4 = cov.held[sl.key];
+      if (!d4) return '<i class="dty-mpip is-gap"></i>';
+      if (out.has(d4)) return '<i class="dty-mpip is-clash"></i>';
+      return `<i class="dty-mpip" style="background:${dutyRoleTint(sl.role)}"></i>`;
     }).join("");
 
-    const lead = cov.slots.find(s => cov.held[s.key]);
-    const summary = !cov.demanded
-      ? (dutyIsWeekend(iso) ? "weekend" : cal.some(c => c.code === "PH") ? "public holiday" : "no duties")
-      : lead ? `${lead.key} ${escapeHtml(displayPersonLabel(cov.held[lead.key]))}${cov.filled > 1 ? ` +${cov.filled - 1}` : ""}`
-             : "nothing assigned";
-    const d = new Date(iso + "T00:00:00");
-    return `<button class="dty-dayrow${dutyIsWeekend(iso) || cal.some(c => c.code === "PH") ? " is-week" : ""}${iso === today ? " is-today" : ""}"
-        onclick="dutyOpenDay('${escapeAttr(iso)}')">
-      <span class="dty-dnum mono">${["SUN","MON","TUE","WED","THU","FRI","SAT"][d.getDay()]}<b>${d.getDate()}</b></span>
-      <span class="dty-pips">${pips || '<span class="dty-quiet">&mdash;</span>'}</span>
-      <span class="dty-daysum">${summary}${cal.length ? ` <span class="dty-ctx mono">${escapeHtml(cal[0].code)}</span>` : ""}</span>
-      <span class="dty-chev">&rsaquo;</span></button>`;
-  }).join("");
+    const n = +iso.slice(8);
+    cells.push(`<button class="dty-mcell${quiet ? " is-quiet" : ""}${iso === today ? " is-today" : ""}${mineSlot ? " is-mine" : ""}"
+        onclick="dutyOpenDay('${escapeAttr(iso)}')"
+        aria-label="${escapeAttr(dutyDayLabel(iso))}, ${quiet ? "no duties" : `${cov.filled} of ${cov.demanded} covered`}${mineSlot ? ", you are on" : ""}">
+      <span class="dty-mnum mono">${n}</span>
+      <span class="dty-mpips">${pips}</span>
+      <span class="dty-mcode mono">${mineSlot ? escapeHtml(mineSlot.key.replace(/\s+/g, ""))
+        : ph ? "PH" : cal.length ? escapeHtml(cal[0].code) : ""}</span>
+    </button>`);
+  });
 
   const gaps = problems.filter(p => p.kind === "gap");
   const clashes = problems.filter(p => p.kind === "clash");
@@ -2737,6 +2750,7 @@ function dutyMonthView(today, admin) {
       <span class="dty-daylabel">${escapeHtml(dutyMonthLabel(_dutyMonth))}</span>
       <button onclick="dutyStepMonth(1)" aria-label="Next month">&rsaquo;</button>
     </div>
+
     ${!demanded ? "" : !planned ? `
       <div class="dty-cover">
         <b class="mono">${demanded}</b> duties to fill
@@ -2748,7 +2762,22 @@ function dutyMonthView(today, admin) {
           ? `<span>${gaps.length ? `${gaps.length} still to fill` : ""}${gaps.length && clashes.length ? " &middot; " : ""}${clashes.length ? `${clashes.length} on someone away` : ""}</span>`
           : "<span>nothing outstanding</span>"}
       </div>`}
-    ${problems.length ? `
+
+    <div class="card dty-monthcard">
+      <div class="dty-mgrid dty-mhead">
+        ${["M", "T", "W", "T", "F", "S", "S"].map((d, i) =>
+          `<span class="dty-mdow">${i === 6 ? "S" : d}</span>`).join("")}
+      </div>
+      <div class="dty-mgrid">${cells.join("")}</div>
+      <div class="dty-legend">
+        <span><i style="background:var(--accent)"></i>covered</span>
+        <span><i class="is-gap"></i>unfilled</span>
+        <span><i style="background:var(--orange)"></i>on someone away</span>
+        <span><i style="background:var(--surface3)"></i>no duties</span>
+      </div>
+    </div>
+
+    ${admin && problems.length ? `
       <div class="card">
         <header class="dty-cardhead"><h3>NEEDS A LOOK</h3><span class="right mono" style="color:var(--orange)">${problems.length}</span></header>
         ${problems.slice(0, 5).map(p => `
@@ -2763,12 +2792,10 @@ function dutyMonthView(today, admin) {
         <div class="pad dty-quiet">From ${escapeHtml(dutyDayLabel(today))} onwards. Days already
           past are left alone.</div>
       </div>` : ""}
-    <div class="card"><div class="dty-monthlist">${rows}</div></div>`;
+    <div class="dty-foot">Tap any day to see who is on it${admin ? " and change it" : ""}.
+      ${me ? "Days you are on are outlined." : ""}</div>`;
 }
 
-// Fairness and the two off ledgers. The four commanders who are in the
-// schedule but not in the OFF system get one line saying so - a row of zeros
-// would read as "he has taken everything".
 function dutyPeopleView(admin) {
   // How duties are shared out is everybody's business - it is the fairness
   // question, and hiding it is how a roster stops being trusted. How much

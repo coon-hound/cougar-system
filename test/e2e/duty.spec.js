@@ -87,8 +87,8 @@ test("a commander sees the WHOLE schedule, with his own duty leading it", async 
   await expect(page.locator(".dty-ro")).toHaveText("READ ONLY");
 
   await page.evaluate(() => setDutyMode("month"));
-  await expect(page.locator(".dty-monthlist")).toBeVisible();
-  expect(await page.locator(".dty-dayrow").count()).toBeGreaterThan(27);
+  await expect(page.locator(".dty-mgrid").first()).toBeVisible();
+  expect(await page.locator(".dty-mcell:not(.is-blank)").count()).toBeGreaterThan(27);
 
   await page.evaluate(() => setDutyMode("people"));
   expect(await page.locator(".dty-bal").count()).toBeGreaterThan(0);
@@ -171,12 +171,11 @@ test("the admin gets the planner, and the month stays inside a phone", async ({ 
   await expect(page.locator("button.dty-slot").first()).toBeVisible();
 
   await page.evaluate(() => setDutyMode("month"));
-  await expect(page.locator(".dty-monthlist")).toBeVisible();
-  // One row per day of the month, and coverage carried by pips rather than by
-  // a grid nobody can read on a phone.
-  const rows = await page.locator(".dty-dayrow").count();
-  expect(rows).toBeGreaterThan(27);
-  expect(await page.locator(".dty-pip").count()).toBeGreaterThan(0);
+  await expect(page.locator(".dty-mgrid").first()).toBeVisible();
+  // One cell per day, seven to a row, with coverage carried by pips. A cell
+  // cannot name five holders; tapping it opens the day, which can.
+  expect(await page.locator(".dty-mcell:not(.is-blank)").count()).toBeGreaterThan(27);
+  expect(await page.locator(".dty-mpip").count()).toBeGreaterThan(0);
 
   // THE assertion this whole layout exists for.
   for (const mode of ["today", "month", "people"]) {
