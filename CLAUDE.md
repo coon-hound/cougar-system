@@ -58,6 +58,8 @@ Anything selecting conducts by age keeps all of them or none; name the ids.
 - **`api_row` returns every real column**, so adding a column to a table puts it in every `readAll` response and in anything that copies a row. Set derived values *after* copying a source row, not before.
 - **`purge_retention` (0002) hard-deletes soft-deleted rows once past its window**, so a soft delete is not durable on its own - `block_archived_delete` is what keeps archived history out of its reach, and the table is only protected once that trigger is installed on it.
 Its report counts what it looked at, not what it removed: a committed run said `conducts_soft_deleted: 110` and actually deleted 1, the other 109 being archived.
+- **`usage_daily.device` is NOT a per-token id, despite being derived from the auth token.** `js/telemetry.js` hashes the token (FNV-1a) but `ensureStore` only does so **when the id is missing**, so it is written once into `localStorage` and then sticks across every reissue. Measured on production: of 42 tokens, exactly one hashed to a device present in `usage_daily` - the only one never reissued. So `usage_daily` cannot be joined to a token, and this is a feature, not a bug: it makes the id a durable **per-browser** identity, where a reissue on a device whose storage survived produces no new id and a wiped bucket produces one. Use `token_activity` (`0011`) when the question is about a credential, and `usage_daily` when it is about a browser.
+- **`check_auth` runs on EVERY request, including the 20-second `revCheck` poll.** Anything added to it is a write per device per 20 seconds unless it is gated. `0011` gates its daily row on `last_seen_at::date < current_date`, tested against the row as it was read *before* the request.
 - **A killed migration leaves its transaction open.** `idle_in_transaction_session_timeout` is `0` on this database, so a client killed mid-run holds its row locks until the connection drops, and the next run blocks on them silently. Check `pg_stat_activity` before assuming a rerun is merely slow.
 
 ## Personnel data rules
@@ -109,6 +111,10 @@ Add a spec per frontend feature under `test/e2e/*.spec.js`.
 The Playwright static server's port is **derived from the checkout path**, and the server is pinned with `--directory`.
 It used to be a fixed 5599 with `reuseExistingServer`, which meant a worktree's run silently adopted whichever checkout started the server first and tested code it did not contain - a spec passing against the wrong tree, with nothing in the output to say so.
 `PW_PORT` still overrides if you need a specific port.
+
+`test/live/api-contract.test.js` defaults to `COUGAR_TOKEN=dev-token`, but `dev-env.sh` **reuses whatever usable token already exists** and mints `dev-token` only on a database that has none.
+On any database seeded by another run or a second worktree, that default names a token that is not there and all 32 tests fail as auth failures - which reads exactly like a regression in the change under test.
+`verify.sh` now reads the token out of the database instead (as `demo.sh` always did); if you invoke the suite by hand, pass `COUGAR_TOKEN` or expect to lose twenty minutes.
 
 `js/state.js` is no longer loadable on its own: its read-boundary normalizers call into `js/helpers.js` (`canonMedStatus`), so the node harnesses load `helpers.js` first, exactly as `index.html` does.
 
