@@ -21,6 +21,15 @@ const ForbiddenError = class extends Error {
   constructor(message) { super(message); this.name = "ForbiddenError"; }
 };
 
+// The backend does not know this tab. Almost always a DEPLOY ORDER problem:
+// TABLE / STATE_KEY are module-level in the Edge Function, so a frontend that
+// ships before the function is redeployed asks for a tab that does not exist
+// yet. Retrying cannot fix it, and the tab is not coming back this session, so
+// the client stops asking and keeps the data locally until it can.
+const TabUnknownError = class extends Error {
+  constructor(message, tab) { super(message); this.name = "TabUnknownError"; this.tab = tab; }
+};
+
 // Transport-level failure: fetch rejected (offline, DNS, CORS) or the request
 // timed out. `timeout` distinguishes an abort-by-timer from other failures.
 const NetError = class extends Error {
