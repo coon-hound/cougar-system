@@ -72,7 +72,15 @@ const TAB_TO_STATE = {
   "Appointments": "appointments",
   "Leave": "leave",
   "MSK": "msk",
-  "Conducts": "conducts"
+  "Conducts": "conducts",
+  // Duty schedule support tables (0009). `Duty` itself is deliberately NOT
+  // here yet: STATE.duty is still the per-device command-team map below, and
+  // pointing a pull at that key would replace the map with an array and take
+  // the parade state's command team down with it. The promotion lands with the
+  // rest of the duty rewrite; until then Duty is backend-tracked and
+  // frontend-ignored, exactly as RouteMarch / SOC / PolarFlow already are.
+  "Calendar": "calendar",
+  "OilRules": "oilRule"
 };
 
 // Persisted set of tab names with unpushed local changes. Survives reloads
@@ -277,6 +285,11 @@ const STATE = {
   // free-text conduct names. Empty array on first load triggers the migration
   // modal that promotes legacy string `conduct` fields to ids.
   conducts: [],
+  // Per-DATE context for the duty grid (PH, IPPT, NDP, CONFINED, XWB) and the
+  // off-in-lieu entitlement rules. Absence is NOT here: OFF/AL are Leave rows
+  // and MC is a Medical row, all read through outOfCampMap.
+  calendar: [],
+  oilRule: [],
   // Global view scope: "" = all. Persisted across reloads so leaving the app
   // mid-task and coming back doesn't blow away the section you were focused on.
   // filterRole adds a third dimension on top of platoon/section — toggles
@@ -423,6 +436,42 @@ function normalizeLeave(records) {
   });
 }
 
+// Calendar rows are a fact about a DATE, not about a person, so there is no d4
+// to pad. The full schema is emitted on every row because the frontend assumes
+// a uniform shape everywhere (CLAUDE.md) and the backend no longer derives
+// columns from row 0's keys the way writeTab did.
+function normalizeCalendar(records) {
+  return (records || []).map(r => {
+    if (!r) return r;
+    const out = { ...r };
+    if ("id" in out) out.id = normId(out.id);
+    return {
+      id: out.id ?? "", date: out.date ?? "", code: out.code ?? "",
+      label: out.label ?? "", note: out.note ?? "",
+      ...out
+    };
+  });
+}
+
+// OIL entitlement rules. `appliesTo` is "ALL", an appointment class ("VC"/"SC")
+// or ONE commander's 4D - so it is padded only when it looks like a 4D, never
+// when it is a class token. `days` stays a string here and is coerced with an
+// explicit + at the point of summing, like leave.days.
+function normalizeOilRule(records) {
+  return (records || []).map(r => {
+    if (!r) return r;
+    const out = { ...r };
+    if ("id" in out) out.id = normId(out.id);
+    const to = String(out.appliesTo ?? "");
+    out.appliesTo = /^\d{1,4}$/.test(to) ? padD4(to) : to;
+    return {
+      id: out.id ?? "", event: out.event ?? "", appliesTo: out.appliesTo,
+      days: out.days ?? "", notes: out.notes ?? "",
+      ...out
+    };
+  });
+}
+
 // Row ids are TEXT, always. Sheets typed its id column as a NUMBER, so the app
 // could get away with `row.id === +editId`. Postgres types every column as text
 // (0001_init.sql), which makes that comparison false for the same row — and the
@@ -551,6 +600,8 @@ function loadLocal() {
     STATE.conductDetail = normalizeConductDetail(d.conductDetail);
     STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);
+    STATE.calendar = normalizeCalendar(d.calendar);
+    STATE.oilRule = normalizeOilRule(d.oilRule);
     STATE.msk = normalizeMSK(d.msk);
     STATE.conducts = padD4OnLayer(Array.isArray(d.conducts) ? d.conducts : []);
     STATE.rev = (d.rev && typeof d.rev === "object") ? d.rev : {};

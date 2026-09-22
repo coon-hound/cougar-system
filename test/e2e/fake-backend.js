@@ -24,6 +24,7 @@ const STATE_KEY = {
   IPPT: "ippt", RouteMarch: "rm", SOC: "soc", PolarFlow: "polar",
   ConductDetail: "conductDetail", Appointments: "appointments",
   Leave: "leave", MSK: "msk", Conducts: "conducts",
+  Duty: "duty", Calendar: "calendar", OilRules: "oilRule",
 };
 const REV_TABS = Object.keys(STATE_KEY);
 

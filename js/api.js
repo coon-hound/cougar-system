@@ -58,7 +58,9 @@ const PULL_ASSIGN = {
   appointments:  d => STATE.appointments = normalizeAppointments(d),
   leave:         d => STATE.leave = normalizeLeave(d),
   msk:           d => STATE.msk = normalizeMSK(d),
-  conducts:      d => STATE.conducts = padD4OnLayer(d)
+  conducts:      d => STATE.conducts = padD4OnLayer(d),
+  calendar:      d => STATE.calendar = normalizeCalendar(d),
+  oilRule:       d => STATE.oilRule = normalizeOilRule(d)
 };
 
 const API = {

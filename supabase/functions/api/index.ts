@@ -52,6 +52,7 @@ const TABLE: Record<string, string> = {
   Appointments: "appointments", Leave: "leave", MSK: "msk",
   Conducts: "conducts", ParadeStates: "paradestates",
   TgUsers: "tgusers", ReportSick: "reportsick", Config: "config",
+  Duty: "duty", Calendar: "calendar", OilRules: "oil_rule",
 };
 
 // Sheet tab → readAll response key (mirrors TAB_TO_STATE, js/state.js:32-45).
@@ -61,6 +62,10 @@ const STATE_KEY: Record<string, string> = {
   IPPT: "ippt", RouteMarch: "rm", SOC: "soc", PolarFlow: "polar",
   ConductDetail: "conductDetail", Appointments: "appointments",
   Leave: "leave", MSK: "msk", Conducts: "conducts",
+  // The duty schedule (0009). `calendar` is the per-DATE context (PH, IPPT,
+  // NDP ...) and `oil_rule` the off-in-lieu entitlement rules; absence stays
+  // in Leave and Medical, so there is no tab for it here.
+  Duty: "duty", Calendar: "calendar", OilRules: "oilRule",
 };
 
 // Exactly REV_TABS (apps-script-Code.gs:309-310). ParadeStates, TgUsers,

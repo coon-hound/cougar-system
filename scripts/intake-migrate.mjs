@@ -39,7 +39,12 @@
 // medical history, which is both invisible afterwards and unsafe.
 // ============================================================================
 
-import postgres from "postgres";
+// `postgres` is imported lazily inside main(), NOT at the top level.
+// `.github/workflows/test.yml` runs `node test/run.js` with no `npm install`,
+// so anything a unit test can reach must not pull in an npm package on load -
+// it passes locally, where node_modules exists, and fails only in CI with
+// ERR_MODULE_NOT_FOUND. A test only has to NAME this file in a string for the
+// static guard to count it as reachable, which is how this surfaced.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -60,6 +65,7 @@ const ENCRYPTED = new Set([
 const REV_TABS = [
   "Roster", "Medical", "Attendance", "IPPT", "RouteMarch", "SOC",
   "PolarFlow", "ConductDetail", "Appointments", "Leave", "MSK", "Conducts",
+  "Duty", "Calendar", "OilRules",
 ];
 
 // Tables that get archived at a changeover. Conducts is excluded: it is a
@@ -67,6 +73,15 @@ const REV_TABS = [
 const COHORT_TABLES = [
   "roster", "medical", "attendance", "ippt", "routemarch", "soc",
   "polarflow", "conductdetail", "appointments", "leave", "msk",
+  // The duty schedule (0009). These hold commander rows only, and commanders
+  // are skipped by the archive step and rolled forward - so they never
+  // actually archive. They are here so the ROLL-FORWARD loop picks them up: a
+  // commander row left on a departed cohort's label can be soft-deleted in the
+  // app and then never revived, because keep_archived_archived silently
+  // declines it and the user sees a write that reports success and does
+  // nothing. `calendar` is absent on purpose: it is recurring unit vocabulary,
+  // not a cohort's property, and is not intake-stamped at all.
+  "duty", "oil_rule",
 ];
 
 // ── Argument parsing ────────────────────────────────────────────────────────
@@ -301,6 +316,7 @@ async function main() {
   if (!fs.existsSync(rollPath)) { console.error(`No such file: ${rollPath}`); process.exitCode = 1; return; }
   const roll = parseCsv(fs.readFileSync(rollPath, "utf8"));
 
+  const { default: postgres } = await import("postgres");
   const sql = postgres(DATABASE_URL, { prepare: false, max: 4 });
   try {
     const current = await currentIntake(sql);

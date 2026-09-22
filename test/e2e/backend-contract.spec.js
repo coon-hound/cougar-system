@@ -221,3 +221,67 @@ test("an edit made offline is held, then drains on reconnect", async ({ page }) 
   expect(await page.evaluate(() => (STATE.dirty && STATE.dirty.size) || 0)).toBe(0);
   expect(backend.rows("Roster").some((r) => r.outOfCamp === true || r.outOfCamp === "TRUE")).toBe(true);
 });
+
+// ── The duty schedule tabs (0009) ───────────────────────────────────────────
+//
+// Adding a synced tab touches seven files that nothing ties together, and every
+// way of getting it wrong is SILENT: the backend serves rows the client never
+// asks for, or the client asks for a key the backend never fills, and in both
+// cases the array is simply empty and nothing says why. test/static.test.js
+// pins the MAPS against each other; this pins the behaviour they are supposed
+// to produce, end to end through the real client.
+test("Calendar and OilRules arrive from readAll and land in STATE", async ({ page }) => {
+  const backend = await bootAuthed(page, {
+    seed: {
+      Roster: rosterSeed(),
+      Calendar: [{ id: "cal-2026-10-09-PH", date: "2026-10-09", code: "PH", label: "Public holiday", note: "" }],
+      OilRules: [{ id: "oil-panzer-VC", event: "PANZER", appliesTo: "VC", days: "4", notes: "Role entitlement" }],
+    },
+  });
+
+  await expect.poll(() => page.evaluate(() => STATE.calendar.length)).toBe(1);
+  await expect.poll(() => page.evaluate(() => STATE.oilRule.length)).toBe(1);
+
+  // The readAll key is `oilRule` while the tab is `OilRules`, exactly like
+  // rm / polar / conductDetail already differ from their tab names. Getting
+  // that pairing wrong is the failure this asserts against.
+  expect(await page.evaluate(() => STATE.calendar[0].code)).toBe("PH");
+  expect(await page.evaluate(() => STATE.oilRule[0].appliesTo)).toBe("VC");
+
+  // The rev must be tracked, or no other device ever learns the tab changed.
+  const revs = await page.evaluate(() => ({ cal: STATE.rev.Calendar, oil: STATE.rev.OilRules }));
+  expect(revs.cal).toBeGreaterThan(0);
+  expect(revs.oil).toBeGreaterThan(0);
+  expect(backend.requests.length).toBeGreaterThan(0);
+});
+
+test("a duty row survives the write path with its deterministic id intact", async ({ page }) => {
+  // The id IS the natural key - duty-<date>-<role><slot> - which is what lets
+  // two phones edit the same slot and converge on one row instead of minting
+  // two. That only holds if the id survives the round trip verbatim, and ids
+  // are TEXT: an id that got coerced through a number would come back as NaN
+  // and every later write would miss the row it meant to update.
+  const backend = await bootAuthed(page, { seed: { Roster: rosterSeed() } });
+  const id = "duty-2026-10-01-PDS7";
+
+  await page.evaluate(async (rowId) => {
+    const row = { id: rowId, date: "2026-10-01", role: "PDS", slot: "7",
+                  d4: "0001", status: "published", source: "manual", note: "" };
+    await API.upsertRow("Duty", row);
+  }, id);
+
+  await expect.poll(() => backend.tabs.Duty?.length ?? 0).toBe(1);
+  const row = backend.tabs.Duty[0];
+  expect(row.id).toBe(id);
+  expect(typeof row.id).toBe("string");
+  expect(row.slot).toBe("7");
+
+  // Writing the SAME slot again replaces it rather than adding a second row.
+  await page.evaluate(async (rowId) => {
+    await API.upsertRow("Duty", { id: rowId, date: "2026-10-01", role: "PDS",
+                                  slot: "7", d4: "0002", status: "published",
+                                  source: "manual", note: "" });
+  }, id);
+  await expect.poll(() => backend.tabs.Duty.length).toBe(1);
+  expect(backend.tabs.Duty[0].d4).toBe("0002");
+});

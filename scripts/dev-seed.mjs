@@ -136,6 +136,15 @@ for (let c = 1; c <= 6; c++) {
     name: `${pick(GIVEN, c + 2)} ${pick(SURNAMES, c + 5)}`, role: "Commander", rank: "CPT",
     status: "Active", outOfCamp: "FALSE", campIn: "FALSE", program: "Combined",
     phone: `9${String(5000000 + c * 131).slice(0, 7)}`,
+    // Duty-schedule fields (0009). appt alternates so both OIL rule classes
+    // match somebody; leaveQuota is the ANNUAL LEAVE entitlement, and OIL has
+    // no quota because it is earned from the rules below. One commander is
+    // left untracked on purpose: "appears in the schedule" and "has an off
+    // budget" are two different predicates, and the balances view has to keep
+    // them apart rather than showing him as a row of zeros.
+    appt: c % 2 ? "VC" : "SC",
+    oilTracked: c === 6 ? "" : "true",
+    leaveQuota: "14", openingOilUsed: c === 1 ? "2.5" : "0", openingAlUsed: "0",
   });
 }
 
@@ -403,11 +412,56 @@ const msk = MSK_CASES.flatMap((m) => {
 });
 
 // ── Load ────────────────────────────────────────────────────────────────────
+// ── Duty schedule (0009) ────────────────────────────────────────────────────
+//
+// Three tables, three different kinds of fact, which is the whole point of the
+// split: `duty` is an assignment (a person, a date, a role), `calendar` is a
+// fact about a DATE that is true for everyone, and `oilRule` is an entitlement
+// rule. Absence is NOT here - OFF/AL are Leave rows and MC is a Medical row,
+// all read through outOfCampMap, so the grid cannot disagree with the strength
+// board about who is in camp.
+//
+// Ids are DETERMINISTIC rather than nextId(): the natural key IS the id, so a
+// reseed upserts the same rows and two devices writing the same slot converge
+// instead of minting two rows for it.
+const commanders = roster.filter((r) => r.role === "Commander");
+const duty = [];
+for (let i = 0; i < 10; i++) {
+  const date = iso(i - 3);                            // a few days either side of today
+  const wd = new Date(date + "T00:00:00Z").getUTCDay();
+  if (wd === 0 || wd === 6) continue;                 // weekends carry no duty
+  const slots = [["CDS", ""], ["COS", ""], ["PDS", "1"], ["PDS", "2"]];
+  slots.forEach(([role, slot], n) => {
+    const who = commanders[(i + n) % commanders.length];
+    duty.push({
+      id: `duty-${date}-${role}${slot}`, date, role, slot, d4: who.id,
+      status: "published", source: "manual", note: "",
+    });
+  });
+}
+
+const calendar = [
+  { id: `cal-${iso(2)}-IPPT`, date: iso(2), code: "IPPT", label: "IPPT", note: "" },
+  { id: `cal-${iso(9)}-NDP`,  date: iso(9), code: "NDP",  label: "NDP rehearsal", note: "" },
+];
+
+// Applies To is ALL, an appointment class, or ONE commander's 4D - never a
+// name. Days are fractional in the real data, so seed a 0.5 to keep that path
+// exercised.
+const oilRule = [
+  { id: "oil-arr-ALL",   event: "ARR",       appliesTo: "ALL", days: "1",   notes: "Everyone" },
+  { id: "oil-panzer-VC", event: "PANZER",    appliesTo: "VC",  days: "4",   notes: "Role entitlement" },
+  { id: "oil-panzer-SC", event: "PANZER",    appliesTo: "SC",  days: "2",   notes: "Role entitlement" },
+  { id: `oil-armskote-${commanders[0].id}`, event: "ARMSKOTE",
+    appliesTo: commanders[0].id, days: "0.5", notes: "Individual" },
+];
+
 const TABS = [
   ["Conducts", conducts.map(({ id, name }) => ({ id, name }))],
   ["Roster", roster], ["IPPT", ippt], ["Medical", medical], ["Leave", leave],
   ["Appointments", appointments], ["PolarFlow", polar], ["Attendance", attendance],
   ["ConductDetail", conductDetail], ["RouteMarch", rm], ["SOC", soc],
+  ["Duty", duty], ["Calendar", calendar], ["OilRules", oilRule],
 ];
 
 try {
