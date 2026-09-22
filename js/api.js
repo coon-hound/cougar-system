@@ -13,6 +13,14 @@ const BusyError = class extends Error {
   constructor(message) { super(message); this.name = "BusyError"; }
 };
 
+// The token is valid, but it is not allowed to do this (body {error, code:403}).
+// A DIFFERENT thing from AuthError, and it needs the opposite retry policy from
+// almost every other failure: retrying cannot outrun a permission you do not
+// have, so the op is never replayed. Raised for the admin-only tabs.
+const ForbiddenError = class extends Error {
+  constructor(message) { super(message); this.name = "ForbiddenError"; }
+};
+
 // Transport-level failure: fetch rejected (offline, DNS, CORS) or the request
 // timed out. `timeout` distinguishes an abort-by-timer from other failures.
 const NetError = class extends Error {

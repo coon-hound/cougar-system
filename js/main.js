@@ -300,6 +300,9 @@ async function refreshIdentity() {
     const me = await API.whoami();
     if (!me || me.error) return;
     STATE.me = me;
+    // Remember what the server said, so an offline launch still knows who is
+    // holding this phone and whether they may edit the duty schedule.
+    if (typeof cacheIdentity === "function") cacheIdentity(me);
     const btn = document.querySelector('.nav-btn[data-nav="access"]');
     if (btn && me.canInvite) btn.hidden = false;
     if (STATE.nav === "access") render();

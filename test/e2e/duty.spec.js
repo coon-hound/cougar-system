@@ -88,6 +88,47 @@ test("a commander sees his own next duty, not the planner", async ({ page }) => 
   expect(errs).toEqual([]);
 });
 
+test("identity comes from the access code, with no way to claim someone else", async ({ page }) => {
+  // The invite issues one token per person and auth_tokens carries their 4D,
+  // so the app already knows who this is. There is deliberately no picker: on
+  // this screen a self-declared identity means reading another commander's
+  // duties and off balances by choosing his name.
+  await gotoDuty(page, asReader);
+  await expect(page.locator(".dty-mine-who")).toContainText("COMD TAN");
+  expect(await page.locator("#content select").count()).toBe(0);
+
+  // A token that names somebody else shows THEIR duties, not a choice.
+  await page.evaluate(() => { STATE.me = { d4: "0003", canEditDuty: false }; render(); });
+  await expect(page.locator(".dty-mine-who")).toContainText("ECHO WONG");
+
+  // A token that resolves to nobody explains itself rather than offering a list.
+  await page.evaluate(() => { STATE.me = { d4: "", canEditDuty: false }; render(); });
+  await expect(page.locator(".dty-ask")).toBeVisible();
+  expect(await page.locator("#content select").count()).toBe(0);
+});
+
+test("an offline launch still knows who is holding the phone", async ({ page }) => {
+  // whoami needs the network. The cache is the SERVER's last answer, written
+  // only on a successful whoami, so it is identity, not a self-declaration.
+  await gotoDuty(page, asReader);
+  await page.evaluate(() => {
+    cacheIdentity({ d4: "0002", person: "DELTA LIM", canEditDuty: false });
+    STATE.me = undefined;          // as it is when whoami cannot be reached
+    render();
+  });
+  await expect(page.locator(".dty-mine-who")).toContainText("DELTA LIM");
+
+  // An admin offline keeps the planner rather than being silently demoted to
+  // the read-only screen. A stale yes is harmless - the server still refuses
+  // the write - while a stale no would lock him out of his own job.
+  await page.evaluate(() => {
+    cacheIdentity({ d4: "0001", person: "COMD TAN", canEditDuty: true });
+    STATE.me = undefined;
+    render();
+  });
+  await expect(page.locator(".dty-seg")).toBeVisible();
+});
+
 test("a non-admin cannot reach an edit control, even on today's team", async ({ page }) => {
   await gotoDuty(page, asReader);
   // The slot rows render, but as text rather than buttons.

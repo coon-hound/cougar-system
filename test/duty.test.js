@@ -36,6 +36,16 @@ function load(seedLocal) {
   return sandbox;
 }
 
+// render.js too, for the handful of duty helpers that live there. Its module
+// scope only reads localStorage, so the stub is enough - everything touching
+// the DOM is inside a function.
+function loadWithRender(seedLocal) {
+  const s = load(seedLocal);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "js/render.js"), "utf8"), s,
+    { filename: "js/render.js" });
+  return s;
+}
+
 const row = (date, role, slot, d4, status) => ({
   id: `duty-${date}-${role}${slot || ""}`, date, role, slot: slot || "",
   d4, status: status || "published", source: "manual", note: "",
@@ -258,6 +268,67 @@ module.exports = async function run() {
     const s = withLedger({ role: "Recruit" });
     eq(s.commanderBalances("0001"), null, "a recruit has no off ledger");
     eq(withLedger().commanderBalances("9999"), null, "nor does an id that is not on the roster");
+  });
+
+  suite("duty: identity comes from the access code, never from a picker");
+
+  await test("the 4D is read from the token's identity, and padded", () => {
+    // padD4 is load-bearing: a commander id like 0001 loses its leading zeros
+    // in transit, and an unpadded one matches no roster row at all - the man
+    // would simply have no duties.
+    const s = loadWithRender();
+    s.STATE.me = { d4: "1", canEditDuty: false };
+    eq(s.dutyMeD4(), "0001", "whoami's 4D is repadded before it is used as a key");
+
+    const off = loadWithRender({ "cougar-identity": JSON.stringify({ d4: "4" }) });
+    eq(off.dutyMeD4(), "0004", "and so is the cached one, on an offline launch");
+
+    eq(loadWithRender().dutyMeD4(), "", "no identity at all is blank, not a guess");
+  });
+
+  await test("the cached identity is what the SERVER said, and survives a launch", () => {
+    // whoami needs the network and this app is used without it, so the last
+    // answer is cached. It is written only from a successful whoami - nothing
+    // in the UI can set it, because a self-declared identity on this screen
+    // means reading another commander's duties and off balances.
+    const s = load();
+    s.cacheIdentity({ d4: "0004", person: "ALPHA", canEditDuty: true });
+    const again = load({ "cougar-identity": s.localStorage.getItem("cougar-identity") });
+    const c = again.cachedIdentity();
+    eq(c.d4, "0004", "the 4D survives");
+    eq(c.canEditDuty, true, "and so does the capability");
+  });
+
+  await test("a junk or absent cache never throws", () => {
+    eq(load().cachedIdentity(), null, "nothing cached yet");
+    eq(load({ "cougar-identity": "{not json" }).cachedIdentity(), null, "corrupt cache");
+    eq(load({ "cougar-identity": '"a string"' }).cachedIdentity(), null, "a non-object");
+  });
+
+  await test("an identity with neither a 4D nor a person is not cached", () => {
+    const s = load();
+    s.cacheIdentity({ canEditDuty: true });
+    eq(s.localStorage.getItem("cougar-identity"), null,
+      "nothing worth remembering, so nothing is written");
+  });
+
+  await test("edit rights: the live answer wins, the cache covers offline, unknown is NO", () => {
+    const s = load();
+    eq(s.canEditDuty(), false, "unknown and uncached reads as not an admin");
+
+    const cached = load({ "cougar-identity": JSON.stringify({ d4: "0001", canEditDuty: true }) });
+    eq(cached.canEditDuty(), true, "an admin offline keeps the planner");
+
+    // A stale YES is harmless - the server refuses the write and says so. A
+    // stale NO would lock an admin out of his own screen, so the live answer
+    // always wins over the cache, in both directions.
+    const revoked = load({ "cougar-identity": JSON.stringify({ d4: "0001", canEditDuty: true }) });
+    revoked.STATE.me = { d4: "0001", canEditDuty: false };
+    eq(revoked.canEditDuty(), false, "a live no overrides a cached yes");
+
+    const granted = load({ "cougar-identity": JSON.stringify({ d4: "0001", canEditDuty: false }) });
+    granted.STATE.me = { d4: "0001", canEditDuty: true };
+    eq(granted.canEditDuty(), true, "and a live yes overrides a cached no");
   });
 
   suite("duty: who may hold which role");

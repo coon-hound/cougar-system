@@ -403,15 +403,47 @@ function dutyTallies(includeDraft) {
 const dutyTallyOf = (t, d4) =>
   t[d4] || { PDS: 0, CDS: 0, COS: 0, GD: 0, CDO: 0, SENTRY: 0, total: 0 };
 
+// The last identity the SERVER gave us, cached so the app still knows who is
+// holding the phone on an offline launch - whoami needs the network, and this
+// app is used in places that do not have it.
+//
+// Its own localStorage key, so clearing the data cache does not wipe it, and
+// it is only ever written from a successful whoami (js/main.js). Nothing in
+// the UI can set it: on this screen a self-declared identity would mean
+// reading another commander's duties and off balances by picking his name.
+const IDENTITY_KEY = "cougar-identity";
+function cachedIdentity() {
+  try {
+    const v = JSON.parse(localStorage.getItem(IDENTITY_KEY) || "null");
+    return (v && typeof v === "object") ? v : null;
+  } catch { return null; }
+}
+function cacheIdentity(me) {
+  try {
+    if (me && (me.d4 || me.person)) {
+      localStorage.setItem(IDENTITY_KEY, JSON.stringify({
+        d4: me.d4 || "", person: me.person || "",
+        canEditDuty: !!me.canEditDuty, at: Date.now(),
+      }));
+    }
+  } catch { /* private mode - identity just needs the network next launch */ }
+}
+
 // May this device edit the schedule? Presentation only - js/* is public code,
 // so the Edge Function refuses an unauthorised write whatever the UI shows
 // (ADMIN_WRITE_TABS). Hiding the controls just spares 25 commanders a screen
 // full of buttons that would only ever tell them no.
 //
-// Unknown means NOT an admin: an offline launch, or a backend too old to have
-// heard of the capability, should show the read-only screen rather than a
-// planner whose every write will bounce.
-const canEditDuty = () => !!(STATE.me && STATE.me.canEditDuty);
+// Falls back to the cached answer so an admin offline still gets the planner.
+// A stale yes is harmless - the server is the one that decides, and a write it
+// refuses now says so plainly instead of retrying forever (ForbiddenError in
+// js/sync.js). A stale no is not, which is why unknown-and-uncached reads as
+// not an admin: better a read-only screen than a planner that bounces.
+function canEditDuty() {
+  if (STATE.me && typeof STATE.me.canEditDuty === "boolean") return STATE.me.canEditDuty;
+  const c = cachedIdentity();
+  return !!(c && c.canEditDuty);
+}
 
 // Row ids, unique across devices.
 //

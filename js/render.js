@@ -2467,18 +2467,22 @@ function dutyWhen(iso, today) {
   return n > 0 ? `in ${n} days` : `${Math.abs(n)} days ago`;
 }
 
-// Who is holding this phone. STATE.me.d4 comes from the backend; the local
-// pick is the fallback for a device that has one token shared by several
-// people, which is how a few of these phones are actually used.
-const DUTY_ME_KEY = "cougar-duty-me";
+// Who is holding this phone.
+//
+// The invite issues one token per person and auth_tokens carries their 4D, so
+// whoami ALREADY knows who this is - 34 of the 35 live tokens name a
+// commander. There is deliberately no "which of these are you?" picker: it
+// would be a self-declaration, and a self-declaration on this screen means
+// reading somebody else's duties and off balances by choosing their name.
+//
+// The cache exists because whoami needs the network and this app is expected
+// to work without it. It stores what the SERVER said, not what a user picked,
+// and is written only by identityCached() on a successful whoami.
 function dutyMeD4() {
-  if (STATE.me && STATE.me.d4) return padD4(STATE.me.d4);
-  try { return localStorage.getItem(DUTY_ME_KEY) || ""; } catch { return ""; }
-}
-function setDutyMe(d4) {
-  try { d4 ? localStorage.setItem(DUTY_ME_KEY, d4) : localStorage.removeItem(DUTY_ME_KEY); }
-  catch { /* private mode - the picker just asks again next time */ }
-  render();
+  const live = STATE.me && STATE.me.d4;
+  if (live) return padD4(live);
+  const c = cachedIdentity();
+  return c && c.d4 ? padD4(c.d4) : "";
 }
 
 let _dutyMode = "today";      // admin only: today | month | people
@@ -2500,21 +2504,20 @@ function dutyReaderHtml(today) {
   return `
     <div class="dty-head"><h2>Duty</h2>
       <span class="dty-sub">${dutyDayLabel(today)}</span></div>
-    ${r && r.role === "Commander" ? dutyMineHtml(me, today) : dutyWhoAreYouHtml(me)}
+    ${r && r.role === "Commander" ? dutyMineHtml(me, today) : dutyNoIdentityHtml()}
     ${dutyTodayCardHtml(today, false)}
     <div class="dty-foot">Built by the company admin. Ask them for a change.</div>`;
 }
 
-function dutyWhoAreYouHtml(me) {
-  const cmdrs = sortByRank(STATE.roster.filter(x => x.role === "Commander"), dutyByName);
-  if (!cmdrs.length) return "";
+// Shown when the access code on this device does not resolve to a commander
+// on the roster. There is nothing to pick here on purpose - see dutyMeD4.
+function dutyNoIdentityHtml() {
   return `<div class="card"><div class="pad">
-      <div class="dty-ask">Which of these are you?</div>
-      <div class="dty-asksub">Saved on this phone only, so your own duties come up first.</div>
-      <select class="dty-mepick" onchange="setDutyMe(this.value)">
-        <option value="">Choose your name</option>
-        ${cmdrs.map(c => `<option value="${escapeAttr(c.id)}"${c.id === me ? " selected" : ""}>${escapeHtml(displayPersonLabel(c.id))}</option>`).join("")}
-      </select></div></div>`;
+      <div class="dty-ask">We cannot tell who you are on this device</div>
+      <div class="dty-asksub">Your duties are looked up from your own access code, so
+        nobody can read someone else's by mistake. Today's team is below.
+        If this is wrong, ask the company admin to reissue your access.</div>
+    </div></div>`;
 }
 
 // The answer to "when am I next on", given the space it deserves.
@@ -2545,7 +2548,6 @@ function dutyMineHtml(d4, today) {
     <div class="card dty-mine">
       <div class="dty-mine-top">
         <div class="dty-mine-who">${escapeHtml(displayPersonLabel(d4))}</div>
-        <button class="btn btn-icon dty-mine-swap" onclick="setDutyMe('')" title="Not you?">&#9998;</button>
       </div>
       ${n0 ? `
         <div class="dty-mine-next">

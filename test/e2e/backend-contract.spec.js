@@ -285,3 +285,39 @@ test("a duty row survives the write path with its deterministic id intact", asyn
   await expect.poll(() => backend.tabs.Duty.length).toBe(1);
   expect(backend.tabs.Duty[0].d4).toBe("0002");
 });
+
+test("a write the backend refuses is dropped, not retried forever", async ({ page }) => {
+  // The duty schedule is admin-only server-side. Every other failure class in
+  // this app is worth retrying - busy, offline, stale revision - so the
+  // generic path stashes the op and replays it on a backoff. A 403 is the one
+  // that is permanent: no number of retries turns a commander into an admin,
+  // and the sync pill would sit red forever over a change that is never going
+  // to land. So it stops, says why, and lets go of the op.
+  const backend = await bootAuthed(page, {
+    seed: { Roster: rosterSeed() },
+    onRequest: (body) =>
+      body.tab === "Duty" && body.action !== "read"
+        ? { error: "Not allowed", code: 403 }
+        : undefined,
+  });
+
+  await page.evaluate(async () => {
+    await autoSync("Duty", { type: "upsert", row: {
+      id: "duty-2026-10-01-CDS", date: "2026-10-01", role: "CDS", slot: "",
+      d4: "0001", status: "published", source: "manual", note: "" } });
+  });
+
+  // It settles rather than queueing: nothing dirty, nothing stashed, no
+  // pending retry. Asserted by polling, because the drain is asynchronous.
+  await expect
+    .poll(() => page.evaluate(() => ({
+      dirty: [...(STATE.dirty || [])],
+      stashed: JSON.parse(localStorage.getItem("cougar-dirty-ops-v1") || '{"tabs":{}}').tabs.Duty || [],
+    })), { timeout: 10000 })
+    .toEqual({ dirty: [], stashed: [] });
+
+  // It was actually attempted once - "settled" must not be able to pass
+  // because the write never left the device.
+  expect(backend.tabs.Duty ?? []).toEqual([]);
+  expect(backend.requests.length).toBeGreaterThan(0);
+});
