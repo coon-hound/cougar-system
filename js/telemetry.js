@@ -53,10 +53,16 @@ const TELEMETRY = (function () {
   // ranking — the entire point of this feature — reads those days normally,
   // and only the completed/abandoned split is withheld.
   //
-  // Set this to the first day on which every device is running the fixed
-  // collector. The uniform `?v=` bump forces that reload, which is what makes
-  // a single date honest here.
-  const OUTCOMES_VALID_FROM = "2026-09-22";
+  // Set this to the first FULL day on which every device is running the fixed
+  // collector, which is the day AFTER the deploy lands - not the day of it.
+  // The uniform `?v=` bump forces the reload, but it forces it whenever each
+  // phone next opens the app, so the deploy day itself is always a mix of
+  // rows from both collectors and cannot be trusted as a whole.
+  //
+  // If this merge slips past its intended date, move this with it. A cutoff
+  // set earlier than the deploy silently certifies inverted data as measured,
+  // which is the failure this whole constant exists to prevent.
+  const OUTCOMES_VALID_FROM = "2026-09-23";
 
   // ── The task registry ─────────────────────────────────────────────────────
   //
