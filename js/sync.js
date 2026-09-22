@@ -190,6 +190,11 @@ function refreshSyncIndicator() {
 // NEW invite link (main.js calls authRestored() after a successful redeem).
 let _authFailed = false;
 
+// Tabs the deployed backend does not know about, learned at the first failed
+// write and forgotten on reload. Keeps a frontend that shipped ahead of its
+// Edge Function usable instead of red.
+const _tabUnsupported = new Set();
+
 function goToSyncTab() {
   STATE.nav = "sync";
   if (typeof render === "function") render();
@@ -378,6 +383,10 @@ const _draining = new Map();      // tabName → promise of the active drain loo
 // drain loop if one isn't already running. mode dispatches to the right
 // primitive (see dispatchWrite). Returns the drain promise.
 function autoSync(tabName, mode) {
+  // Already known to be missing from the deployed backend. The edit is in
+  // STATE and saveLocal has persisted it; queueing it would buy one failed
+  // round trip per keystroke and nothing else.
+  if (_tabUnsupported.has(tabName)) return Promise.resolve();
   if (!_writeQueue.has(tabName)) _writeQueue.set(tabName, []);
   _writeQueue.get(tabName).push(mode);
   if (_draining.has(tabName)) return _draining.get(tabName);
@@ -434,7 +443,24 @@ async function drainTab(tabName) {
         // OCC-merge) rather than a stale full replace. Replace failures aren't
         // stashed — they re-derive from STATE on retry.
         stashDirtyOps(tabName, mode);
-        if (e && e.name === "ForbiddenError") {
+        if (e && e.name === "TabUnknownError") {
+          // Deploy order, not data. Hold the rows locally, stop asking for the
+          // session, and say what actually fixes it. The alternative is what
+          // this replaced: one failed round trip per edit, forever, with the
+          // sync pill red and no clue why.
+          //
+          // Session-scoped on purpose, exactly like the applyOps fallback: a
+          // reload re-probes, so the moment the function is redeployed the
+          // next launch syncs normally with nothing lost.
+          _tabUnsupported.add(tabName);
+          while (q.length) q.shift();
+          _dirtyOps.delete(tabName);
+          persistDirtyOps();
+          clearSyncedOps(tabName, []);
+          _lastSyncError = null;
+          syncLog(`${tabName} is newer than the backend - the Edge Function needs redeploying. `
+            + `Changes are kept on this device and will sync once it is.`, "var(--orange)");
+        } else if (e && e.name === "ForbiddenError") {
           // Permanent for this device, so the op is DROPPED rather than kept:
           // the generic path stashes and retries on a backoff, and the sync
           // pill would sit red forever over a change that is never going to
@@ -589,6 +615,12 @@ async function runWrite(tabName, mode) {
   // because the generic path stashes the op and retries it on a backoff
   // forever - and no number of retries turns a commander into an admin.
   if (res && res.code === 403) throw new ForbiddenError(res.error || "Not allowed");
+  // "Tab 'X' not found" - the deployed Edge Function predates this tab. Tagged
+  // so the drain loop can stop asking for the rest of the session instead of
+  // retrying a write that cannot land until someone redeploys.
+  if (res && res.error && /^Tab '.*' not found$/.test(res.error)) {
+    throw new TabUnknownError(res.error, tabName);
+  }
   if (res && res.error) throw new Error(res.error);
   if (res && res.rev != null) { STATE.rev[tabName] = res.rev; saveLocal(); }
   return res;

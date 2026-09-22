@@ -704,6 +704,11 @@ function saveLocal() {
     ippt: STATE.ippt,
     conductDetail: STATE.conductDetail, appointments: STATE.appointments,
     leave: STATE.leave, msk: STATE.msk, conducts: STATE.conducts,
+    // loadLocal reads these three, so saveLocal has to write them or every
+    // duty edit is lost on the next reload - and on a backend that does not
+    // know the tab yet, the command team would be lost outright, which is
+    // worse than the per-device map this replaced.
+    duty: STATE.duty, calendar: STATE.calendar, oilRule: STATE.oilRule,
     rev: STATE.rev || {}
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(d));

@@ -321,3 +321,72 @@ test("a write the backend refuses is dropped, not retried forever", async ({ pag
   expect(backend.tabs.Duty ?? []).toEqual([]);
   expect(backend.requests.length).toBeGreaterThan(0);
 });
+
+test("a tab the deployed backend does not know is held locally, not retried", async ({ page }) => {
+  // THE DEPLOY-ORDER CASE, and it is not hypothetical: TABLE and STATE_KEY are
+  // module-level in the Edge Function, so a frontend that reaches phones
+  // before the function is redeployed asks for a tab that does not exist yet.
+  //
+  // It matters more than it looks, because setDutyHolder is what the parade
+  // state's command-team picker calls. Left alone, every CDO pick in the
+  // FP/LP modal would fail and retry forever, on the most-used screen in the
+  // app, with the sync pill red and no clue why.
+  const backend = await bootAuthed(page, {
+    seed: { Roster: rosterSeed() },
+    onRequest: (body) =>
+      body.tab === "Duty" ? { error: "Tab 'Duty' not found" } : undefined,
+  });
+
+  const write = () => page.evaluate(async () => {
+    await autoSync("Duty", { type: "upsert", row: {
+      id: "duty-2026-10-01-CDO", date: "2026-10-01", role: "CDO", slot: "",
+      d4: "0001", status: "published", source: "manual", note: "" } });
+  });
+
+  await write();
+  await expect
+    .poll(() => page.evaluate(() => ({
+      dirty: [...(STATE.dirty || [])],
+      stashed: JSON.parse(localStorage.getItem("cougar-dirty-ops-v1") || '{"tabs":{}}').tabs.Duty || [],
+    })), { timeout: 10000 })
+    .toEqual({ dirty: [], stashed: [] });
+
+  // It asked ONCE. Every later edit is kept locally without another round
+  // trip - the tab is not going to appear mid-session.
+  const afterFirst = backend.requests.length;
+  await write();
+  await write();
+  await page.waitForTimeout(400);
+  expect(backend.requests.length).toBe(afterFirst);
+});
+
+test("a duty edit survives a reload even when it could not be synced", async ({ page }) => {
+  // saveLocal has to persist STATE.duty, or the command team is LOST on the
+  // next launch - worse than the per-device map the synced tab replaced.
+  await bootAuthed(page, {
+    seed: { Roster: rosterSeed() },
+    onRequest: (body) =>
+      body.tab === "Duty" ? { error: "Tab 'Duty' not found" } : undefined,
+  });
+
+  await page.evaluate(() => setDutyHolder("2026-10-01", "CDO", "0001"));
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => dutyForDate("2026-10-01").CDO)).toBe("0001");
+
+  // Round-trip through the cache rather than page.reload(): seedAndGoto seeds
+  // via addInitScript, which re-runs on every navigation and would rewrite
+  // localStorage from the fixture - hiding exactly what this is checking.
+  const persisted = await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem(
+      Object.keys(localStorage).find((k) => /^cougar-data/.test(k))) || "{}");
+    return (raw.duty || []).map((r) => r.id);
+  });
+  expect(persisted).toContain("duty-2026-10-01-CDO");
+
+  const afterReload = await page.evaluate(() => {
+    STATE.duty = [];                 // as it is at the top of a fresh launch
+    loadLocal();
+    return dutyForDate("2026-10-01").CDO;
+  });
+  expect(afterReload).toBe("0001");
+});
