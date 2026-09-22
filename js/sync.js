@@ -434,7 +434,21 @@ async function drainTab(tabName) {
         // OCC-merge) rather than a stale full replace. Replace failures aren't
         // stashed — they re-derive from STATE on retry.
         stashDirtyOps(tabName, mode);
-        if (e && e.name === "AuthError") {
+        if (e && e.name === "ForbiddenError") {
+          // Permanent for this device, so the op is DROPPED rather than kept:
+          // the generic path stashes and retries on a backoff, and the sync
+          // pill would sit red forever over a change that is never going to
+          // land. The local edit stays on screen until the next pull replaces
+          // it with what the server actually holds, which is the honest
+          // outcome - the server is the one that said no.
+          while (q.length) q.shift();
+          _dirtyOps.delete(tabName);
+          persistDirtyOps();
+          clearSyncedOps(tabName, []);          // marks clean now nothing is held
+          _lastSyncError = null;
+          syncLog(`${tabName} is admin-only on this device, so that change was not saved. `
+            + `Ask the company admin to make it.`, "var(--orange)");
+        } else if (e && e.name === "AuthError") {
           // Access revoked server-side. Stop the world: stash everything still
           // queued WITHOUT dispatching (one failed round trip total) and flip
           // the sign-in state - auto-retry no-ops until authRestored().
@@ -570,6 +584,11 @@ async function runWrite(tabName, mode) {
     e.batchUnsupported = true;
     throw e;
   }
+  // Not allowed. The token is fine; this device may not write this tab (the
+  // duty schedule is admin-only). Tagged rather than thrown generically,
+  // because the generic path stashes the op and retries it on a backoff
+  // forever - and no number of retries turns a commander into an admin.
+  if (res && res.code === 403) throw new ForbiddenError(res.error || "Not allowed");
   if (res && res.error) throw new Error(res.error);
   if (res && res.rev != null) { STATE.rev[tabName] = res.rev; saveLocal(); }
   return res;

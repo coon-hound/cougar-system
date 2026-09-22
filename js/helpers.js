@@ -261,17 +261,188 @@ function displayPersonLabel(d4) {
   return r.name || d4;
 }
 
-// Off-in-lieu days used + quota + remaining for a commander. Returns null
-// for recruits and unknown ids so callers can decide whether to render a
-// balance card.
-function commanderLeaveBalance(d4) {
+// Annual leave entitlement. `roster.leaveQuota` has always defaulted to 14 in
+// the commander form, and 14 is the annual leave entitlement - the two were
+// the same number wearing the wrong label. OIL gets no quota column, because
+// OIL is EARNED: its entitlement is the sum of the rules that apply.
+const AL_DEFAULT = 14;
+
+// Both off ledgers for a commander, DERIVED. Returns null for recruits, for
+// unknown ids, and for a commander who is not in the OFF system at all -
+// four of them are in the schedule deliberately without a balance, and a row
+// of zeros would read as "he has taken everything" rather than "not tracked".
+//
+// Nothing here is stored. Both sides of each ledger are records: the earning
+// side is STATE.oilRule, the spending side is STATE.leave. A stored balance is
+// one missed decrement away from being a lie, and nothing recomputes it.
+function commanderBalances(d4) {
   const r = STATE.roster.find(x => x.id === d4);
   if (!r || r.role !== "Commander") return null;
-  const quota = +r.leaveQuota || 0;
-  const used = STATE.leave
-    .filter(l => l.d4 === d4 && l.type === "Off-in-Lieu")
+  if (!r.oilTracked || String(r.oilTracked).toLowerCase() === "false") return null;
+
+  // A rule applies to everyone, to an appointment class, or to one man by 4D -
+  // never by name. An appointment class only matches when he HAS one, or a
+  // commander with a blank appt would collect every VC and SC rule at once.
+  const applies = ru => ru.appliesTo === "ALL"
+    || (!!r.appt && ru.appliesTo === r.appt)
+    || ru.appliesTo === d4;
+  const earned = (STATE.oilRule || []).filter(applies)
+    .reduce((s, ru) => s + (+ru.days || 0), 0);
+
+  const spent = type => (STATE.leave || [])
+    .filter(l => l.d4 === d4 && l.type === type)
     .reduce((s, l) => s + (+l.days || 0), 0);
-  return { used, quota, remaining: quota - used };
+
+  const oilUsed = (+r.openingOilUsed || 0) + spent("Off-in-Lieu");
+  // A BLANK quota must not read as a zero entitlement: +"" and +null are both
+  // 0, so an unfilled column would silently say "no annual leave at all".
+  const alQuota = (r.leaveQuota === "" || r.leaveQuota == null)
+    ? AL_DEFAULT : (+r.leaveQuota || 0);
+  const alUsed = (+r.openingAlUsed || 0) + spent("Annual Leave");
+
+  return {
+    oil: { entitled: earned, used: oilUsed, remaining: earned - oilUsed },
+    al:  { entitled: alQuota, used: alUsed, remaining: alQuota - alUsed }
+  };
+}
+
+// Which duty roles a commander may hold. CDS eligibility is RANK, not a stored
+// flag: in the cumulative tallies exactly the 2SGs have CDS and no PDS, and
+// everyone else the reverse. rosterRank is the only place a rank is read.
+function dutyEligibleRoles(r) {
+  if (!r || r.role !== "Commander") return [];
+  const rank = (typeof rosterRank === "function" ? rosterRank(r) : r.rank) || "";
+  return ["COS", "GD", "CDO", "SENTRY"].concat(rank === "2SG" ? ["CDS"] : ["PDS"]);
+}
+
+// ── Reading the duty schedule ───────────────────────────────────────────────
+//
+// What a day DEMANDS. This mirrors the command team the parade state already
+// asks for - CDO, CDS, COS and one PDS per platoon - so there is no second
+// vocabulary to keep in step and no configuration to fill in before the screen
+// is useful.
+//
+// A weekend or a public holiday demands NOTHING, and that is not the same as
+// a day whose duties are unfilled: zero demand means there is no slot, so
+// there is nothing to report as a gap. Conflating the two is what makes a
+// coverage figure meaningless.
+function dutyDemandFor(dateIso) {
+  if (!dateIso) return [];
+  const d = new Date(dateIso + "T00:00:00");
+  if (isNaN(d)) return [];
+  const wd = d.getDay();
+  if (wd === 0 || wd === 6) return [];
+  if ((STATE.calendar || []).some(c => c && c.date === dateIso && c.code === "PH")) return [];
+  const roles = (typeof paradeDutyRoles === "function") ? paradeDutyRoles() : ["CDO", "CDS", "COS"];
+  return roles.map(key => {
+    const { role, slot } = dutyParseRoleKey(key);
+    return { key, role, slot, id: dutyRowId(dateIso, role, slot) };
+  });
+}
+
+// Calendar context for a date: PH, IPPT, NDP, CONFINED, XWB. A fact about the
+// DATE, true for all 24 at once, which is why it is stored once and not on
+// every commander's row.
+const dutyCalendarFor = dateIso =>
+  (STATE.calendar || []).filter(c => c && c.date === dateIso);
+
+// Who holds what on a date, as { roleKey: d4 }.
+//
+// EXACT, not inherited: this is the planning read, and a day is only covered
+// by rows actually written for it. Draft rows count here because the planner
+// is what a draft is for; the parade state uses dutyForDate, which carries
+// forward and is published-only.
+function dutyHoldersFor(dateIso, includeDraft) {
+  return dutyExactForDate(dateIso, { includeDraft: includeDraft !== false });
+}
+
+// Coverage for one date: demanded, filled, and the slots that are a genuine
+// problem. A `clash` is a slot held by someone outOfCampMap says is away - it
+// can only exist because absence is read live rather than copied into the
+// schedule, which is the whole reason MC is not a duty code.
+function dutyCoverage(dateIso, includeDraft) {
+  const slots = dutyDemandFor(dateIso);
+  const held = dutyHoldersFor(dateIso, includeDraft);
+  const out = typeof outOfCampMap === "function" ? outOfCampMap(dateIso) : new Map();
+  const gaps = [], clashes = [];
+  slots.forEach(s => {
+    const d4 = held[s.key];
+    if (!d4) { gaps.push(s); return; }
+    if (out.has(d4)) clashes.push({ ...s, d4, out: out.get(d4) });
+  });
+  return { slots, held, demanded: slots.length,
+           filled: slots.length - gaps.length, gaps, clashes };
+}
+
+// The next duty a commander holds on or after a date, and the one after it.
+// This is the only question most commanders ever ask of this screen.
+function dutyNextFor(d4, fromIso, limit) {
+  if (!d4) return [];
+  const from = fromIso || (typeof todayISO === "function" ? todayISO() : "");
+  return (STATE.duty || [])
+    .filter(r => r && r.d4 === d4 && r.date >= from && (!r.status || r.status === "published"))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.role.localeCompare(b.role))
+    .slice(0, limit || 3);
+}
+
+// Per-commander tallies over the whole schedule - the fairness question the
+// OVERALL sheet exists to answer. Counts published rows only: a draft month
+// must not move anybody's numbers before it is real.
+function dutyTallies(includeDraft) {
+  const t = {};
+  (STATE.duty || []).forEach(r => {
+    if (!r || !r.d4) return;
+    if (!includeDraft && r.status && r.status !== "published") return;
+    const k = r.d4;
+    t[k] = t[k] || { PDS: 0, CDS: 0, COS: 0, GD: 0, CDO: 0, SENTRY: 0, total: 0 };
+    if (t[k][r.role] === undefined) t[k][r.role] = 0;
+    t[k][r.role]++; t[k].total++;
+  });
+  return t;
+}
+const dutyTallyOf = (t, d4) =>
+  t[d4] || { PDS: 0, CDS: 0, COS: 0, GD: 0, CDO: 0, SENTRY: 0, total: 0 };
+
+// The last identity the SERVER gave us, cached so the app still knows who is
+// holding the phone on an offline launch - whoami needs the network, and this
+// app is used in places that do not have it.
+//
+// Its own localStorage key, so clearing the data cache does not wipe it, and
+// it is only ever written from a successful whoami (js/main.js). Nothing in
+// the UI can set it: on this screen a self-declared identity would mean
+// reading another commander's duties and off balances by picking his name.
+const IDENTITY_KEY = "cougar-identity";
+function cachedIdentity() {
+  try {
+    const v = JSON.parse(localStorage.getItem(IDENTITY_KEY) || "null");
+    return (v && typeof v === "object") ? v : null;
+  } catch { return null; }
+}
+function cacheIdentity(me) {
+  try {
+    if (me && (me.d4 || me.person)) {
+      localStorage.setItem(IDENTITY_KEY, JSON.stringify({
+        d4: me.d4 || "", person: me.person || "",
+        canEditDuty: !!me.canEditDuty, at: Date.now(),
+      }));
+    }
+  } catch { /* private mode - identity just needs the network next launch */ }
+}
+
+// May this device edit the schedule? Presentation only - js/* is public code,
+// so the Edge Function refuses an unauthorised write whatever the UI shows
+// (ADMIN_WRITE_TABS). Hiding the controls just spares 25 commanders a screen
+// full of buttons that would only ever tell them no.
+//
+// Falls back to the cached answer so an admin offline still gets the planner.
+// A stale yes is harmless - the server is the one that decides, and a write it
+// refuses now says so plainly instead of retrying forever (ForbiddenError in
+// js/sync.js). A stale no is not, which is why unknown-and-uncached reads as
+// not an admin: better a read-only screen than a planner that bounces.
+function canEditDuty() {
+  if (STATE.me && typeof STATE.me.canEditDuty === "boolean") return STATE.me.canEditDuty;
+  const c = cachedIdentity();
+  return !!(c && c.canEditDuty);
 }
 
 // Row ids, unique across devices.
@@ -444,7 +615,7 @@ const STATE_TO_TAB = {
   ippt: "IPPT",
   conductDetail: "ConductDetail", appointments: "Appointments",
   leave: "Leave", msk: "MSK", conducts: "Conducts",
-  calendar: "Calendar", oilRule: "OilRules"
+  duty: "Duty", calendar: "Calendar", oilRule: "OilRules"
 };
 function deleteEntry(arrayName, id, label) {
   if (!confirm(`Delete this ${label || "entry"}?`)) return;
@@ -1284,6 +1455,13 @@ const gv = id => document.getElementById(id)?.value || "";
 
 // Escape user-supplied text for safe interpolation into HTML attribute values.
 const escapeAttr = s => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+// The same job for TEXT rather than an attribute value. Names in this dataset
+// are free text off the roster column, and every view string-templates them
+// straight into HTML, so the two escapers are named for where the value is
+// going - passing an attribute escaper a text node reads as a mistake even
+// when it happens to be safe.
+const escapeHtml = s => String(s ?? "")
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // Local-time today as YYYY-MM-DD (avoids toISOString's UTC shift).
 function todayISO() {

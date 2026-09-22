@@ -4920,3 +4920,134 @@ function importBackup(input) {
   } catch (err) { alert("Import failed: " + err.message); } };
   reader.readAsText(input.files[0]); input.value = "";
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Duty schedule: the two editing sheets. Admin only - and the Edge Function
+// refuses the write regardless, so this gate is convenience, not security.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Why a commander cannot take a slot. Returns "" when he can. The string is
+// shown to the admin beside his name, so it is written for a person: he is
+// entitled to know why the app is arguing with him.
+function dutyBlockedReason(c, roleKey, dateIso, takenToday) {
+  const { role, slot } = dutyParseRoleKey(roleKey);
+  const out = outOfCampMap(dateIso).get(c.id);
+  if (out) return out.reason ? `${out.kind === "medical" ? "on MC" : "away"} - ${out.reason}` : (out.kind === "medical" ? "on MC" : "away");
+  if (!dutyEligibleRoles(c).includes(role))
+    return role === "CDS" ? "not a 2SG" : role === "PDS" ? "2SG - takes CDS, not PDS" : "not eligible";
+  if (role === "PDS" && slot && String(getPlt(c)) !== String(slot)) return `platoon ${getPlt(c) || "-"}, not ${slot}`;
+  if (takenToday.has(c.id)) return "already on duty today";
+  // The guidelines rule, both ways round: no duty the day after night sentry,
+  // and none the day before an off.
+  const prev = dutyForDate(dutyShiftISO(dateIso, -1), { includeDraft: true });
+  if (Object.values(prev).includes(c.id)) return "on duty yesterday";
+  const nextOut = outOfCampMap(dutyShiftISO(dateIso, 1)).get(c.id);
+  if (nextOut && nextOut.kind === "leave") return "books out tomorrow";
+  return "";
+}
+
+function openDutySlot(dateIso, roleKey) {
+  if (!canEditDuty()) return;
+  const held = dutyForDate(dateIso, { includeDraft: true });
+  const cur = held[roleKey] || "";
+  const takenToday = new Set(Object.entries(held)
+    .filter(([k]) => k !== roleKey).map(([, v]) => v).filter(Boolean));
+  const t = dutyTallies(true);
+  const { role } = dutyParseRoleKey(roleKey);
+
+  const rows = STATE.roster.filter(r => r.role === "Commander")
+    .map(c => ({ c, why: dutyBlockedReason(c, roleKey, dateIso, takenToday) }));
+  // The man already in the slot is listed as the man already in the slot,
+  // whatever else is true of him. He can hold a second duty that day and so
+  // come back "already on duty" against his own slot, and filing him under
+  // NOT AVAILABLE reads as though the app has lost him.
+  const inSlot = rows.filter(r => r.c.id === cur);
+  const rest = rows.filter(r => r.c.id !== cur);
+  // Fewest of this role first, so the fair pick is the one under the thumb.
+  const free = rest.filter(r => !r.why)
+    .sort((a, b) => dutyTallyOf(t, a.c.id)[role] - dutyTallyOf(t, b.c.id)[role]
+                 || String(a.c.id).localeCompare(String(b.c.id)));
+  const busy = rest.filter(r => r.why);
+
+  const row = r => `
+    <button class="dty-pick${r.why ? " is-unavail" : ""}${r.c.id === cur ? " is-sel" : ""}"
+      onclick="setDutySlot('${escapeAttr(dateIso)}','${escapeAttr(roleKey)}','${escapeAttr(r.c.id)}')">
+      <span class="dty-pick-main">
+        <span class="dty-pick-nm">${escapeHtml(displayPersonLabel(r.c.id))}</span>
+        <span class="dty-pick-meta">${r.why ? escapeHtml(r.why)
+          : `platoon ${getPlt(r.c) || "HQ"}${r.c.appt ? " &middot; " + escapeHtml(r.c.appt) : ""} &middot; ${dutyTallyOf(t, r.c.id)[role]} so far`}</span>
+      </span>
+      <span class="dty-pick-cnt mono">${dutyTallyOf(t, r.c.id).total}</span></button>`;
+
+  openModal(`${roleKey} - ${dutyDayLabel(dateIso)}`, `
+    <div class="dty-picklist">
+      ${inSlot.length ? `<div class="dty-pickgrp">CURRENTLY ASSIGNED</div>${inSlot.map(row).join("")}` : ""}
+      <button class="dty-pick" onclick="setDutySlot('${escapeAttr(dateIso)}','${escapeAttr(roleKey)}','')">
+        <span class="dty-pick-main"><span class="dty-pick-nm" style="color:var(--muted)">&#10005; Clear this slot</span></span></button>
+      ${free.length ? `<div class="dty-pickgrp">SUGGESTED &middot; fewest ${escapeHtml(role)} first</div>` : ""}
+      ${free.slice(0, 4).map(row).join("")}
+      ${free.length > 4 ? `<div class="dty-pickgrp">OTHERS AVAILABLE</div>${free.slice(4).map(row).join("")}` : ""}
+      ${busy.length ? `<div class="dty-pickgrp">NOT AVAILABLE &middot; shown with the reason</div>${busy.map(row).join("")}` : ""}
+    </div>`);
+}
+
+function setDutySlot(dateIso, roleKey, d4) {
+  setDutyHolder(dateIso, roleKey, d4);
+  closeModal();
+  render();
+}
+
+// One commander's month, folded into a 7-wide calendar. A 31-wide strip does
+// not fit a phone; 7 columns at 46px do, with every cell a real tap target.
+function openDutyPerson(d4) {
+  const c = STATE.roster.find(r => r.id === d4);
+  if (!c) return;
+  const t = dutyTallyOf(dutyTallies(true), d4);
+  // Same rule as the people list: the duty tallies are open, another man's
+  // leave balance is not.
+  const maySeeBal = canEditDuty() || d4 === dutyMeD4();
+  const bal = maySeeBal ? commanderBalances(d4) : null;
+  const days = dutyMonthDays(_dutyMonth);
+  if (!days.length) return;
+
+  const first = new Date(days[0] + "T00:00:00").getDay();
+  let cells = Array.from({ length: first }, () => '<div class="dty-cell is-blank"></div>').join("");
+  days.forEach(iso => {
+    const out = outOfCampMap(iso).get(d4);
+    const mine = (STATE.duty || []).find(r => r && r.d4 === d4 && r.date === iso);
+    let code = "&mdash;", tint = "var(--dim)";
+    if (out) {
+      code = out.kind === "medical" ? "MC" : "OFF";
+      tint = out.kind === "medical" ? "var(--red)" : "var(--purple)";
+    } else if (mine) {
+      code = escapeHtml(mine.role + (mine.slot || ""));
+      tint = dutyRoleTint(mine.role);
+    } else if (dutyIsWeekend(iso)) { code = "WK"; }
+    const n = +iso.slice(8);
+    cells += `<div class="dty-cell${dutyIsWeekend(iso) ? " is-week" : ""}">
+      <span class="dty-cell-d mono">${n}</span>
+      <span class="dty-cell-c mono" style="color:${tint}">${code}</span></div>`;
+  });
+
+  const next = dutyNextFor(d4, todayISO(), 1)[0];
+  openModal(displayPersonLabel(d4), `
+    <div class="dty-person">
+      <div class="dty-person-top">
+        platoon ${getPlt(c) || "HQ"}${c.appt ? ` &middot; ${escapeHtml(c.appt)}` : ""} &middot; ${t.total} duties
+        <div class="dty-person-next">${next
+          ? `Next: <b>${escapeHtml(next.role + (next.slot || ""))}</b> on ${escapeHtml(dutyDayLabel(next.date))}`
+          : "No duty scheduled."}</div>
+        ${!maySeeBal ? ""
+          : bal ? `<div class="dty-person-bal">
+            <span class="oil">OIL <b class="mono">${dutyNum(bal.oil.remaining)}</b> of ${dutyNum(bal.oil.entitled)} left</span>
+            <span class="al">AL <b class="mono">${dutyNum(bal.al.remaining)}</b> of ${dutyNum(bal.al.entitled)} left</span>
+            <div class="dty-quiet">Entitlement is the sum of the rules that apply to him, not a stored number.</div></div>`
+          : `<div class="dty-quiet" style="margin-top:6px">Not in the off system - scheduled, but carries no balance.</div>`}
+      </div>
+      <div class="dty-cal">${["M","T","W","T","F","S","S"].map((d, i) =>
+        `<div class="dty-cal-head">${i === 6 ? "S" : d}</div>`).join("")}</div>
+      <div class="dty-cal">${cells}</div>
+      <div class="dty-person-foot">Off and leave come from his leave records, and MC from the
+        medical tab. Tap a day in the month view to change a duty.</div>
+    </div>`);
+}

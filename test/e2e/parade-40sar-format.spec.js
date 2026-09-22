@@ -71,9 +71,19 @@ test("the command team is picked per date and remembered for it", async ({ page 
   await expect(cdo.locator("option:checked")).toHaveText(picked);
 
   // Saved against the parade date, so reopening the same date restores it.
+  //
+  // Asserted through dutyForDate rather than against the storage layout: the
+  // command team moved out of a per-device localStorage map and into the synced
+  // Duty tab, and the read point is what the rest of the app actually depends
+  // on. Pinning the shape underneath would have to be rewritten every time it
+  // changes, and would say nothing about whether the parade state still works.
   const date = await page.locator("#rep-date").inputValue();
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("cougar-duty") || "{}"));
-  expect(Object.keys(stored)).toEqual([date]);
+  const stored = await page.evaluate((d) => ({
+    team: dutyForDate(d),
+    rows: STATE.duty.filter((r) => r.date === d).map((r) => ({ id: r.id, role: r.role, status: r.status })),
+  }), date);
+  expect(Object.keys(stored.team)).toEqual(["CDO"]);
+  expect(stored.rows).toEqual([{ id: `duty-${date}-CDO`, role: "CDO", status: "published" }]);
 
   await page.evaluate(() => { closeModal(); openReportModal("FP"); });
   await expect(page.locator("#duty-section label", { hasText: "CDO" }).locator("option:checked")).toHaveText(picked);
