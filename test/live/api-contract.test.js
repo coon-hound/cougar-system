@@ -554,6 +554,27 @@ if (require.main === module) {
       console.log("#   start one with: ./scripts/dev-env.sh up");
       process.exit(0);
     }
+
+    // `ping` is the one PUBLIC action, so answering it proves a backend is
+    // listening and nothing else. Every suite below needs a token that
+    // authenticates, and a dev database is provisioned with whatever token its
+    // operator issued - not necessarily the "dev-token" default. Without this
+    // second probe that mismatch does not read as a misconfigured environment:
+    // it reads as 29 cascading contract failures and a red PR, which is how it
+    // was first hit. An unreachable backend already skips; an unusable one has
+    // to skip the same way and say which knob to turn.
+    try {
+      const probe = await (await fetch(`${API}?action=revCheck&auth=${encodeURIComponent(TOKEN)}`,
+        { signal: AbortSignal.timeout(5000) })).json();
+      if (probe.code === 401) throw new Error(probe.error || "Unauthorized");
+    } catch (e) {
+      console.log(`\n# live API contract: SKIPPED — the token does not authenticate at ${API}`);
+      console.log(`#   (${String(e.message || e)})`);
+      console.log("#   pass the one this backend knows, e.g.:");
+      console.log("#     COUGAR_TOKEN=<token> node test/live/api-contract.test.js");
+      console.log("#   dev-env.sh prints its token in the 'Ready.' banner.");
+      process.exit(0);
+    }
     console.log(`# live API contract against ${API}`);
     await module.exports();
     process.exit(summary());

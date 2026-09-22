@@ -443,7 +443,8 @@ const STATE_TO_TAB = {
   roster: "Roster", medical: "Medical", attendance: "Attendance",
   ippt: "IPPT",
   conductDetail: "ConductDetail", appointments: "Appointments",
-  leave: "Leave", msk: "MSK", conducts: "Conducts"
+  leave: "Leave", msk: "MSK", conducts: "Conducts",
+  calendar: "Calendar", oilRule: "OilRules"
 };
 function deleteEntry(arrayName, id, label) {
   if (!confirm(`Delete this ${label || "entry"}?`)) return;

@@ -52,6 +52,7 @@ import { formatReseatReport, formatSwapReport, parseSections, planReseat, planSw
 export const REV_TABS = [
   "Roster", "Medical", "Attendance", "IPPT", "RouteMarch", "SOC",
   "PolarFlow", "ConductDetail", "Appointments", "Leave", "MSK", "Conducts",
+  "Duty", "Calendar", "OilRules",
 ];
 
 // The temporary key the rename passes through. "~" sorts above every digit and

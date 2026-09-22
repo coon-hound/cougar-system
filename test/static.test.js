@@ -8,7 +8,23 @@ const { suite, test, ok } = require("./_tap");
 
 const ROOT = path.resolve(__dirname, "..");
 const REV_TABS = ["Roster", "Medical", "Attendance", "IPPT", "RouteMarch", "SOC",
-  "PolarFlow", "ConductDetail", "Appointments", "Leave", "MSK", "Conducts"];
+  "PolarFlow", "ConductDetail", "Appointments", "Leave", "MSK", "Conducts",
+  "Duty", "Calendar", "OilRules"];
+
+// Tabs the BACKEND tracks and the FRONTEND deliberately ignores. Every entry is
+// a decision someone has to be able to defend, which is why the list is here
+// and checked rather than left implicit in a diff between two files.
+//
+//   RouteMarch / SOC / PolarFlow  dropped from the frontend when those
+//                                 programs were retired; the backend still
+//                                 serves and revs them.
+//   Duty                          0009 adds the tab, but STATE.duty is still
+//                                 the per-device command-team MAP. Pointing a
+//                                 pull at that key replaces the map with an
+//                                 array and takes the parade state's command
+//                                 team with it, so the frontend picks this tab
+//                                 up in the same change that promotes the map.
+const FRONTEND_IGNORED_TABS = ["RouteMarch", "SOC", "PolarFlow", "Duty"];
 
 module.exports = async function run() {
   suite("static: load-time guards");
@@ -276,5 +292,116 @@ module.exports = async function run() {
     for (const keep of ["!sample_polar.csv", "!docs/nominal-roll-template.csv"]) {
       ok(rules.includes(keep), `.gitignore lost its deliberate exception ${keep}`);
     }
+  });
+
+  suite("static: the tab maps across the repo agree");
+
+  await test("every file that lists the synced tabs lists the same ones", () => {
+    // Adding a synced tab touches SEVEN files and nothing ties them together,
+    // so the usual failure is a half-done change: the backend serves a tab the
+    // client never asks for, or the client asks for one the fake backend does
+    // not know, and both are SILENT. Rows simply never arrive.
+    //
+    // STATE_KEY in the Edge Function is the authority, because
+    // `REV_TABS = Object.keys(STATE_KEY)` there - membership of that one map is
+    // what makes a tab revision-tracked and part of readAll at all.
+    const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
+
+    // Pull the KEYS out of an object literal assigned to `name`. Keys may be
+    // bare or quoted, and the literal may carry comments, so match key-before-
+    // colon rather than trying to parse the object.
+    const keysOf = (src, name) => {
+      const m = new RegExp(name + "\\s*(?::[^=]*)?=\\s*\\{([\\s\\S]*?)\\n\\};").exec(src);
+      if (!m) return null;
+      const body = m[1].replace(/\/\/[^\n]*/g, "");
+      return [...body.matchAll(/(?:^|[{,\s])["']?([A-Za-z][\w]*)["']?\s*:/g)].map((x) => x[1]);
+    };
+    // Pull the STRING ELEMENTS out of an array literal assigned to `name`.
+    const arrayOf = (src, name) => {
+      const m = new RegExp(name + "\\s*=\\s*\\[([\\s\\S]*?)\\];").exec(src);
+      if (!m) return null;
+      return [...m[1].replace(/\/\/[^\n]*/g, "").matchAll(/["']([^"']+)["']/g)].map((x) => x[1]);
+    };
+
+    const api = read("supabase/functions/api/index.ts");
+    const backendTabs = keysOf(api, "const STATE_KEY");
+    ok(backendTabs && backendTabs.length, "could not read STATE_KEY out of the Edge Function");
+
+    // The Edge Function's own two maps: every tracked tab needs a real table.
+    const tableTabs = keysOf(api, "const TABLE");
+    const missingTable = backendTabs.filter((t) => !tableTabs.includes(t));
+    ok(missingTable.length === 0,
+      "a tab is in STATE_KEY but has no TABLE entry, so every read of it 500s: "
+      + JSON.stringify(missingTable));
+
+    // This file's own copy, used by the unbumped-write scan above.
+    ok(JSON.stringify([...REV_TABS].sort()) === JSON.stringify([...backendTabs].sort()),
+      "REV_TABS in this test has drifted from the Edge Function's STATE_KEY, so "
+      + "the bumpRev scan silently stops covering a tab. backend="
+      + JSON.stringify(backendTabs) + " here=" + JSON.stringify(REV_TABS));
+
+    // The e2e fake backend must mirror the real one exactly, or a spec passes
+    // against a protocol the real backend does not speak.
+    const fakeTabs = keysOf(read("test/e2e/fake-backend.js"), "const STATE_KEY");
+    ok(JSON.stringify([...fakeTabs].sort()) === JSON.stringify([...backendTabs].sort()),
+      "test/e2e/fake-backend.js STATE_KEY has drifted from the Edge Function: "
+      + "fake=" + JSON.stringify(fakeTabs) + " real=" + JSON.stringify(backendTabs));
+
+    // The ops scripts bump a rev per tab. A tab whose rev did not move is a tab
+    // every phone still believes its stale cache of, and will push back over.
+    for (const f of ["scripts/reseat.mjs", "scripts/intake-migrate.mjs"]) {
+      const tabs = arrayOf(read(f), "REV_TABS");
+      ok(JSON.stringify([...tabs].sort()) === JSON.stringify([...backendTabs].sort()),
+        f + " REV_TABS has drifted from the Edge Function, so it will leave a "
+        + "tab unbumped and every phone holding a stale cache of it: "
+        + JSON.stringify(tabs));
+    }
+
+    // The frontend may legitimately ignore a tab, but only on the list above.
+    const frontTabs = keysOf(read("js/state.js"), "const TAB_TO_STATE");
+    const unexpectedlyMissing = backendTabs
+      .filter((t) => !frontTabs.includes(t) && !FRONTEND_IGNORED_TABS.includes(t));
+    ok(unexpectedlyMissing.length === 0,
+      "the backend tracks a tab the frontend neither consumes nor documents as "
+      + "ignored; add it to TAB_TO_STATE or to FRONTEND_IGNORED_TABS with a "
+      + "reason: " + JSON.stringify(unexpectedlyMissing));
+
+    const phantom = frontTabs.filter((t) => !backendTabs.includes(t));
+    ok(phantom.length === 0,
+      "the frontend asks for a tab the backend does not serve, so its rows "
+      + "never arrive and nothing says so: " + JSON.stringify(phantom));
+
+    const staleIgnores = FRONTEND_IGNORED_TABS.filter((t) => frontTabs.includes(t));
+    ok(staleIgnores.length === 0,
+      "a tab is listed as frontend-ignored but the frontend now consumes it; "
+      + "drop it from FRONTEND_IGNORED_TABS: " + JSON.stringify(staleIgnores));
+  });
+
+  await test("every STATE key the frontend pulls into is assigned on pull and on load", () => {
+    // TAB_TO_STATE names the STATE array a tab lands in. Three other places
+    // must agree, and all three fail silently: PULL_ASSIGN (js/api.js) is what
+    // readAll actually writes through, STATE_TO_TAB (js/helpers.js) is what
+    // deleteEntry routes a delete by, and STATE itself must declare the array
+    // or the first render reads undefined.
+    const stateSrc = fs.readFileSync(path.join(ROOT, "js/state.js"), "utf8");
+    const m = /const TAB_TO_STATE = \{([\s\S]*?)\n\};/.exec(stateSrc);
+    ok(m, "could not read TAB_TO_STATE");
+    const keys = [...m[1].replace(/\/\/[^\n]*/g, "")
+      .matchAll(/:\s*["']([\w]+)["']/g)].map((x) => x[1]);
+
+    const apiSrc = fs.readFileSync(path.join(ROOT, "js/api.js"), "utf8");
+    const helpSrc = fs.readFileSync(path.join(ROOT, "js/helpers.js"), "utf8");
+    const pull = /const PULL_ASSIGN = \{([\s\S]*?)\n\};/.exec(apiSrc)[1];
+    const s2t = /const STATE_TO_TAB = \{([\s\S]*?)\n\};/.exec(helpSrc)[1];
+
+    const missing = [];
+    for (const k of keys) {
+      if (!new RegExp("(^|[\\s,{])" + k + "\\s*:").test(pull)) missing.push(`PULL_ASSIGN.${k}`);
+      if (!new RegExp("(^|[\\s,{])" + k + "\\s*:").test(s2t)) missing.push(`STATE_TO_TAB.${k}`);
+      if (!new RegExp("(^|[\\s,{])" + k + "\\s*:").test(stateSrc)) missing.push(`STATE.${k}`);
+    }
+    ok(missing.length === 0,
+      "a tab lands in a STATE array that is not wired everywhere it must be; "
+      + "each of these fails silently at runtime: " + JSON.stringify(missing));
   });
 };
