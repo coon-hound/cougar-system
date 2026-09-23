@@ -159,8 +159,14 @@ test("nothing personal reaches the stored telemetry blob", async ({ page }) => {
   // Every 4D in the fixture, and the names that go with them.
   const seeded = await page.evaluate(() =>
     STATE.roster.flatMap((r) => [r.id, r["4d"], r.name].filter(Boolean)));
+  // Searched with the numeric timing fields removed: a millisecond timestamp
+  // like 1790134362402 contains a fixture 4D ("2402") by pure chance, which
+  // made this test fail whenever the clock lined up. Those fields are numbers
+  // the app computes, never text a person typed; the check below still proves
+  // no key or name carries a digit.
+  const text = blob.replace(/"(t|ms|lastFlush)":\d+/g, "");
   for (const needle of seeded) {
-    expect(blob, `telemetry blob leaked "${needle}"`).not.toContain(needle);
+    expect(text, `telemetry blob leaked "${needle}"`).not.toContain(needle);
   }
   // And no bare 4-digit run of any kind outside the millisecond timestamps.
   const names = await page.evaluate(() => {

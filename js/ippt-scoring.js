@@ -4,10 +4,14 @@
 // then derive every other age group by applying a per-group shift — push-ups
 // and sit-ups shift by 1 rep per age group (older = needs fewer reps for the
 // same score); 2.4km run shifts by 10 seconds per age group (older = more
-// time allowed). This matches the official tables at the diagonal boundary
-// rows; off-boundary cells may differ from the official score by ±1 point.
-// The score is pre-filled in the IPPT form but always editable so the user
-// can match the official scoresheet exactly when there's any divergence.
+// time allowed).
+//
+// Verified, not assumed: age groups 1 and 2 reproduce every one of the 680
+// BMT results (26 May - 13 Aug 2026) that has a real run time, point for
+// point, against the printed totals on the official score sheets. The static
+// tables are the MINDEF "Sit-Up/Push-Up Score Table for Servicemen". Older
+// age groups rely on the shift rule alone and have never been checked against
+// a sheet. The score is pre-filled in the IPPT form but stays editable.
 //
 // Award tiers per user request:
 //   ≥90: Gold★ (NDU / Commando / Guards quality)
@@ -57,26 +61,27 @@ const PUSHUP_GROUP1 = {
   18:6, 17:4, 16:2, 15:1, 14:0
 };
 
-// Sit-up scoring for age group 1 (<22). Identical to push-ups in the upper
-// range; diverges slightly in the 17-18 reps range (sit-ups are scored
-// stricter at the bottom).
+// Sit-up scoring for age group 1 (<22). NOT the push-up table: sit-ups score
+// lower from 37 reps down (37 = 18, 30 = 13, 25 = 9). An earlier copy of this
+// table was the push-up table pasted in, which over-scored a 30-rep sit-up by
+// 3 points.
 const SITUP_GROUP1 = {
   60:25, 59:24, 58:24, 57:24, 56:24,
   55:23, 54:23, 53:23, 52:23,
   51:22, 50:22, 49:22, 48:22,
   47:21, 46:21, 45:21, 44:21,
   43:20, 42:20, 41:20, 40:20,
-  39:19, 38:19, 37:19,
-  36:18, 35:18, 34:18,
-  33:17, 32:17, 31:17,
-  30:16, 29:16, 28:16,
-  27:15, 26:15,
-  25:14, 24:13, 23:12, 22:11, 21:10, 20:9, 19:8,
+  39:19, 38:19,
+  37:18, 36:18,
+  35:17, 34:16, 33:15, 32:14, 31:14,
+  30:13, 29:13, 28:12, 27:11, 26:10,
+  25:9, 24:8, 23:7, 22:7, 21:6, 20:6, 19:5,
   18:4, 17:3, 16:2, 15:1, 14:0
 };
 
-// 2.4km run scoring for age group 1 (<22). Key = seconds; value = score.
-// Faster than 510s (8:30) = 50 capped; slower than 970s (16:10) = 0.
+// 2.4km run scoring for age group 1 (<22). Key = the SLOWEST time (seconds)
+// that still earns the score: 8:30 or faster = 50, 8:31-8:40 = 49, and so on.
+// Slower than 16:00 (960s) = 0.
 const RUN_GROUP1 = {
   510:50, 520:49, 530:48, 540:47, 550:46, 560:45, 570:44, 580:43, 590:42, 600:41,
   610:40, 620:39, 630:38, 640:38, 650:37, 660:37, 670:36, 680:36, 690:35, 700:35,
@@ -110,10 +115,14 @@ function parseRunTimeMMSS(mmss) {
 // from the actual seconds to translate into the group-1 reference frame.
 function lookupRunScore(seconds, ageGroup) {
   if (!ageGroup || seconds == null) return null;
+  // 0:00 is how a result with no run is stored, not a record-breaking run.
+  if (seconds <= 0) return 0;
   const adjSec = seconds - (ageGroup - 1) * 10;
   if (adjSec <= 510) return 50;
-  if (adjSec > 970) return 0;
-  const key = Math.round(adjSec / 10) * 10;
+  if (adjSec > 960) return 0;
+  // Each band ends ON its key, so round UP to the band's upper bound: 12:02 is
+  // in the 12:01-12:10 band (32 pts). Math.round put it in 11:51-12:00 (33).
+  const key = Math.ceil(adjSec / 10) * 10;
   return RUN_GROUP1[key] !== undefined ? RUN_GROUP1[key] : 0;
 }
 

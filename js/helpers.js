@@ -1280,6 +1280,33 @@ const typeBadge = t => badge(t, t === "RSI" ? "orange" : t === "Injury" ? "red" 
 const awardBadge = s => { const a = getAward(s); const c = { "Gold★": "purple", Gold: "yellow", Silver: "accent", Pass: "green", Fail: "red", "N/A": "accent" }; return badge(a, c[a] || "accent"); };
 const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
 
+// ─── IPPT: series (BMT vs KH) ─────────────
+// The company has been tested in two phases: five IPPTs during BMT (May to
+// Aug 2026), then again at Keat Hong once posted into unit training. Attempt
+// numbers restart per series, so an IPPT is identified by (series, attempt) and
+// never by the attempt number alone - "IPPT 1" means two different days.
+// Rows written before the `series` field existed carry none. Every one of them
+// is dated, and the date decides: BMT ended at the intake 16 changeover.
+const IPPT_SERIES = ["KH", "BMT"];      // display order: the current phase first
+const IPPT_KH_START = "2026-09-14";     // intake 16 changeover (first KH day)
+function ipptSeriesOf(e) {
+  const s = String(e?.series || "").trim().toUpperCase();
+  if (IPPT_SERIES.includes(s)) return s;
+  const iso = displayDateToISO(e?.date);
+  return iso && iso >= IPPT_KH_START ? "KH" : "BMT";
+}
+// "IPPT KH 1" / "BMT IPPT 3" in headings; "KH 1" / "BMT 3" on chips and chart
+// axes, where the section around them already says which series it is.
+function ipptConductLabel(series, n, short) {
+  if (short) return `${series} ${n}`;
+  return series === "BMT" ? `BMT IPPT ${n}` : `IPPT KH ${n}`;
+}
+// Chronological order across both series: every BMT attempt precedes every KH
+// attempt, then by attempt number within a series.
+function ipptOrderKey(e) {
+  return (ipptSeriesOf(e) === "BMT" ? 0 : 1000) + (+e?.attempt || 0);
+}
+
 // ─── IPPT: YTT detection + aggregation + stats ─────────────
 // True when runTime is empty, zero, or a Sheets-formatted zero duration.
 function isZeroRunTime(rt) {
@@ -1319,7 +1346,7 @@ function formatSeconds(s) {
 }
 
 // Returns one IPPT entry per recruit, picked by mode:
-//   "latest" → highest attempt number (ties broken by score)
+//   "latest" → most recent attempt (series-aware: any KH beats any BMT)
 //   "best"   → highest score (YTT counted as -1 so it loses ties)
 function aggregateIPPT(entries, mode) {
   const byD4 = new Map();
@@ -1331,7 +1358,7 @@ function aggregateIPPT(entries, mode) {
       const cScore = isYTT(cur) ? -1 : (+cur.score || 0);
       if (eScore > cScore) byD4.set(e.d4, e);
     } else { // latest
-      if ((+e.attempt || 0) > (+cur.attempt || 0)) byD4.set(e.d4, e);
+      if (ipptOrderKey(e) > ipptOrderKey(cur)) byD4.set(e.d4, e);
     }
   }
   return [...byD4.values()];

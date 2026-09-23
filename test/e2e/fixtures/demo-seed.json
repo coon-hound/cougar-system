@@ -92,7 +92,8 @@
         "pushups": 20,
         "situps": 22,
         "runTime": "13:30",
-        "score": 60
+        "score": 60,
+        "series": "BMT"
       },
       {
         "id": "7002",
@@ -102,7 +103,8 @@
         "pushups": 28,
         "situps": 30,
         "runTime": "12:40",
-        "score": 70
+        "score": 70,
+        "series": "BMT"
       },
       {
         "id": "7003",
@@ -112,7 +114,8 @@
         "pushups": 40,
         "situps": 42,
         "runTime": "11:10",
-        "score": 85
+        "score": 85,
+        "series": "BMT"
       },
       {
         "id": "7004",
@@ -122,7 +125,8 @@
         "pushups": 24,
         "situps": 26,
         "runTime": "13:00",
-        "score": 65
+        "score": 65,
+        "series": "BMT"
       },
       {
         "id": "7005",
@@ -132,7 +136,8 @@
         "pushups": 29,
         "situps": 31,
         "runTime": "12:30",
-        "score": 72
+        "score": 72,
+        "series": "BMT"
       },
       {
         "id": "7006",
@@ -142,7 +147,8 @@
         "pushups": 33,
         "situps": 35,
         "runTime": "12:00",
-        "score": 78
+        "score": 78,
+        "series": "BMT"
       },
       {
         "id": "7007",
@@ -152,7 +158,8 @@
         "pushups": 36,
         "situps": 38,
         "runTime": "11:40",
-        "score": 80
+        "score": 80,
+        "series": "BMT"
       },
       {
         "id": "7008",
@@ -162,7 +169,8 @@
         "pushups": 31,
         "situps": 33,
         "runTime": "12:20",
-        "score": 74
+        "score": 74,
+        "series": "BMT"
       },
       {
         "id": "7009",
@@ -172,7 +180,8 @@
         "pushups": 28,
         "situps": 30,
         "runTime": "12:40",
-        "score": 70
+        "score": 70,
+        "series": "BMT"
       },
       {
         "id": "7010",
@@ -182,7 +191,8 @@
         "pushups": 32,
         "situps": 34,
         "runTime": "12:10",
-        "score": 75
+        "score": 75,
+        "series": "BMT"
       },
       {
         "id": "7011",
@@ -192,7 +202,8 @@
         "pushups": 27,
         "situps": 29,
         "runTime": "12:50",
-        "score": 68
+        "score": 68,
+        "series": "BMT"
       },
       {
         "id": "7012",
@@ -202,7 +213,8 @@
         "pushups": 33,
         "situps": 34,
         "runTime": "12:05",
-        "score": 76
+        "score": 76,
+        "series": "BMT"
       },
       {
         "id": "7013",
@@ -212,7 +224,8 @@
         "pushups": 18,
         "situps": 20,
         "runTime": "14:00",
-        "score": 55
+        "score": 55,
+        "series": "BMT"
       },
       {
         "id": "7014",
@@ -222,7 +235,8 @@
         "pushups": 22,
         "situps": 24,
         "runTime": "13:20",
-        "score": 62
+        "score": 62,
+        "series": "BMT"
       },
       {
         "id": "7015",
@@ -232,7 +246,52 @@
         "pushups": 0,
         "situps": 0,
         "runTime": "0:00",
-        "score": 0
+        "score": 0,
+        "series": "BMT"
+      },
+      {
+        "id": "7101",
+        "d4": "C1401",
+        "attempt": 1,
+        "date": "23 Sep 2026",
+        "pushups": 42,
+        "situps": 44,
+        "runTime": "11:40",
+        "score": 72,
+        "series": "KH"
+      },
+      {
+        "id": "7102",
+        "d4": "C1402",
+        "attempt": 1,
+        "date": "23 Sep 2026",
+        "pushups": 50,
+        "situps": 48,
+        "runTime": "11:05",
+        "score": 80,
+        "series": "KH"
+      },
+      {
+        "id": "7103",
+        "d4": "C1403",
+        "attempt": 1,
+        "date": "23 Sep 2026",
+        "pushups": 30,
+        "situps": 31,
+        "runTime": "13:20",
+        "score": 58,
+        "series": "KH"
+      },
+      {
+        "id": "7104",
+        "d4": "C2401",
+        "attempt": 1,
+        "date": "23 Sep 2026",
+        "pushups": 0,
+        "situps": 0,
+        "runTime": "0:00",
+        "score": 0,
+        "series": "KH"
       }
     ],
     "conductDetail": [

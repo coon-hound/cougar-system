@@ -1619,47 +1619,100 @@ function renderMedical(el) {
     </div>`;
 }
 
-// Which IPPT conduct the stats are scoped to. "" = all attempts, else an
-// attempt number (1 = IPPT 1, 2 = IPPT 2, …). View-only state, not persisted.
-let _ipptAttemptFilter = "";
-function setIpptAttemptFilter(v) { _ipptAttemptFilter = v; render(); }
+// Per-series view state (BMT and KH each have their own conducts): which
+// conduct the stats are scoped to ("" = all, else an attempt number) and which
+// two conducts the comparison card puts side by side (defaults to first vs
+// latest with data, re-derived in ipptSeriesSection when the stored pair is
+// stale). View-only, not persisted.
+const _ipptView = { KH: { attempt: "", cmpA: "", cmpB: "" }, BMT: { attempt: "", cmpA: "", cmpB: "" } };
+function setIpptAttemptFilter(series, v) { _ipptView[series].attempt = v; render(); }
+function setIpptCompare(series, a, b) { _ipptView[series].cmpA = a; _ipptView[series].cmpB = b; render(); }
 
-// Which two conducts the comparison scatter + movers list put side by side.
-// Defaults to first vs latest conduct with data (set in renderIPPT when the
-// stored pair is invalid — e.g. after new data arrives). View-only state.
-let _ipptCmpA = "", _ipptCmpB = "";
-function setIpptCompare(a, b) { _ipptCmpA = a; _ipptCmpB = b; render(); }
-
+// The IPPT tab leads with the CURRENT phase (IPPT at Keat Hong). BMT results
+// are history: one collapsed card at the bottom that opens into the same full
+// analytics, scoped to BMT. Mixing the two would be wrong, not just noisy:
+// attempt numbers restart per series, so "IPPT 1" names two different days.
 function renderIPPT(el) {
   const visible = visibleD4Set();
   const scoped = STATE.ippt.filter(i => passesFilter(i.d4, visible));
+  const kh = scoped.filter(e => ipptSeriesOf(e) === "KH");
+  const bmt = scoped.filter(e => ipptSeriesOf(e) === "BMT");
+  const aggMode = STATE.ipptAggMode || "latest";
 
-  // Attempt filter — narrows the stats/charts/lists/table to a single IPPT
-  // conduct (IPPT 1, IPPT 2, …). "" means all attempts.
-  const attempts = [...new Set(STATE.ippt.map(e => +e.attempt).filter(n => n > 0))].sort((a, b) => a - b);
-  const attemptFilter = _ipptAttemptFilter && attempts.includes(+_ipptAttemptFilter) ? +_ipptAttemptFilter : "";
-  const attemptScoped = attemptFilter ? scoped.filter(e => +e.attempt === attemptFilter) : scoped;
+  const khSec = ipptSeriesSection("KH", kh, aggMode);
+  const bmtOpen = dashSectionOpen("ipptbmt", false);
+  const bmtSec = bmtOpen && bmt.length ? ipptSeriesSection("BMT", bmt, aggMode) : null;
+  const bmtAttempts = [...new Set(bmt.map(e => +e.attempt).filter(n => n > 0))].sort((a, b) => a - b);
+  const bmtIsos = bmt.map(e => displayDateToISO(e.date)).filter(Boolean).sort();
+  const bmtSpan = bmtIsos.length ? `${isoToDisplayDate(bmtIsos[0])} to ${isoToDisplayDate(bmtIsos[bmtIsos.length - 1])}` : "";
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <h2 style="font-size:18px;font-weight:700">IPPT Tracker${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.ippt.length}]</span>` : ""}</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-success" onclick="pushTab('IPPT',STATE.ippt)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
+        <button class="btn btn-primary" onclick="openIPPTForm()">+ Add</button>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Stats use</span>
+      <div class="filter-role-group">
+        <button class="role-btn ${aggMode === "latest" ? "active" : ""}" onclick="setIpptAggMode('latest'); render()">Latest</button>
+        <button class="role-btn ${aggMode === "best" ? "active" : ""}" onclick="setIpptAggMode('best'); render()">Best</button>
+      </div>
+      <span style="font-size:11px;color:var(--muted)">attempt per recruit</span>
+    </div>
+
+    <section data-ippt-series="KH">
+      <h3 class="ippt-series-title">IPPT at Keat Hong${khSec.attempts.length ? ` <span>${khSec.attempts.length} conduct${khSec.attempts.length === 1 ? "" : "s"} · ${kh.length} result${kh.length === 1 ? "" : "s"}</span>` : ""}</h3>
+      ${kh.length ? khSec.html : `<div class="empty-state">${STATE.ippt.some(e => ipptSeriesOf(e) === "KH") ? `No IPPT KH results${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : "No IPPT KH results yet. Tap + Add to record one."}</div>`}
+    </section>
+
+    ${bmt.length ? `<section data-ippt-series="BMT" style="margin-top:22px">${dashSection({
+      key: "ipptbmt", icon: "🗂", title: "BMT IPPT results",
+      note: `${bmtAttempts.length} conduct${bmtAttempts.length === 1 ? "" : "s"} · ${bmt.length} result${bmt.length === 1 ? "" : "s"}${bmtSpan ? ` · ${bmtSpan}` : ""}`,
+      body: () => bmtSec ? bmtSec.html : ""
+    })}</section>` : ""}`;
+
+  // Charts attached after DOM is in place. Old instances were already wiped
+  // by the destroy loop at the top of render(). A closed BMT section built no
+  // canvases, so it builds no charts.
+  if (kh.length) khSec.buildCharts();
+  if (bmtSec) bmtSec.buildCharts();
+}
+
+// Everything the tab shows for ONE series: stats, awards, YTT chase (KH only),
+// top performers, trend, progression, compare, award mix and the raw table.
+// Canvas ids and chart keys carry the series so both sections can be open at
+// once. Returns { html, buildCharts, attempts }.
+function ipptSeriesSection(series, rows, aggMode) {
+  const k = series.toLowerCase();
+  const view = _ipptView[series];
+  const L = n => ipptConductLabel(series, n, true);
+  const attempts = [...new Set(rows.map(e => +e.attempt).filter(n => n > 0))].sort((a, b) => a - b);
+  const attemptFilter = view.attempt && attempts.includes(+view.attempt) ? +view.attempt : "";
+  const attemptScoped = attemptFilter ? rows.filter(e => +e.attempt === attemptFilter) : rows;
 
   // Aggregate one entry per recruit (latest or best) for the stats/charts/
   // leaderboard. The underlying table below still shows every row.
-  const aggMode = STATE.ipptAggMode || "latest";
   const aggregated = aggregateIPPT(attemptScoped, aggMode);
   const stats = computeIPPTStats(aggregated);
 
   // YTT chase: recruits in the filtered scope who either have an all-zero
-  // IPPT row OR have no IPPT row at all — both are "haven't taken yet". When an
-  // attempt is selected, YTT = hasn't taken THAT IPPT.
-  const rosterInScope = filteredRoster();
+  // row OR have no row at all. Only the current phase has anyone to chase:
+  // BMT is closed, and a third of today's company never went through it.
+  const rosterInScope = filteredRoster().filter(r => r.role !== "Commander");
   const takenD4s = new Set(attemptScoped.filter(e => !isYTT(e)).map(e => e.d4));
-  const yttRecruits = rosterInScope.filter(r => !takenD4s.has(r.id));
+  const yttRecruits = series === "KH" ? rosterInScope.filter(r => !takenD4s.has(r.id)) : null;
 
-  // Company-wide performance trend across the IPPT conducts: average push-ups,
+  // Company-wide performance trend across the conducts: average push-ups,
   // sit-ups and 2.4km time per attempt, over everyone in scope who took that
-  // attempt (non-YTT). Independent of the attempt filter — it spans all IPPTs.
+  // attempt (non-YTT). Independent of the attempt filter.
   const ipptTrend = attempts.map(n => {
     // Exclude recruits with a 0 run time (incomplete run) — they'd skew the
     // station averages and aren't shown on the growth charts.
-    const es = scoped.filter(e => +e.attempt === n && !isYTT(e) && parseRunTimeToSeconds(e.runTime) > 0);
+    const es = rows.filter(e => +e.attempt === n && !isYTT(e) && parseRunTimeToSeconds(e.runTime) > 0);
     const avg = f => es.length ? Math.round(es.reduce((s, x) => s + f(x), 0) / es.length) : null;
     const runSecs = es.map(x => parseRunTimeToSeconds(x.runTime)).filter(s => s > 0);
     return {
@@ -1671,30 +1724,27 @@ function renderIPPT(el) {
   }).filter(r => r.count > 0);
 
   // Per-recruit score series across every conduct — the shared cohort model
-  // for all the cross-attempt visualizations below (progression lines,
-  // comparison scatter, movers, award mix). Independent of the attempt filter.
-  const series = ipptSeriesByRecruit(scoped);
-  const progression = series.filter(r => Object.keys(r.byAttempt).length >= 2);
+  // for the cross-attempt visualizations below. Independent of the attempt filter.
+  const series_ = ipptSeriesByRecruit(rows);
+  const progression = series_.filter(r => Object.keys(r.byAttempt).length >= 2);
 
   // Comparison pair: any two conducts, defaulting to first vs latest so the
-  // full journey shows by default (the old fixed IPPT 1 vs 2 stopped meaning
-  // anything once IPPT 3 landed). Falls back when the stored pair is stale.
-  let cmpA = attempts.includes(+_ipptCmpA) ? +_ipptCmpA : attempts[0];
-  let cmpB = attempts.includes(+_ipptCmpB) ? +_ipptCmpB : attempts[attempts.length - 1];
+  // full journey shows by default. Falls back when the stored pair is stale.
+  let cmpA = attempts.includes(+view.cmpA) ? +view.cmpA : attempts[0];
+  let cmpB = attempts.includes(+view.cmpB) ? +view.cmpB : attempts[attempts.length - 1];
   if (cmpA >= cmpB) { cmpA = attempts[0]; cmpB = attempts[attempts.length - 1]; }
   const cmpPairs = [];
   for (let i = 0; i < attempts.length; i++)
     for (let j = i + 1; j < attempts.length; j++) cmpPairs.push([attempts[i], attempts[j]]);
-  const paired = attempts.length >= 2 ? ipptPairedCohort(series, cmpA, cmpB) : [];
+  const paired = attempts.length >= 2 ? ipptPairedCohort(series_, cmpA, cmpB) : [];
   const movers = paired.slice().sort((x, y) => y.delta - x.delta);
   const improvedN = paired.filter(p => p.delta > 0).length;
   const declinedN = paired.filter(p => p.delta < 0).length;
 
-  // Award mix per conduct: tier tally over everyone with a valid score in that
-  // conduct. Rendered as 100% stacked bars so a different taker count per
-  // conduct can't masquerade as a tier shift.
+  // Award mix per conduct, as 100% stacked bars so a different taker count
+  // per conduct can't masquerade as a tier shift.
   const awardMix = attempts.map(n => {
-    const scores = series.filter(r => r.byAttempt[n] != null).map(r => r.byAttempt[n]);
+    const scores = series_.filter(r => r.byAttempt[n] != null).map(r => r.byAttempt[n]);
     const tally = { "Fail": 0, "Pass": 0, "Silver": 0, "Gold": 0, "Gold★": 0 };
     scores.forEach(s => { tally[getAward(s)] = (tally[getAward(s)] || 0) + 1; });
     return { n, count: scores.length, tally };
@@ -1720,36 +1770,24 @@ function renderIPPT(el) {
     else buckets[5]++;
   }
 
-  el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-      <h2 style="font-size:18px;font-weight:700">IPPT Tracker${attemptFilter ? ` <span style="color:var(--accent);font-size:13px">· IPPT ${attemptFilter}</span>` : ""}${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.ippt.length}]</span>` : ""}</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <label class="btn" style="cursor:pointer">Import CSV<input type="file" accept=".csv" onchange="importIPPT(this)" style="display:none"></label>
-        <button class="btn btn-success" onclick="pushTab('IPPT',STATE.ippt)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
-        <button class="btn btn-primary" onclick="openIPPTForm()">+ Add</button>
-      </div>
-    </div>
+  const personRow = (d4, right) => `<div onclick="openPerson('${d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;align-items:center">
+    <span>${displayId(d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(d4)}</span> ` : ""}${displayPersonLabel(d4)}</span>${right}</div>`;
+  const tableRows = attemptScoped.slice().sort((a, b) => ipptOrderKey(a) - ipptOrderKey(b) || String(a.d4).localeCompare(String(b.d4)));
 
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Stats use</span>
+  const html = `
+    ${attempts.length > 1 ? `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Conduct</span>
       <div class="filter-role-group">
-        <button class="role-btn ${aggMode === "latest" ? "active" : ""}" onclick="setIpptAggMode('latest'); render()">Latest</button>
-        <button class="role-btn ${aggMode === "best" ? "active" : ""}" onclick="setIpptAggMode('best'); render()">Best</button>
+        <button class="role-btn ${!attemptFilter ? "active" : ""}" onclick="setIpptAttemptFilter('${series}', '')">All</button>
+        ${attempts.map(n => `<button class="role-btn ${attemptFilter === n ? "active" : ""}" onclick="setIpptAttemptFilter('${series}', '${n}')">${L(n)}</button>`).join("")}
       </div>
-      <span style="font-size:11px;color:var(--muted)">attempt per recruit</span>
-      ${attempts.length > 1 ? `
-        <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-left:6px">Conduct</span>
-        <div class="filter-role-group">
-          <button class="role-btn ${!attemptFilter ? "active" : ""}" onclick="setIpptAttemptFilter('')">All</button>
-          ${attempts.map(n => `<button class="role-btn ${attemptFilter === n ? "active" : ""}" onclick="setIpptAttemptFilter('${n}')">IPPT ${n}</button>`).join("")}
-        </div>` : ""}
-    </div>
+    </div>` : ""}
 
     <div class="stats-row">
       <div class="stat"><label>Taken</label><div class="val">${stats.taken}<span style="font-size:12px;color:var(--muted);font-weight:400">/${stats.total}</span></div><div class="sub">${pct(stats.taken, stats.total)}% recorded</div></div>
       <div class="stat"><label>Passed (61+)</label><div class="val" style="color:var(--green)">${stats.passed}</div><div class="sub">${pct(stats.passed, stats.taken)}% of taken</div></div>
       <div class="stat"><label>Failed</label><div class="val" style="color:var(--red)">${stats.fail}</div><div class="sub">${pct(stats.fail, stats.taken)}% of taken</div></div>
-      <div class="stat"><label>YTT</label><div class="val" style="color:var(--accent)">${stats.ytt}</div><div class="sub">yet to take${attemptFilter ? ` IPPT ${attemptFilter}` : ""}</div></div>
+      <div class="stat"><label>YTT</label><div class="val" style="color:var(--accent)">${yttRecruits ? yttRecruits.length : stats.ytt}</div><div class="sub">yet to take${attemptFilter ? ` ${L(attemptFilter)}` : ""}</div></div>
       <div class="stat"><label>Avg Score</label><div class="val" style="color:var(--accent)">${stats.avgScore || "—"}</div><div class="sub">${stats.scoreN} results</div></div>
       <div class="stat"><label>Avg 2.4km</label><div class="val" style="color:var(--accent)">${formatSeconds(stats.avgRunSec)}</div><div class="sub">${stats.runSecN} results</div></div>
     </div>
@@ -1757,25 +1795,22 @@ function renderIPPT(el) {
     <div class="grid-2">
       <div class="card">
         <h3>Award Breakdown${isFilterActive() ? ` <span style="color:var(--accent);font-weight:400;font-size:10px">in ${filterLabel()}</span>` : ""}</h3>
-        <div class="chart-box tall"><canvas id="chart-ippt-awards"></canvas></div>
+        <div class="chart-box tall"><canvas id="chart-ippt-${k}-awards"></canvas></div>
       </div>
       <div class="card">
         <h3>Score Distribution</h3>
-        <div class="chart-box tall"><canvas id="chart-ippt-distribution"></canvas></div>
+        <div class="chart-box tall"><canvas id="chart-ippt-${k}-distribution"></canvas></div>
       </div>
     </div>
 
     <div class="grid-2">
-      <div class="card">
+      ${yttRecruits ? `<div class="card">
         <h3>YTT Chase List <span style="color:var(--accent);font-weight:400;font-size:10px">${yttRecruits.length} to chase</span></h3>
         ${yttRecruits.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
-          ${yttRecruits.map(r => `<div onclick="openPerson('${r.id}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;align-items:center">
-            <span>${displayId(r.id) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(r.id)}</span> ` : ""}${displayPersonLabel(r.id)}</span>
-            <span class="badge badge-accent" style="font-size:9px">YTT</span>
-          </div>`).join("")}
-        </div>` : `<div style="color:var(--muted);font-size:12px;padding:8px">Everyone in scope has taken IPPT 🎉</div>`}
-      </div>
-      <div class="card">
+          ${yttRecruits.map(r => personRow(r.id, `<span class="badge badge-accent" style="font-size:9px">YTT</span>`)).join("")}
+        </div>` : `<div style="color:var(--muted);font-size:12px;padding:8px">Everyone in scope has taken ${attemptFilter ? L(attemptFilter) : "IPPT"} 🎉</div>`}
+      </div>` : ""}
+      <div class="card"${yttRecruits ? "" : ` style="grid-column:1 / -1"`}>
         <h3>Top Performers <span style="color:var(--muted);font-weight:400;font-size:10px">by ${aggMode === "best" ? "best" : "latest"} attempt</span></h3>
         ${topPerformers.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
           ${topPerformers.map((e, idx) => `<div onclick="openPerson('${e.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;align-items:center;gap:8px">
@@ -1788,27 +1823,27 @@ function renderIPPT(el) {
       </div>
     </div>
 
-    ${ipptTrend.length >= 2 ? `<div class="card" style="margin-bottom:16px">
-      <h3>IPPT Performance Trend <span style="color:var(--muted);font-weight:400;font-size:10px">company avg per station across IPPTs${isFilterActive() ? ` · ${filterLabel()}` : ""}</span></h3>
+    ${ipptTrend.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="trend">
+      <h3>Performance Trend <span style="color:var(--muted);font-weight:400;font-size:10px">company avg per station across conducts${isFilterActive() ? ` · ${filterLabel()}` : ""}</span></h3>
       <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:6px 0 10px">
-        ${ipptTrend.map(r => `<span>IPPT ${r.n}: <strong style="color:var(--text)">${r.count}</strong> took</span>`).join("")}
+        ${ipptTrend.map(r => `<span>${L(r.n)}: <strong style="color:var(--text)">${r.count}</strong> took</span>`).join("")}
         <span>· all lines up = improvement (2.4km axis inverted)</span>
       </div>
-      <div class="chart-box" style="height:380px"><canvas id="chart-ippt-trend"></canvas></div>
+      <div class="chart-box" style="height:380px"><canvas id="chart-ippt-${k}-trend"></canvas></div>
     </div>` : ""}
 
     ${attempts.length >= 2 && progression.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="progression">
-      <h3 style="font-size:15px">Score Progression <span style="color:var(--muted);font-weight:400;font-size:11px">one line per recruit across all IPPTs · <span style="color:var(--green)">green</span> up / <span style="color:var(--red)">red</span> down vs their first · bold line = company avg</span></h3>
-      <div class="chart-box" style="height:420px"><canvas id="chart-ippt-progress"></canvas></div>
+      <h3 style="font-size:15px">Score Progression <span style="color:var(--muted);font-weight:400;font-size:11px">one line per recruit across all conducts · <span style="color:var(--green)">green</span> up / <span style="color:var(--red)">red</span> down vs their first · bold line = company avg</span></h3>
+      <div class="chart-box" style="height:420px"><canvas id="chart-ippt-${k}-progress"></canvas></div>
     </div>` : ""}
 
     ${attempts.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="compare">
-      <h3 style="font-size:15px">Compare Conducts: IPPT ${cmpA} → IPPT ${cmpB} <span style="color:var(--muted);font-weight:400;font-size:11px">${paired.length} took both · <span style="color:var(--green)">${improvedN} up</span> · <span style="color:var(--red)">${declinedN} down</span></span></h3>
+      <h3 style="font-size:15px">Compare Conducts: ${L(cmpA)} → ${L(cmpB)} <span style="color:var(--muted);font-weight:400;font-size:11px">${paired.length} took both · <span style="color:var(--green)">${improvedN} up</span> · <span style="color:var(--red)">${declinedN} down</span></span></h3>
       <div class="filter-role-group" style="margin:8px 0 10px">
-        ${cmpPairs.map(([a, b]) => `<button class="role-btn ${a === cmpA && b === cmpB ? "active" : ""}" onclick="setIpptCompare(${a}, ${b})">IPPT ${a} → ${b}</button>`).join("")}
+        ${cmpPairs.map(([a, b]) => `<button class="role-btn ${a === cmpA && b === cmpB ? "active" : ""}" onclick="setIpptCompare('${series}', ${a}, ${b})">${L(a)} → ${b}</button>`).join("")}
       </div>
       ${paired.length >= 2 ? `
-      <div class="chart-box" style="height:460px"><canvas id="chart-ippt-scatter"></canvas></div>
+      <div class="chart-box" style="height:460px"><canvas id="chart-ippt-${k}-scatter"></canvas></div>
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px">
         <div style="flex:1;min-width:220px">
           <h3 style="font-size:12px;color:var(--green)">▲ Most improved</h3>
@@ -1824,33 +1859,34 @@ function renderIPPT(el) {
             <span class="mono" style="white-space:nowrap">${p.s1} → ${p.s2} <strong style="color:var(--red)">${p.delta}</strong></span>
           </div>`).join("") || `<div style="color:var(--muted);font-size:11px;padding:4px">No one dropped 🎉</div>`}
         </div>
-      </div>` : `<div style="color:var(--muted);font-size:12px;padding:8px">Fewer than 2 recruits took both IPPT ${cmpA} and IPPT ${cmpB}.</div>`}
+      </div>` : `<div style="color:var(--muted);font-size:12px;padding:8px">Fewer than 2 recruits took both ${L(cmpA)} and ${L(cmpB)}.</div>`}
     </div>` : ""}
 
     ${awardMix.length >= 2 ? `<div class="card" style="margin-bottom:16px" data-ippt-card="awardmix">
-      <h3 style="font-size:15px">Award Mix by Conduct <span style="color:var(--muted);font-weight:400;font-size:11px">% of takers per tier · ${awardMix.map(r => `IPPT ${r.n}: ${r.count}`).join(" · ")}</span></h3>
-      <div class="chart-box" style="height:360px"><canvas id="chart-ippt-awardmix"></canvas></div>
+      <h3 style="font-size:15px">Award Mix by Conduct <span style="color:var(--muted);font-weight:400;font-size:11px">% of takers per tier · ${awardMix.map(r => `${L(r.n)}: ${r.count}`).join(" · ")}</span></h3>
+      <div class="chart-box" style="height:360px"><canvas id="chart-ippt-${k}-awardmix"></canvas></div>
     </div>` : ""}
 
-    ${attemptScoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th>Name</th><th>#</th><th>Date</th><th>PU</th><th>SU</th><th>2.4km</th><th>Score</th><th>Award</th><th></th></tr></thead><tbody>
-    ${attemptScoped.map(i => `<tr><td class="mono" style="font-weight:700">${displayId(i.d4)}</td><td style="text-align:left">${displayPersonLabel(i.d4)}</td><td>${i.attempt}</td><td>${i.date}</td><td>${i.pushups}</td><td>${i.situps}</td><td>${i.runTime}</td><td style="font-weight:700;font-size:15px">${isYTT(i) ? '<span style="color:var(--muted)">—</span>' : i.score}</td><td>${ipptAwardBadge(i)}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="openIPPTForm('${i.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="deleteEntry('ippt', '${i.id}', 'IPPT entry')" title="Delete">✕</button></td></tr>`).join("")}
-    </tbody></table></div>` : `<div class="empty-state">${STATE.ippt.length ? `No IPPT entries${attemptFilter ? ` for IPPT ${attemptFilter}` : ""}${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : "No IPPT data yet. Add results or import CSV."}</div>`}`;
+    ${tableRows.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th>Name</th><th>IPPT</th><th>Date</th><th>PU</th><th>SU</th><th>2.4km</th><th>Score</th><th>Award</th><th></th></tr></thead><tbody>
+    ${tableRows.map(i => `<tr><td class="mono" style="font-weight:700">${displayId(i.d4)}</td><td style="text-align:left">${displayPersonLabel(i.d4)}</td><td style="white-space:nowrap">${L(i.attempt)}</td><td style="white-space:nowrap">${displayDateToISO(i.date) ? isoToShortDate(displayDateToISO(i.date)) : (i.date || "—")}</td><td>${i.pushups}</td><td>${i.situps}</td><td>${i.runTime}</td><td style="font-weight:700;font-size:15px">${isYTT(i) ? '<span style="color:var(--muted)">—</span>' : i.score}</td><td>${ipptAwardBadge(i)}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="openIPPTForm('${i.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="deleteEntry('ippt', '${i.id}', 'IPPT entry')" title="Delete">✕</button></td></tr>`).join("")}
+    </tbody></table></div>` : `<div class="empty-state">No results${attemptFilter ? ` for ${L(attemptFilter)}` : ""}${isFilterActive() ? ` in ${filterLabel()}` : ""}.</div>`}`;
 
-  // Charts attached after DOM is in place. Old instances were already wiped
-  // by the destroy loop at the top of render().
-  buildIPPTAwardsChart(stats);
-  buildIPPTDistributionChart(buckets);
-  buildIPPTTrendChart(ipptTrend);
-  buildIPPTProgressChart(progression, attempts);
-  buildIPPTScatterChart(paired, cmpA, cmpB);
-  buildIPPTAwardMixChart(awardMix);
+  const buildCharts = () => {
+    buildIPPTAwardsChart(stats, k);
+    buildIPPTDistributionChart(buckets, k);
+    buildIPPTTrendChart(ipptTrend, k, L);
+    buildIPPTProgressChart(progression, attempts, k, L);
+    buildIPPTScatterChart(paired, cmpA, cmpB, k, L);
+    buildIPPTAwardMixChart(awardMix, k, L);
+  };
+  return { html, buildCharts, attempts };
 }
 
 // Award mix per conduct — 100% stacked bars, one bar per IPPT, segmented by
 // tier. Percent-of-takers (not raw counts) so a smaller IPPT 3 cohort still
 // compares honestly against IPPT 1/2; tooltips carry the raw counts.
-function buildIPPTAwardMixChart(awardMix) {
-  const canvas = document.getElementById("chart-ippt-awardmix");
+function buildIPPTAwardMixChart(awardMix, k, L) {
+  const canvas = document.getElementById(`chart-ippt-${k}-awardmix`);
   if (!canvas || typeof Chart === "undefined" || !awardMix || awardMix.length < 2) return;
   // Canvas takes real colour strings, so the tokens are resolved once per build.
   const IK = {
@@ -1865,10 +1901,10 @@ function buildIPPTAwardMixChart(awardMix) {
     { key: "Gold",   color: IK.yellow },
     { key: "Gold★",  color: IK.purple }
   ];
-  STATE.charts.ipptAwardMix = new Chart(canvas, {
+  STATE.charts["ipptAwardMix-" + k] = new Chart(canvas, {
     type: "bar",
     data: {
-      labels: awardMix.map(r => "IPPT " + r.n),
+      labels: awardMix.map(r => L(r.n)),
       datasets: tiers.map(t => ({
         label: t.key,
         data: awardMix.map(r => r.count ? +(r.tally[t.key] / r.count * 100).toFixed(1) : 0),
@@ -1899,8 +1935,8 @@ function buildIPPTAwardMixChart(awardMix) {
 // improved, red declined, grey flat. A bold accent line carries the company
 // average so the individual spread reads against the trend. Gaps (missed a
 // conduct) are bridged by spanGaps.
-function buildIPPTProgressChart(progression, attempts) {
-  const canvas = document.getElementById("chart-ippt-progress");
+function buildIPPTProgressChart(progression, attempts, k, L) {
+  const canvas = document.getElementById(`chart-ippt-${k}-progress`);
   if (!canvas || typeof Chart === "undefined" || !progression || progression.length < 2 || attempts.length < 2) return;
   const PK = {
     up: cssColorA("--green", ".4"), down: cssColorA("--red", ".4"),
@@ -1912,10 +1948,10 @@ function buildIPPTProgressChart(progression, attempts) {
     const xs = progression.filter(r => r.byAttempt[n] != null).map(r => r.byAttempt[n]);
     return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
   });
-  STATE.charts.ipptProgress = new Chart(canvas, {
+  STATE.charts["ipptProgress-" + k] = new Chart(canvas, {
     type: "line",
     data: {
-      labels: attempts.map(n => "IPPT " + n),
+      labels: attempts.map(n => L(n)),
       datasets: [
         ...progression.map(r => ({
           label: r.d4,
@@ -1963,8 +1999,8 @@ function buildIPPTProgressChart(progression, attempts) {
 // user-selectable (defaults to first vs latest). Dots above the line improved
 // (green), below declined (red). Reveals whether weak or strong recruits grew
 // most between the two conducts.
-function buildIPPTScatterChart(paired, cmpA, cmpB) {
-  const canvas = document.getElementById("chart-ippt-scatter");
+function buildIPPTScatterChart(paired, cmpA, cmpB, k, L) {
+  const canvas = document.getElementById(`chart-ippt-${k}-scatter`);
   if (!canvas || typeof Chart === "undefined" || !paired || paired.length < 2) return;
   const SK = {
     green: cssColor("--green"), red: cssColor("--red"), muted: cssColor("--muted"),
@@ -1973,7 +2009,7 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
   const all = paired.flatMap(p => [p.s1, p.s2]);
   const lo = Math.max(0, Math.floor((Math.min(...all) - 5) / 5) * 5);
   const hi = Math.min(100, Math.ceil((Math.max(...all) + 5) / 5) * 5);
-  STATE.charts.ipptScatter = new Chart(canvas, {
+  STATE.charts["ipptScatter-" + k] = new Chart(canvas, {
     type: "scatter",
     data: {
       datasets: [
@@ -2004,8 +2040,8 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
         tooltip: { titleFont: { size: 13 }, bodyFont: { size: 13 }, padding: 10, callbacks: { label: ctx => ctx.raw.d4 ? `${displayId(ctx.raw.d4) || ctx.raw.d4}: ${ctx.raw.x} → ${ctx.raw.y}` : "" } }
       },
       scales: {
-        x: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpA} score`, color: SK.muted, font: { size: 13 } }, grid: { color: SK.border }, ticks: { color: SK.muted, font: { size: 12 } } },
-        y: { min: lo, max: hi, title: { display: true, text: `IPPT ${cmpB} score`, color: SK.muted, font: { size: 13 } }, grid: { color: SK.border }, ticks: { color: SK.muted, font: { size: 12 } } }
+        x: { min: lo, max: hi, title: { display: true, text: `${L(cmpA)} score`, color: SK.muted, font: { size: 13 } }, grid: { color: SK.border }, ticks: { color: SK.muted, font: { size: 12 } } },
+        y: { min: lo, max: hi, title: { display: true, text: `${L(cmpB)} score`, color: SK.muted, font: { size: 13 } }, grid: { color: SK.border }, ticks: { color: SK.muted, font: { size: 12 } } }
       }
     }
   });
@@ -2015,17 +2051,17 @@ function buildIPPTScatterChart(paired, cmpA, cmpB) {
 // Push-ups and sit-ups (reps) share the left axis; 2.4km time uses a right axis
 // in seconds (rendered mm:ss) since its scale and direction differ — lower is
 // better there, so a falling run line means improvement.
-function buildIPPTTrendChart(trend) {
-  const canvas = document.getElementById("chart-ippt-trend");
+function buildIPPTTrendChart(trend, k, L) {
+  const canvas = document.getElementById(`chart-ippt-${k}-trend`);
   if (!canvas || typeof Chart === "undefined" || !trend || trend.length < 2) return;
   const TK = {
     accent: cssColor("--accent"), green: cssColor("--green"), orange: cssColor("--orange"),
     muted: cssColor("--muted"), border: cssColor("--border")
   };
-  STATE.charts.ipptTrend = new Chart(canvas, {
+  STATE.charts["ipptTrend-" + k] = new Chart(canvas, {
     type: "line",
     data: {
-      labels: trend.map(r => "IPPT " + r.n),
+      labels: trend.map(r => L(r.n)),
       datasets: [
         { label: "Avg Push-ups", data: trend.map(r => r.pushups), borderColor: TK.accent, backgroundColor: TK.accent, yAxisID: "reps", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true },
         { label: "Avg Sit-ups", data: trend.map(r => r.situps), borderColor: TK.green, backgroundColor: TK.green, yAxisID: "reps", borderWidth: 3, tension: 0.3, pointRadius: 6, pointHoverRadius: 8, spanGaps: true },
@@ -2052,8 +2088,8 @@ function buildIPPTTrendChart(trend) {
   });
 }
 
-function buildIPPTAwardsChart(stats) {
-  const canvas = document.getElementById("chart-ippt-awards");
+function buildIPPTAwardsChart(stats, k) {
+  const canvas = document.getElementById(`chart-ippt-${k}-awards`);
   if (!canvas || typeof Chart === "undefined") return;
   // Order high → low so the legend reads top-to-bottom intuitively.
   // Only include non-zero slices so the chart isn't cluttered with empty tiers.
@@ -2071,19 +2107,19 @@ function buildIPPTAwardsChart(stats) {
   if (stats.ytt)      { labels.push("YTT");    data.push(stats.ytt);      colors.push(AK.dim); }
   if (!data.length) return;
 
-  STATE.charts.ipptAwards = new Chart(canvas, {
+  STATE.charts["ipptAwards-" + k] = new Chart(canvas, {
     type: "doughnut",
     data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: AK.surface, borderWidth: 2 }] },
     options: { plugins: { legend: { position: "right", labels: { color: AK.muted, font: { size: 11 } } } } }
   });
 }
 
-function buildIPPTDistributionChart(buckets) {
-  const canvas = document.getElementById("chart-ippt-distribution");
+function buildIPPTDistributionChart(buckets, k) {
+  const canvas = document.getElementById(`chart-ippt-${k}-distribution`);
   if (!canvas || typeof Chart === "undefined") return;
   // buckets: [YTT, Fail 0–60, Pass 61–74, Silver 75–84, Gold 85–89, Gold★ 90+]
   const DK = { muted: cssColor("--muted"), border: cssColor("--border") };
-  STATE.charts.ipptDistribution = new Chart(canvas, {
+  STATE.charts["ipptDistribution-" + k] = new Chart(canvas, {
     type: "bar",
     data: {
       labels: ["YTT", "Fail", "Pass", "Silver", "Gold", "Gold★"],

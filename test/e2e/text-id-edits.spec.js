@@ -79,8 +79,10 @@ test("editing a medical record updates it in place - it does not append a duplic
 });
 
 test("editing an IPPT result updates it in place - the edit is not silently dropped", async ({ page }) => {
-  // Straight from the fixture, whose ids are numeric strings ("7001").
-  const id = await page.evaluate(() => STATE.ippt[0].id);
+  // Straight from the fixture, whose ids are numeric strings ("7101"). The tab
+  // opens on the current phase (KH), so its first editable row is ALPHA ONE's
+  // KH 1 result.
+  const id = await page.evaluate(() => STATE.ippt.find((r) => r.series === "KH" && r.d4 === "1401").id);
   expect(id, "the fixture must hold production-shaped numeric-string ids").toMatch(/^\d+$/);
 
   await page.click('.nav-btn[data-nav="ippt"]');

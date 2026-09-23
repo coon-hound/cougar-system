@@ -70,7 +70,7 @@ const PULL_ASSIGN = {
   roster:        d => STATE.roster = normalizeRoster(d),
   medical:       d => STATE.medical = normalizeMedical(d),
   attendance:    d => STATE.attendance = normalizeAttendance(d),
-  ippt:          d => STATE.ippt = padD4OnLayer(d),
+  ippt:          d => STATE.ippt = normalizeIPPT(d),
   conductDetail: d => STATE.conductDetail = normalizeConductDetail(d),
   appointments:  d => STATE.appointments = normalizeAppointments(d),
   leave:         d => STATE.leave = normalizeLeave(d),

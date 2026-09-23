@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 145;
+const APP_VERSION = 155;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 155,
+    date: "23 Sep 2026",
+    title: "IPPT at Keat Hong",
+    intro: "The IPPT tab now leads with the company's IPPTs at Keat Hong. The five BMT IPPTs are all still there, in one card at the bottom of the tab.",
+    items: [
+      { t: "🏃 IPPT KH comes first", d: "Stats, awards, the YTT chase list, top performers and the full results table are all for IPPT at Keat Hong. The chase list shows everyone without a KH result yet." },
+      { t: "🗂 BMT results, one tap away", d: "Tap \"BMT IPPT results\" at the bottom of the tab to open every BMT chart and result. It stays open until you close it." },
+      { t: "📝 Pick the phase when adding a result", d: "+ Add now asks for Keat Hong or BMT. A man's profile labels each IPPT as KH 1, BMT 3 and so on." },
+      { t: "🧮 Auto-calculated scores fixed", d: "The form was using the push-up table for sit-ups and rounding run times into the wrong band, so some pre-filled scores were a few points off. Both now match the official tables." },
+    ],
+  },
   {
     v: 145,
     date: "17 Sep 2026",

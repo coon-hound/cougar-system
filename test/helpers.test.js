@@ -239,6 +239,27 @@ module.exports = async function run() {
     eq(h.ipptNetDelta({ byAttempt: { 1: 80, 3: 70 } }), -10, "gap bridged: last vs first");
     eq(h.ipptNetDelta({ byAttempt: { 2: 75 } }), 0);
   });
+  suite("helpers: IPPT series (BMT vs KH) - attempt numbers restart per series");
+
+  await test("ipptSeriesOf: an explicit series wins; a legacy row is dated into one", () => {
+    const h = loadHelpers(baseState());
+    eq(h.ipptSeriesOf({ series: "KH", date: "26 May 2026" }), "KH", "explicit beats date");
+    eq(h.ipptSeriesOf({ series: "bmt" }), "BMT", "case-insensitive");
+    eq(h.ipptSeriesOf({ date: "13 Aug 2026" }), "BMT");
+    eq(h.ipptSeriesOf({ date: "14 Sep 2026" }), "KH", "the changeover day is KH");
+    eq(h.ipptSeriesOf({ date: "0:00" }), "BMT", "an undated DNS row is BMT history");
+  });
+
+  await test("aggregateIPPT latest: KH 1 is more recent than BMT 5", () => {
+    const h = loadHelpers(baseState());
+    const rows = [
+      { d4: "1101", series: "BMT", attempt: 5, pushups: 50, situps: 50, runTime: "10:00", score: 88 },
+      { d4: "1101", series: "KH", attempt: 1, pushups: 30, situps: 30, runTime: "13:00", score: 55 },
+    ];
+    eq(h.aggregateIPPT(rows, "latest")[0].score, 55);
+    eq(h.aggregateIPPT(rows, "best")[0].score, 88);
+  });
+
   suite("helpers: nextId — a collision-free TEXT id");
 
   // nextId is a top-level `const` arrow, and const/let at script scope never
