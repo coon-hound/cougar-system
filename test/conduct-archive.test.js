@@ -45,16 +45,29 @@ module.exports = async function () {
   // ── Numbering ───────────────────────────────────────────────────────────
   suite("conduct archive - the migration slots in cleanly");
 
-  await test("0010 is the highest number, and no number is claimed twice", () => {
+  await test("no migration number is claimed twice", () => {
     // A past incident shipped two migrations both calling themselves 0005. The
     // files apply in lexical order, so a collision means one of them is skipped
-    // or applied in an order nobody chose. Not gapless: 0008 is held by an
-    // unmerged branch, which is exactly why this one is 0010.
+    // or applied in an order nobody chose. THAT is the durable invariant and it
+    // is what this asserts.
+    //
+    // It used to also assert that 0010 was the highest number, with 0008 left
+    // free for an unmerged branch. Both halves of that were wrong: an upper
+    // bound fails on the next migration anybody writes, so it is a tripwire
+    // against ordinary work rather than against the defect it names - it fired
+    // the moment token_activity landed. And reserving a LOWER number for a
+    // branch that has not shipped inverts the ordering, because whichever
+    // migration reaches production first is applied first: 0009 and 0010 merged
+    // while 0008 was still unmerged, so an 0008 applied afterwards would be an
+    // out-of-order migration the CLI refuses by default. A later branch takes
+    // the next FREE number at merge time, never a reserved earlier one.
+    //
+    // Not gapless, and that is fine: 0008 is a permanent gap.
     const files = fs.readdirSync(MIGDIR).filter((f) => f.endsWith(".sql")).sort();
     const nums = files.map((f) => f.slice(0, 4));
     eq(nums.length, new Set(nums).size, `one migration per number: ${files.join(", ")}`);
     ok(nums.includes("0010"), "0010_conduct_archive.sql is present");
-    ok(nums.every((n) => n <= "0010"), "nothing is numbered after it");
+    ok(nums.every((n) => /^\d{4}$/.test(n)), "every migration is numbered NNNN");
   });
 
   // ── The keeper list ─────────────────────────────────────────────────────

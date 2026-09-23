@@ -1,4 +1,4 @@
-// Static guards over 0008_token_activity.sql — the migration that measures how
+// Static guards over 0011_token_activity.sql — the migration that measures how
 // device tokens die.
 //
 // It is one table and one rewritten function, so there is little behaviour to
@@ -26,7 +26,7 @@ const path = require("path");
 const { suite, test, ok } = require("./_tap");
 
 const ROOT = path.join(__dirname, "..");
-const MIG = path.join(ROOT, "supabase/migrations/0008_token_activity.sql");
+const MIG = path.join(ROOT, "supabase/migrations/0011_token_activity.sql");
 
 module.exports = async function run() {
   suite("token_activity: measuring how device tokens die");
@@ -35,7 +35,7 @@ module.exports = async function run() {
   // The body of check_auth as this migration leaves it.
   const fn = mig.slice(mig.indexOf("create or replace function check_auth"),
                        mig.indexOf("-- ── Retention"));
-  ok(fn.length > 200, "found the check_auth body in 0008");
+  ok(fn.length > 200, "found the check_auth body in 0011");
 
   await test("the activity row is written only AFTER every refusal path", () => {
     const insertAt = fn.indexOf("insert into token_activity");
@@ -75,7 +75,7 @@ module.exports = async function run() {
     // correctly declines for the rest of it. Without this seed the whole fleet
     // records nothing on the one day somebody will look.
     ok(/insert into token_activity[\s\S]{0,400}from auth_tokens[\s\S]{0,200}last_seen_at is not null/
-       .test(mig), "0008 backfills one row per token from last_seen_at");
+       .test(mig), "0011 backfills one row per token from last_seen_at");
     ok(/on conflict \(token, day\) do nothing/.test(mig),
        "the backfill keeps the migration re-runnable");
   });

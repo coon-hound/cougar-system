@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0008_token_activity.sql — find out what is actually happening to the tokens
+-- 0011_token_activity.sql — find out what is actually happening to the tokens
 --
 -- THE PROBLEM THIS MEASURES, NOT SOLVES. Commanders lose access often enough
 -- that re-issuing links is routine admin work. Production on 22 Sep 2026:
