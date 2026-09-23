@@ -47,6 +47,7 @@ It does not: two days into intake 16 the company typed a fresh "ENDURANCE RUN 1"
 Archiving is sticky by design: un-archiving is a psql `update ... set deleted_at = null`, never a click, because `keep_archived_archived` declines the app's revival silently.
 - **`conducts.updated_at` is not a creation time** (`conducts_touch` rewrites it on every UPDATE), and the Sheets import stamped all 109 imported rows with one timestamp AFTER the intake 16 cutoff.
 Anything selecting conducts by age keeps all of them or none; name the ids.
+- **An IPPT is (series, attempt), never attempt alone.** `series` is `BMT` (the five BMT IPPTs) or `KH` (Keat Hong, the current phase), and attempt numbers restart per series, so "IPPT 1" names two different days. Read it through `ipptSeriesOf` (it dates legacy rows that have no field) and order across series with `ipptOrderKey`. Results arrive as screenshots of the IPPT app and go in through `scripts/ippt-import.mjs` - see [docs/IPPT-IMPORT.md](docs/IPPT-IMPORT.md).
 - **Derived state is derived.** Out-of-camp status and the movement board are computed from their source records, never stored separately. Do not introduce a second copy.
 
 ## The Postgres backend
@@ -72,6 +73,8 @@ Its report counts what it looked at, not what it removed: a committed run said `
 Matching people by name needs an unordered token set, not a string compare: `TAN WEI MING` and `WEI MING TAN` are the same person, and `BIN` / `S/O` / `BINTE` carry no information.
 
 Do not trust a loose similarity threshold. The token pool is small (LIM, TAN, WEI, KAI, JUN), so two shared tokens means very little: `JOSHUA LIM KAI EN` scores 0.67 against `KAI XIN LIM`. Anything short of an exact match should ask a human rather than guess, because the thing being guessed at is whose medical records these are.
+
+The one exception: names in the IPPT app (the conducting staff's detail lists) are OFFICIAL, and the roster is corrected to them - spelling and punctuation - when an IPPT import finds a difference (owner's rule, 23 Sep 2026; see [docs/IPPT-IMPORT.md](docs/IPPT-IMPORT.md)).
 
 Source documents disagree, and the database is the tiebreak. The intake 16 attendance tracker read `W` as `V` across about twenty names (`CHEV KAI XIANG` for `CHEW`, `TOH VEN HO` for `WEN`), while the self-reported in-processing form had its own typos. Where a person is already in `roster`, that spelling wins.
 

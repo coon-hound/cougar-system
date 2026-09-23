@@ -14,7 +14,7 @@ function closeModal() {
 function openPerson(d4) {
   const p = STATE.roster.find(r => r.id === d4); if (!p) return;
   const med = STATE.medical.filter(m => m.d4 === d4);
-  const ippts = STATE.ippt.filter(i => i.d4 === d4).sort((a, b) => a.attempt - b.attempt);
+  const ippts = STATE.ippt.filter(i => i.d4 === d4).sort((a, b) => ipptOrderKey(a) - ipptOrderKey(b));
   // Commanders never show their 00xx id — surface rank instead. Enlistees show
   // "<RANK> · <4D> — status": the rank is there because it now MOVES (REC to
   // PTE on posting into unit training), so a commander checking a man against
@@ -150,7 +150,7 @@ function openPerson(d4) {
   if (ippts.length) {
     html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">IPPT Progression</h4>`;
     html += `<div class="chart-box"><canvas id="person-ippt-chart"></canvas></div>`;
-    html += ippts.map(i => `<span class="badge badge-accent" style="margin:2px">#${i.attempt}: ${i.score} ${awardBadge(i.score)}</span>`).join("");
+    html += ippts.map(i => `<span class="badge badge-accent" style="margin:2px">${ipptConductLabel(ipptSeriesOf(i), i.attempt, true)}: ${i.score} ${awardBadge(i.score)}</span>`).join("");
   }
   if (med.length) {
     const today = todayISO();
@@ -232,7 +232,7 @@ function openPerson(d4) {
     if (ipptCanvas && ippts.length) {
       new Chart(ipptCanvas, {
         type: "line",
-        data: { labels: ippts.map(i => "#" + i.attempt), datasets: [{ data: ippts.map(i => +i.score), borderColor: PC.orange, backgroundColor: PC.orangeWash, fill: true, tension: .3, pointRadius: 5 }] },
+        data: { labels: ippts.map(i => ipptConductLabel(ipptSeriesOf(i), i.attempt, true)), datasets: [{ data: ippts.map(i => +i.score), borderColor: PC.orange, backgroundColor: PC.orangeWash, fill: true, tension: .3, pointRadius: 5 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: PC.border } }, x: { grid: { color: PC.border } } } }
       });
     }
@@ -700,7 +700,10 @@ function openIPPTForm(id) {
       <div style="display:flex;flex-direction:column;gap:10px">
         ${e ? editHint : ""}
         <div class="form-group"><label>Recruit</label><span onchange="recomputeIPPTScore()">${rosterSelect("f-d4", true, e?.d4 || "")}</span></div>
-        ${formSelect("f-attempt", "Attempt", ["1", "2", "3", "4"], true, e?.attempt ? String(e.attempt) : "")}
+        <div class="form-row">
+          ${formSelect("f-series", "Phase", [["KH", "Keat Hong (KH)"], ["BMT", "BMT"]], true, e ? ipptSeriesOf(e) : "KH")}
+          ${formSelect("f-attempt", "IPPT no.", ["1", "2", "3", "4", "5", "6", "7", "8"], true, e?.attempt ? String(e.attempt) : "")}
+        </div>
         ${formField("f-date", "Date", "date", "", `required value="${dateVal}" min="2020-01-01" max="2099-12-31"`)}
         <div class="form-row">
           <div class="form-group"><label>Push-ups</label><input id="f-pu" type="number" required min="0" max="99" step="1"${numVal(e?.pushups)} ${recalcAttr}></div>
@@ -775,6 +778,7 @@ function submitIPPT() {
   const runTime = `${String(runMin).padStart(2, "0")}:${String(runSec).padStart(2, "0")}`;
   const entry = {
     id: editId || nextId(), d4: gv("f-d4"),
+    series: gv("f-series"),
     attempt: +gv("f-attempt"),
     date: isoToDisplayDate(gv("f-date")),
     pushups: +gv("f-pu"), situps: +gv("f-su"),
@@ -3193,8 +3197,8 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
     .sort((a, b) => {
       const ai = displayDateToISO(a.date) || "";
       const bi = displayDateToISO(b.date) || "";
-      if (ai !== bi) return ai < bi ? -1 : 1;
-      return (+a.attempt || 0) - (+b.attempt || 0);
+      if (ai && bi && ai !== bi) return ai < bi ? -1 : 1;
+      return ipptOrderKey(a) - ipptOrderKey(b);
     });
 
   // Auto-encouragement. The HR-trend variants went with Polar; attendance is
@@ -3236,7 +3240,7 @@ function buildFitnessReportHTML(d4, startIso, endIso) {
     const awardColor = awardColorMap[award] || "#6E7681";
     return `<tr>
       <td style="padding:8px 10px;border-bottom:1px solid #E1E4E8;font-size:12px;color:#6E7681;white-space:nowrap">${i.date || "—"}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #E1E4E8;font-size:12px;text-align:center">${i.attempt || "—"}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #E1E4E8;font-size:12px;text-align:center;white-space:nowrap">${i.attempt ? ipptConductLabel(ipptSeriesOf(i), i.attempt, true) : "—"}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #E1E4E8;font-size:12px;text-align:center"><strong>${i.pushups ?? "—"}</strong> <span style="color:#8B949E">·</span> <span style="color:#1F6FEB;font-weight:600">${puPts}</span></td>
       <td style="padding:8px 10px;border-bottom:1px solid #E1E4E8;font-size:12px;text-align:center"><strong>${i.situps ?? "—"}</strong> <span style="color:#8B949E">·</span> <span style="color:#1F6FEB;font-weight:600">${suPts}</span></td>
       <td style="padding:8px 10px;border-bottom:1px solid #E1E4E8;font-size:12px;text-align:center"><strong>${i.runTime || "—"}</strong> <span style="color:#8B949E">·</span> <span style="color:#1F6FEB;font-weight:600">${runPts}</span></td>
@@ -4911,7 +4915,7 @@ function importBackup(input) {
     if (d.roster) STATE.roster = d.roster;
     if (d.medical) STATE.medical = d.medical;
     if (d.attendance) STATE.attendance = d.attendance;
-    if (d.ippt) STATE.ippt = d.ippt;
+    if (d.ippt) STATE.ippt = normalizeIPPT(d.ippt);
     if (d.conductDetail) STATE.conductDetail = d.conductDetail;
     if (d.appointments) STATE.appointments = d.appointments;
     if (d.leave) STATE.leave = d.leave;

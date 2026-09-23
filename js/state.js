@@ -622,6 +622,14 @@ const normId = v => (v === null || v === undefined) ? "" : String(v).trim();
 // own normalizer. Applied at every read boundary (loadLocal, pullAll) so
 // commander 4Ds stay 4 digits regardless of how Sheets mangles them on
 // round-trip, and so ids never vary by backend.
+// IPPT rows: the generic d4/id boundary, plus the `series` every IPPT consumer
+// keys on (BMT vs KH, see ipptSeriesOf in js/helpers.js). Resolved once here so
+// the rest of the app can read `row.series` and a row missing the field is
+// back-filled the first time it is edited and pushed.
+function normalizeIPPT(records) {
+  return padD4OnLayer(records).map(r => (r ? { ...r, series: ipptSeriesOf(r) } : r));
+}
+
 function padD4OnLayer(records) {
   return (records || []).map(r => {
     if (!r) return r;
@@ -734,7 +742,7 @@ function loadLocal() {
     STATE.roster = normalizeRoster(d.roster);
     STATE.medical = normalizeMedical(d.medical);
     STATE.attendance = normalizeAttendance(d.attendance);
-    STATE.ippt = padD4OnLayer(d.ippt);
+    STATE.ippt = normalizeIPPT(d.ippt);
     STATE.conductDetail = normalizeConductDetail(d.conductDetail);
     STATE.appointments = normalizeAppointments(d.appointments);
     STATE.leave = normalizeLeave(d.leave);

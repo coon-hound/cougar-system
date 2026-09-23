@@ -19,6 +19,15 @@
 !sample_polar.csv
 !docs/nominal-roll-template.csv
 
+# IPPT result screenshots and everything scripts/ippt-import.mjs writes next to
+# them (the reads, the reconciled rows, the verification CSV) carry names
+# beside 4Ds. The working folder lives at the repo root by convention
+# (ipptKH1/, ipptKH2/, ...) and never enters the repo.
+/ippt*/
+*.jpeg
+*.jpg
+*.heic
+
 # ── Secrets & local config ─────────────────────────
 # Anything that could carry a real API key or per-machine config.
 .env
