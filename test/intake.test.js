@@ -363,14 +363,21 @@ module.exports = async function () {
   await test("cohort-scoped tables are archived even for a returnee", () => {
     // Attendance / ConductDetail / PolarFlow describe conducts the new cohort
     // did not attend. Carrying them would corrupt strength and LMS counts.
+    //
+    // Conducts joined them in 0010. It was "keep" until intake 16 showed that
+    // conduct names are retyped rather than reused, so a registry that never
+    // archives only grows - 112 rows in one flat <select> on a phone. If this
+    // assertion is ever "fixed" by dropping Conducts back out, the next
+    // changeover silently inherits the previous cohort's whole picker.
     const plan = run(P, {
       roster: outgoing,
       roll: [rollRow({ "4D": "2205", Name: "TAN WEI MING" })],
       data: carryData,
     });
-    eq(plan.archived.sort(), ["Attendance", "ConductDetail", "PolarFlow"]);
+    eq(plan.archived.sort(), ["Attendance", "ConductDetail", "Conducts", "PolarFlow"]);
     eq(plan.carried.attendance, undefined);
     eq(plan.carried.polar, undefined);
+    eq(plan.carried.conducts, undefined);
   });
 
   await test("a non-returnee's records are not carried", () => {

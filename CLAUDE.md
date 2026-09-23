@@ -41,6 +41,12 @@ Moving the whole company's rank is `scripts/promote.mjs` - see [docs/PROMOTE.md]
 - **The parade state is the battalion's format, and the parser must keep understanding BOTH.** `generateParadeStateText` emits the 40 SAR format (blocks, six fixed sections, one line per record); `js/parade-compare.js` parses it AND the pre-Sep-2026 S/N-block format, because saved snapshots are the ground truth of what was filed and are never regenerated. A round-trip test pins parser and generator together, so any change to the emitted text updates the parser in the same PR.
 - **Anything free-text rendered into a parade line goes through `paradeSafeText`.** The line format gives `" - "`, `(`, `)` and `@` structural meaning, so a reason of `Fever (38.5)`, a location of `Raffles @ Sembawang`, or a newline pasted from WhatsApp silently corrupts or splits a record - and a split record still counts in its section header, so the state disagrees with itself. The fuzz test in `test/parade-format.test.js` is what catches this; extend it when you add a field.
 - **Parade strength never counts section lines.** Present/strength comes from `outOfCampMap` plus the ticked borderline returnees, so a person legitimately listed on several lines (an MC and an excuse) is still one body, and the blocks always add up to COMPANY.
+- **Conduct NAMES are retyped, not reused.** `0004_intake.sql` left `conducts` out of the intake archive on the premise that a conduct vocabulary recurs every intake.
+It does not: two days into intake 16 the company typed a fresh "ENDURANCE RUN 1" rather than reuse the previous cohort's entry, and the registry had grown to 112 rows in one phone-sized `<select>`.
+`0010_conduct_archive.sql` gave it the `intake` stamp and both archive guards, and `intake-migrate.mjs` now archives it at every changeover.
+Archiving is sticky by design: un-archiving is a psql `update ... set deleted_at = null`, never a click, because `keep_archived_archived` declines the app's revival silently.
+- **`conducts.updated_at` is not a creation time** (`conducts_touch` rewrites it on every UPDATE), and the Sheets import stamped all 109 imported rows with one timestamp AFTER the intake 16 cutoff.
+Anything selecting conducts by age keeps all of them or none; name the ids.
 - **Derived state is derived.** Out-of-camp status and the movement board are computed from their source records, never stored separately. Do not introduce a second copy.
 
 ## The Postgres backend
@@ -50,6 +56,8 @@ Moving the whole company's rank is `scripts/promote.mjs` - see [docs/PROMOTE.md]
 - **A full-tab write HARD-deletes MSK** before reinserting, because MSK has no `id` to diff on. A soft delete does not protect MSK rows; a `before delete` trigger does.
 - **`dropped_fields` is cached in a module-level variable** for the life of a warm instance, so adding a row to it needs a redeploy to take effect. It doubles as the way to make a column server-owned: the client can still read it via `api_row`, but `shapeRow` drops it on the way in. That is how `roster.pid` and `roster.intake` stay unwritable by any phone.
 - **`api_row` returns every real column**, so adding a column to a table puts it in every `readAll` response and in anything that copies a row. Set derived values *after* copying a source row, not before.
+- **`purge_retention` (0002) hard-deletes soft-deleted rows once past its window**, so a soft delete is not durable on its own - `block_archived_delete` is what keeps archived history out of its reach, and the table is only protected once that trigger is installed on it.
+Its report counts what it looked at, not what it removed: a committed run said `conducts_soft_deleted: 110` and actually deleted 1, the other 109 being archived.
 - **A killed migration leaves its transaction open.** `idle_in_transaction_session_timeout` is `0` on this database, so a client killed mid-run holds its row locks until the connection drops, and the next run blocks on them silently. Check `pg_stat_activity` before assuming a rerun is merely slow.
 
 ## Personnel data rules
