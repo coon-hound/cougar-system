@@ -77,6 +77,20 @@ if [ "$is_db" = 1 ]; then
     echo "## test/live — the real Edge Function over HTTP"
     echo '```'
   } >> "$EV"
+  # Read the token out of the database rather than letting the suite fall back
+  # to its `dev-token` default. dev-env.sh:137 REUSES whatever usable token
+  # already exists and only mints 'dev-token' when there is none, so on any
+  # database seeded by another run (or by scripts/depart.mjs, or a second
+  # worktree) the default names a token that does not exist and all 32 tests
+  # fail as auth failures — which reads exactly like a real regression in the
+  # change under test. demo.sh:52-56 already discovers it this way.
+  if [ -z "${COUGAR_TOKEN:-}" ] && [ -x scripts/dev-env.sh ]; then
+    COUGAR_TOKEN="$(scripts/dev-env.sh psql -qAt -c \
+      "select token from auth_tokens where revoked_at is null and expires_at > now() limit 1" \
+      2>/dev/null | tr -d '[:space:]')" || COUGAR_TOKEN=""
+    [ -n "$COUGAR_TOKEN" ] && export COUGAR_TOKEN \
+      && echo "(using the auth token found in the dev database)" >> "$EV"
+  fi
   if node test/live/api-contract.test.js >> "$EV" 2>&1; then :; else pass=0; fi
   echo '```' >> "$EV"
 fi
