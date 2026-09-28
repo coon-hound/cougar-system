@@ -82,6 +82,62 @@ export function archiveKey(d4, intake) {
   return `${s}@${String(intake ?? "unknown").replace(/\//g, "-")}`;
 }
 
+// ── A roster row from a roll row ────────────────────────────────────────────
+
+// Columns encrypted at rest (0002). Mirrors ENCRYPTED in the Edge Function.
+export const ENCRYPTED = new Set([
+  "dob", "bloodType", "allergies", "otherMedical",
+  "address", "nokName", "nokRelation", "nokPhone",
+]);
+
+// Columns that exist on `roster` (0001) and can be filled from a roll. Listed
+// explicitly rather than spread from the roll so a stray column can never
+// reach the table, and so every row carries an identical key set.
+export const ROSTER_FROM_ROLL = [
+  "phone", "email", "dob", "bloodType", "allergies", "otherMedical",
+  "address", "nokName", "nokRelation", "nokPhone", "height", "weight",
+  "ration", "program", "msk", "highest education level", "motorcycle license",
+];
+
+/**
+ * The full roster row for one seated enlistee. Shared by the changeover and by
+ * a late enlistment (reseat.mjs --enlist), so a man seated either way carries
+ * the same key set - normalizers on the client expect every row to.
+ */
+export function rosterRowFromRoll(src, d4) {
+  const row = {
+    id: d4,
+    "4d": `C${d4}`,                         // display form, as live data holds it
+    name: src.name,
+    rank: src.rank || "REC",
+    role: "Recruit",
+    status: "",
+    groups: "",
+    notes: src.remarks || "",
+    leaveQuota: "",
+    outOfCamp: "", outReason: "", outSince: "",
+    campIn: "", campInSince: "",
+    location: "", locationSince: "",
+    age: "",
+  };
+  for (const f of ROSTER_FROM_ROLL) row[f] = src[f] ?? "";
+  return row;
+}
+
+/**
+ * A new person id: "P" + ten hex digits of a keyed digest of `seed`, suffixed
+ * -2, -3... on the (vanishingly rare) collision. Claims the pid in `taken`.
+ * Seeds are `nric:<digest>` when the roll carries an NRIC, else the name key
+ * plus the intake, so the same man enlisted twice mints the same pid.
+ */
+export function mintPid(hash, seed, taken) {
+  const base = "P" + String(hash(seed)).replace(/[^0-9a-f]/gi, "").slice(0, 10).toUpperCase();
+  let pid = base, n = 2;
+  while (taken.has(pid)) pid = `${base}-${n++}`;
+  taken.add(pid);
+  return pid;
+}
+
 // ── Reading a nominal roll ──────────────────────────────────────────────────
 
 // Header spellings we accept, compared with case and punctuation stripped. HQ
@@ -109,6 +165,9 @@ const ALIASES = {
   height: ["height", "height cm"],
   weight: ["weight", "weight kg"],
   ration: ["ration", "diet", "dietary"],
+  msk: ["msk", "msk history", "msk injuries", "injuries", "injury history"],
+  "highest education level": ["highest education level", "education", "education level", "highest education"],
+  "motorcycle license": ["motorcycle license", "motorcycle licence", "class 2b", "motorcycle"],
   program: ["program", "programme", "training program"],
   remarks: ["remarks", "remark", "notes", "note"],
 };
@@ -267,6 +326,45 @@ export const CARRY_RULES = {
   conducts: { table: "conducts", tab: "Conducts", carry: "none" },
 };
 
+/**
+ * One returnee's record, copied onto his new seat - or null when the rule does
+ * not carry it. Shared by the changeover and by a late returnee seated with
+ * reseat.mjs --enlist, so a man who comes back either way keeps exactly the
+ * same history.
+ *
+ * @returns {{copy: object, clamped: object|null} | null}
+ */
+export function carryRecord(key, rec, newD4, { cutoff, label, hash }) {
+  const rule = CARRY_RULES[key];
+  if (!rule || rule.carry === "none" || rule.carry === "keep" || rule.carry === "commander") return null;
+  if (rule.carry === "future" && cutoff && toISO(rec[rule.dateField]) < cutoff) return null;
+
+  const copy = { ...rec, d4: newD4 };
+  let clamped = null;
+
+  // A status still open when the cohort changed would otherwise put a
+  // returnee on MC on his first parade state, months after the fact. Close
+  // it the day before the cutoff and list it for re-verification; the
+  // archived original keeps the real end date.
+  if (key === "medical" && cutoff) {
+    const end = toISO(copy.endDate);
+    if (!end || end >= cutoff) {
+      clamped = { newD4, status: copy.status ?? "", was: copy.endDate || "(open)" };
+      copy.endDate = displayDate(addDays(cutoff, -1));
+    }
+  }
+
+  // A fresh id, because the original row keeps its own and archives under
+  // it. Deterministic over (table, source id, new seat, label) so a rerun
+  // of the same changeover produces the same ids and stays idempotent.
+  // The "i-" prefix matches the importer's "m-" convention: never
+  // confusable with a legacy numeric id, and `+id` stays NaN.
+  if (!rule.noId) {
+    copy.id = "i-" + String(hash(`${rule.table}|${rec.id ?? ""}|${newD4}|${label}`)).slice(0, 12);
+  }
+  return { copy, clamped };
+}
+
 /** Match confidence, most to least trusted. */
 export const TIER = {
   OVERRIDE: "override",   // a human said so                              → auto
@@ -423,13 +521,7 @@ export function planIntake(ctx) {
     }
   };
 
-  const makePid = (seed) => {
-    const base = "P" + String(hash(seed)).replace(/[^0-9a-f]/gi, "").slice(0, 10).toUpperCase();
-    let pid = base, n = 2;
-    while (takenPids.has(pid)) pid = `${base}-${n++}`;
-    takenPids.add(pid);
-    return pid;
-  };
+  const makePid = (seed) => mintPid(hash, seed, takenPids);
 
   for (const p of ctx.people ?? []) {
     if (!p?.pid) continue;
@@ -553,15 +645,6 @@ export function planIntake(ctx) {
   const returnees = [];
   const newRoster = [];
 
-  // Columns that exist on `roster` (0001) and can be filled from a roll. Listed
-  // explicitly rather than spread from the roll so a stray column can never
-  // reach the table, and so every row carries an identical key set.
-  const ROSTER_FROM_ROLL = [
-    "phone", "email", "dob", "bloodType", "allergies", "otherMedical",
-    "address", "nokName", "nokRelation", "nokPhone", "height", "weight",
-    "ration", "program",
-  ];
-
   for (const m of matches) {
     const src = byD4.get(m.d4);
     if (!src) continue;
@@ -577,23 +660,7 @@ export function planIntake(ctx) {
       });
     }
 
-    const row = {
-      id: src.d4,
-      "4d": `C${src.d4}`,                     // display form, as live data holds it
-      name: src.name,
-      rank: src.rank || "REC",
-      role: "Recruit",
-      status: "",
-      groups: "",
-      notes: src.remarks || "",
-      leaveQuota: "",
-      outOfCamp: "", outReason: "", outSince: "",
-      campIn: "", campInSince: "",
-      location: "", locationSince: "",
-      msk: "", age: "",
-      "highest education level": "", "motorcycle license": "",
-    };
-    for (const f of ROSTER_FROM_ROLL) row[f] = src[f] ?? "";
+    const row = rosterRowFromRoll(src, src.d4);
     newRoster.push({ row, pid, intake: label });
   }
 
@@ -627,30 +694,10 @@ export function planIntake(ctx) {
 
       const newD4 = remap.get(d4);
       if (!newD4) continue;                   // not a returnee: archived, not carried
-      if (rule.carry === "future" && cutoff && toISO(rec[rule.dateField]) < cutoff) continue;
-
-      const copy = { ...rec, d4: newD4 };
-
-      // A status still open when the cohort changed would otherwise put a
-      // returnee on MC on his first parade state, months after the fact. Close
-      // it the day before the cutoff and list it for re-verification; the
-      // archived original keeps the real end date.
-      if (key === "medical" && cutoff) {
-        const end = toISO(copy.endDate);
-        if (!end || end >= cutoff) {
-          clamped.push({ oldD4: d4, newD4, status: copy.status ?? "", was: copy.endDate || "(open)" });
-          copy.endDate = displayDate(addDays(cutoff, -1));
-        }
-      }
-
-      // A fresh id, because the original row keeps its own and archives under
-      // it. Deterministic over (table, source id, new seat, label) so a rerun
-      // of the same changeover produces the same ids and stays idempotent.
-      // The "i-" prefix matches the importer's "m-" convention: never
-      // confusable with a legacy numeric id, and `+id` stays NaN.
-      if (!rule.noId) {
-        copy.id = "i-" + String(hash(`${rule.table}|${rec.id ?? ""}|${newD4}|${label}`)).slice(0, 12);
-      }
+      const c = carryRecord(key, rec, newD4, { cutoff, label, hash });
+      if (!c) continue;
+      if (c.clamped) clamped.push({ oldD4: d4, ...c.clamped });
+      const copy = c.copy;
       out.push(copy);
 
       const pid = returnees.find((r) => r.newD4 === newD4)?.pid;

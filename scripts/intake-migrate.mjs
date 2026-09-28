@@ -50,15 +50,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { CARRY_RULES, archiveKey, formatReport, parseCsv, planIntake } from "./intake-plan.mjs";
+import { CARRY_RULES, ENCRYPTED, archiveKey, formatReport, parseCsv, planIntake } from "./intake-plan.mjs";
 
 const { DATABASE_URL, COUGAR_ENC_KEY } = process.env;
 
-// Columns encrypted at rest (0002). Mirrors ENCRYPTED in the Edge Function.
-const ENCRYPTED = new Set([
-  "dob", "bloodType", "allergies", "otherMedical",
-  "address", "nokName", "nokRelation", "nokPhone",
-]);
 
 // Exactly REV_TABS (Edge Function) — every tab the client tracks a revision
 // for. All of them change here, so all of them must be bumped.

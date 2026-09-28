@@ -421,6 +421,104 @@ async function main() {
     eq(bad, [], "a 4D is printed beside a name that is not an invented one");
   });
 
+  // ── Moves between sections, and late enlistees ─────────────────────────────
+  suite("reseat — --move and --enlist, planned together");
+
+  const transfer = (opts) => P.planTransfer({ roster: opts.roster ?? ROSTER, moves: opts.moves ?? [], enlistees: opts.enlistees ?? [] });
+  const R = await import(pathToFileURL(path.join(ROOT, "scripts/reseat.mjs")).href);
+
+  await test("a man posted to another section: the one he leaves closes up, the one he joins deals him in alphabetically", () => {
+    const p = transfer({ moves: [{ who: "BRAVO LIM", to: "52" }] });
+    ok(p.ok, JSON.stringify(p.issues));
+    eq(moveMap(p), { "5102": "5201", "5103": "5102", "5201": "5202", "5202": "5203" });
+    eq(p.inserts, []);
+  });
+
+  await test("a move out and an enlistee in to the same section are dealt ONCE - nobody else churns", () => {
+    // Run as two operations this would shuffle CHARLIE up to 5102 and straight
+    // back down to 5103, collecting a seat he never really held.
+    const p = transfer({
+      moves: [{ who: "5102", to: "52" }],
+      enlistees: [{ name: "BRAVO KOH", to: "51" }],
+    });
+    ok(p.ok, JSON.stringify(p.issues));
+    eq(p.inserts.map((i) => i.newId), ["5102"], "the enlistee takes the seat just vacated");
+    ok(!("5103" in moveMap(p)), "CHARLIE NG does not move at all");
+    eq(moveMap(p)["5102"], "5201");
+  });
+
+  await test("a section is named as 94, 9-4 or P9S4, and nothing else", () => {
+    eq(["94", "9-4", "P9S4", "p9/4"].map(P.parseSect), ["94", "94", "94", "94"]);
+    eq(["9", "904", "", "0-4"].map(P.parseSect), ["", "", "", ""]);
+  });
+
+  await test("an enlistee already on the roster is refused, not seated twice", () => {
+    const p = transfer({ enlistees: [{ name: "TAN ALPHA", to: "52" }] });
+    ok(!p.ok);
+    ok(/already on the roster as 5101/.test(p.issues[0].message), p.issues[0].message);
+  });
+
+  await test("an unknown man, a man moved twice, or a move to his own section stops the run", () => {
+    ok(!transfer({ moves: [{ who: "NOBODY HERE", to: "52" }] }).ok);
+    ok(!transfer({ moves: [{ who: "5101", to: "52" }, { who: "ALPHA TAN", to: "52" }] }).ok);
+    ok(!transfer({ moves: [{ who: "5101", to: "51" }] }).ok);
+  });
+
+  await test("the transfer report never prints names unless asked", () => {
+    const p = transfer({ moves: [{ who: "BRAVO LIM", to: "52" }], enlistees: [{ name: "ECHO KOH", to: "51" }] });
+    ok(!/BRAVO|ECHO/.test(P.formatTransferReport(p)));
+    ok(/READY/.test(P.formatTransferReport(p)));
+    ok(/ECHO KOH/.test(P.formatTransferReport(p, { names: true })));
+  });
+
+  const H = (s) => require("crypto").createHash("sha256").update(String(s)).digest("hex");
+
+  await test("an enlistee CSV: Section as 72 or Platoon + Section, and the raw NRIC never leaves", () => {
+    const csv = "Name,NRIC,Platoon,Section,Phone\nFoxtrot Koh,S1234567D,7,2,91234567\nGolf Ang,,,72,\n";
+    const { enlistees, issues } = R.readEnlistees(csv, { hash: H });
+    eq(issues, []);
+    eq(enlistees.map((e) => [e.name, e.to]), [["FOXTROT KOH", "72"], ["GOLF ANG", "72"]]);
+    ok(!JSON.stringify(enlistees).includes("S1234567D"), "the raw NRIC must not survive the reader");
+    ok(enlistees[0].nricHash && !enlistees[1].nricHash);
+  });
+
+  const ctx = (over = {}) => ({
+    people: [], archived: [], seatedPids: new Set(), intake: "16", hash: H, ...over,
+  });
+
+  await test("a late enlistee who was in BMT is a RETURNEE, found in the archive by name", () => {
+    const es = [{ name: "FOXTROT KOH S/O GOLF KOH", to: "72", nricHash: "", pidOverride: "" }];
+    const issues = R.resolveEnlistees(es, ctx({ archived: [{ id: "1113@bmt", name: "FOXTROT KOH S/O GOLF KOH", intake: "bmt" }] }));
+    eq(issues, []);
+    eq(es[0].returnee, { archiveD4: "1113@bmt", oldD4: "1113" });
+    eq(es[0].tier, "name");
+    ok(/^P[0-9A-F]{10}$/.test(es[0].pid));
+  });
+
+  await test("a near miss against the archive BLOCKS instead of enlisting a returnee as a stranger", () => {
+    const es = [{ name: "FOXTROT KOH GOLF", to: "72", nricHash: "", pidOverride: "" }];
+    const issues = R.resolveEnlistees(es, ctx({ archived: [{ id: "1113@bmt", name: "FOXTROT KOH GOLF HOTEL", intake: "bmt" }] }));
+    eq(issues.length, 1);
+    ok(/close to 1113@bmt/.test(issues[0].message), issues[0].message);
+  });
+
+  await test("PID settles it: an archive key links him, NEW makes him new", () => {
+    const archived = [{ id: "1113@bmt", name: "FOXTROT KOH GOLF HOTEL", intake: "bmt" }];
+    const a = [{ name: "FOXTROT KOH GOLF", to: "72", nricHash: "", pidOverride: "1113@bmt" }];
+    eq(R.resolveEnlistees(a, ctx({ archived })), []);
+    eq(a[0].returnee.oldD4, "1113");
+    const b = [{ name: "FOXTROT KOH GOLF", to: "72", nricHash: "", pidOverride: "NEW" }];
+    eq(R.resolveEnlistees(b, ctx({ archived })), []);
+    ok(!b[0].returnee);
+  });
+
+  await test("a man the registry knows by NRIC is never minted a second pid", () => {
+    const es = [{ name: "SOMEONE ELSE", to: "72", nricHash: "abc", pidOverride: "" }];
+    const issues = R.resolveEnlistees(es, ctx({ people: [{ pid: "P1", name: "HOTEL LIM", name_key: "hotel lim", nric_hash: "abc" }] }));
+    eq(issues.length, 1);
+    ok(/already knows this man as P1/.test(issues[0].message));
+  });
+
   await test("the report never prints names unless asked", async () => {
     const p = plan(P,
       "SECTION 1 — 2\nCHARLIE NG — 🟢 AI\nALPHA TAN — 🟢 AI\n" +

@@ -44,6 +44,7 @@ If all you can get is those two columns, the changeover still works.
 | `Date of Birth`, `Blood Type`, `Allergies`, `Other Medical` | Shown on the profile card and relevant in an emergency. Encrypted at rest. |
 | `NOK Name`, `NOK Relation`, `NOK Phone` | Next of kin. Encrypted at rest. |
 | `Address`, `Email`, `Height`, `Weight`, `Ration` | Filled in if present, ignored if not. |
+| `MSK`, `Education`, `Motorcycle License` | Shown on the profile card: MSK as the red injury-history note, the other two as facts. |
 | `PID` | Only ever filled in by us, to settle an ambiguous match. Leave it blank. |
 
 Any column not in this list is ignored, and the run reports which ones it skipped.
@@ -124,6 +125,23 @@ Matching falls back to names, which works, and the run will ask about anything i
 
 `Vocation Code` is not a column the system knows.
 It gets skipped, the run says so, and nothing about it is stored.
+
+## Forms that arrive after the changeover
+
+Some men fill in the in-processing form late, after they already hold a seat.
+Put their rows in the same format, with the 4D each man holds now, and run:
+
+```bash
+DATABASE_URL=... COUGAR_ENC_KEY=... node scripts/profile-fill.mjs late-forms.csv            # preview
+DATABASE_URL=... COUGAR_ENC_KEY=... node scripts/profile-fill.mjs late-forms.csv --apply
+```
+
+Each row's name must be the name on that seat, or the run stops, so a 4D typed one digit off cannot put one man's next of kin on another.
+Only empty fields are filled: whatever a commander has since corrected in the app wins over the form (`--overwrite` lifts that).
+A full NRIC sets the man's registry digest if he has none yet.
+The preview runs every write and rolls it back, so it reports exactly what `--apply` will do.
+
+A man who is not seated at all yet is an enlistment, not a profile fill: see `--enlist` in [RESEAT.md](RESEAT.md).
 
 ## What to send back
 
