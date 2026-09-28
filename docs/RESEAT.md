@@ -90,6 +90,35 @@ as `swap`), and the same rev bump.
 The same two follow-ups apply afterwards: bump `STORAGE_KEY` and `?v=`, and
 re-issue invites for both men.
 
+## Moving a man to another section, and seating a late enlistee
+
+A man posted from one section to another, or a late enlistee joining one, is not a re-section: only two sections change, and nobody else should move.
+
+```bash
+node scripts/reseat.mjs --move "ALPHA TAN" 94                     # to platoon 9 section 4
+COUGAR_ENC_KEY=... node scripts/reseat.mjs --enlist late.csv       # seat late enlistees
+node scripts/reseat.mjs --move 7206 94 --enlist late.csv           # both, in ONE pass
+```
+
+Every section whose membership changes is re-dealt alphabetically: the section he leaves closes up behind him, as a departure does, and the one he joins opens a seat in name order.
+`--move` takes a 4D or an exact name, then a section written `94`, `9-4` or `P9S4`, and repeats.
+
+**Put every change into one run.**
+"Move a man out of 7-2" and "enlist a man into 7-2" run separately re-deal 7-2 twice, and the men below the vacated seat shuffle up and straight back down.
+Planned together, the final membership is dealt once, and a man only moves if his final seat differs from the one he holds now.
+
+`--enlist` takes a nominal-roll-format CSV (see [NOMINAL-ROLL.md](NOMINAL-ROLL.md)), one row per man, with his section as `Section` = `72`, or `Platoon` = `7` plus `Section` = `2`.
+Give `Rank` too; it defaults to `REC`.
+Keep the file outside this repository.
+
+**A late enlistee is often a returnee.**
+A man from an earlier intake (a BMT recruit posted in late, a re-course) has his history in the archive under a key like `1113@bmt`.
+The run looks for him there by exact name and, when it finds exactly one, carries his person-scoped history (medical, MSK, IPPT, route march, SOC, future appointments) onto the new seat by the same rules the changeover used, including closing a status that was still open at the cutoff.
+The archived originals stay where they are.
+A near miss blocks rather than enlisting him as a stranger; settle it with a `PID` column holding the archive key (`1113@bmt`), a registry pid, or `NEW`.
+
+Archived BMT rows carry no pid, and the `people` registry only knows men seated since intake 16, so the archive, not the registry, is where a BMT returnee is found.
+
 ## What it refuses to do
 
 The list must account for **the whole platoon, one-to-one**.

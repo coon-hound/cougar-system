@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 155;
+const APP_VERSION = 156;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 156,
+    date: "28 Sep 2026",
+    title: "Platoon 7 and 9 seating",
+    intro: "One man moved from section 7-2 to section 9-4, and a late enlistee from our BMT joined 7-2. Your phone drops its cached copy once on opening and pulls a fresh one, because a phone holding the old seating can write a record against a number that now belongs to somebody else.",
+    items: [
+      { t: "🔢 Three 4Ds in 9-4 moved down one", d: "Section 9-4 is numbered alphabetically, so the man joining it took a seat in the middle and the three after him each moved down by one. Their medical and IPPT records moved with them." },
+      { t: "🪖 The new man in 7-2 kept his BMT history", d: "His BMT medical and IPPT records came across, the same as for everyone who came through from BMT with the company. Nobody else in 7-2 changed number." },
+    ],
+  },
   {
     v: 155,
     date: "23 Sep 2026",

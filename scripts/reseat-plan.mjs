@@ -520,3 +520,177 @@ export function formatSwapReport(plan, { names = false } = {}) {
   L.push(plan.ok ? "READY" : "BLOCKED");
   return L.join("\n");
 }
+
+// ── Moving men between sections, and seating late enlistees ─────────────────
+//
+// A man posted from one section to another, and a late enlistee joining one,
+// are the same operation seen from the seat's side: a section's MEMBERSHIP
+// changes, and every section whose membership changed is re-dealt
+// alphabetically into seats 1..n - the section he leaves closes up behind him
+// (as a departure does) and the one he joins opens a seat in name order.
+//
+// They are planned TOGETHER, in one pass, on purpose. "Move A out of 7-2 and
+// enlist B into 7-2" run as two separate operations re-deals 7-2 twice: the men
+// below A's seat shuffle up and then straight back down, collecting a seat in
+// d4_history they never really held and an invite re-issue for nothing.
+// Computing the final membership first and dealing once means a man only moves
+// if his FINAL seat differs from the one he holds now.
+//
+// Men are named with resolveMan, the same strict matcher the swap and the
+// departure use: a 4D, or a name that resolves to exactly one roster row.
+
+const SECT_RE = /^([1-9])([1-9])$/;
+
+/**
+ * Parse a target section: "94", "9-4", "9/4" or "P9S4" all mean platoon 9,
+ * section 4. Returns "94", or "" when it is not a section.
+ */
+export function parseSect(raw) {
+  const s = String(raw ?? "").toUpperCase().replace(/^P/, "").replace(/[^0-9]/g, "");
+  return SECT_RE.test(s) ? s : "";
+}
+
+/**
+ * @param {object}   ctx
+ * @param {object[]} ctx.roster   current-intake roster rows { id, name, role, pid }
+ * @param {{who:string, to:string}[]} [ctx.moves]      existing men changing section
+ * @param {{name:string, to:string}[]} [ctx.enlistees] new men joining a section
+ * @returns {{ok, moves, inserts, sections, issues}}
+ *   moves   - existing men whose 4D changes: { oldId, newId, name, pid }
+ *   inserts - enlistees and the seat each is dealt: { newId, name, ref }
+ *             (ref is the enlistee object passed in, untouched)
+ */
+export function planTransfer({ roster, moves = [], enlistees = [] }) {
+  const issues = [];
+  const fail = () => ({ ok: false, moves: [], inserts: [], sections: [], issues });
+  const index = rosterIndex(roster);
+
+  if (!moves.length && !enlistees.length) {
+    issues.push({ level: "error", message: "nothing to do: no --move and no enlistee" });
+    return fail();
+  }
+
+  // ── 1. Resolve every existing man, exactly ──────────────────────────────
+  const destOf = new Map();  // id -> target section
+  for (const [n, mv] of moves.entries()) {
+    const side = `move ${n + 1}`;
+    const to = parseSect(mv.to);
+    if (!to) issues.push({ level: "error", message: `${side}: "${mv.to}" is not a section (want e.g. 94 for platoon 9 section 4)` });
+    const man = resolveMan(index, mv.who, side, issues);
+    if (!man || !to) continue;
+    if (destOf.has(man.id)) {
+      issues.push({ level: "error", message: `${side}: ${man.id} is already being moved by an earlier --move` });
+      continue;
+    }
+    if (man.id.slice(0, 2) === to) {
+      issues.push({ level: "error", message: `${side}: ${man.id} is already in section ${to[0]}-${to[1]}` });
+      continue;
+    }
+    destOf.set(man.id, to);
+  }
+
+  // ── 2. Enlistees must be new, and named once ────────────────────────────
+  //
+  // An enlistee whose name is already on the roster is almost always the same
+  // man entered twice (the form came in after he was seated by hand). Seating
+  // him again would split his records across two 4Ds, so it stops the run.
+  const seenNew = new Set();
+  const incoming = [];
+  for (const [n, e] of enlistees.entries()) {
+    const side = `enlistee ${n + 1}`;
+    const name = String(e.name ?? "").trim();
+    const to = parseSect(e.to);
+    if (!name) { issues.push({ level: "error", message: `${side}: no name` }); continue; }
+    if (!to) { issues.push({ level: "error", message: `${side}: "${e.to ?? ""}" is not a section (want e.g. 72)` }); continue; }
+    const key = nameKey(name);
+    const already = index.byKey.get(key) ?? [];
+    if (already.length) {
+      issues.push({
+        level: "error",
+        message: `${side}: already on the roster as ${already.map((m) => m.id).join(", ")}. ` +
+                 `Update that row instead of enlisting him again.`,
+      });
+      continue;
+    }
+    if (seenNew.has(key)) { issues.push({ level: "error", message: `${side}: listed twice` }); continue; }
+    seenNew.add(key);
+    incoming.push({ name, to, ref: e });
+  }
+
+  if (issues.some((i) => i.level === "error")) return fail();
+
+  // ── 3. Final membership of every section that changes ───────────────────
+  const touched = new Set([
+    ...[...destOf.entries()].flatMap(([id, to]) => [id.slice(0, 2), to]),
+    ...incoming.map((e) => e.to),
+  ]);
+
+  const layout = [];
+  const moved = [];
+  const inserts = [];
+  for (const sect of [...touched].sort()) {
+    const stay = index.members.filter((m) => m.id.slice(0, 2) === sect && !destOf.has(m.id));
+    const arrive = index.members.filter((m) => destOf.get(m.id) === sect);
+    const seats = [
+      ...[...stay, ...arrive].map((m) => ({ kind: "man", name: m.name, oldId: m.id, pid: m.pid ?? null })),
+      ...incoming.filter((e) => e.to === sect).map((e) => ({ kind: "new", name: e.name, ref: e.ref })),
+    ].sort((a, b) => a.name.localeCompare(b.name, "en"));
+
+    if (seats.length > 99) {
+      issues.push({ level: "error", message: `section ${sect} would have ${seats.length} men; a 4D has only two digits for the seat` });
+      continue;
+    }
+    const rows = seats.map((s, i) => {
+      const newId = `${sect}${pad2(i + 1)}`;
+      if (s.kind === "new") inserts.push({ newId, name: s.name, ref: s.ref });
+      else if (s.oldId !== newId) moved.push({ oldId: s.oldId, newId, name: s.name, pid: s.pid });
+      return { oldId: s.kind === "new" ? "" : s.oldId, newId, name: s.name };
+    });
+    layout.push({ sect, rows });
+  }
+  if (issues.some((i) => i.level === "error")) return fail();
+
+  // ── 4. Sanity: no two rows end on one seat ──────────────────────────────
+  //
+  // Final ids of the touched sections are unique by construction; the check
+  // that matters is against the men NOT being moved, whose seats must not be
+  // dealt to anybody else.
+  const finalIds = new Map(index.members.map((m) => [m.id, m.id]));
+  for (const m of moved) finalIds.set(m.oldId, m.newId);
+  const taken = [...finalIds.values(), ...inserts.map((i) => i.newId)];
+  if (new Set(taken).size !== taken.length) {
+    issues.push({ level: "error", message: "internal: two men were dealt the same 4D" });
+    return fail();
+  }
+
+  moved.sort((a, b) => a.newId.localeCompare(b.newId));
+  return { ok: true, moves: moved, inserts, sections: layout, issues };
+}
+
+export function formatTransferReport(plan, { names = false } = {}) {
+  const L = [];
+  const who = (n) => (names ? `  ${n}` : "");
+  L.push("─".repeat(72));
+  L.push("TRANSFER");
+  L.push("");
+  for (const s of plan.sections) {
+    L.push(`  SECTION ${s.sect[0]}-${s.sect[1]} — ${s.rows.length}`);
+    for (const r of s.rows) {
+      const mark = !r.oldId ? "  NEW" : r.oldId === r.newId ? "  (unchanged)" : `  <- ${r.oldId}`;
+      L.push(`    ${r.newId}${mark}${who(r.name)}`);
+    }
+    L.push("");
+  }
+  if (plan.ok) {
+    L.push(`  ${plan.moves.length} existing 4D(s) change, ${plan.inserts.length} enlistee(s) seated. Nobody else moves.`);
+    L.push("");
+  }
+  const errors = plan.issues.filter((i) => i.level === "error");
+  for (const e of errors) {
+    L.push(`  ✗ ${e.message}`);
+    for (const c of e.candidates ?? []) L.push(`      ${c.id}  ${(c.score * 100).toFixed(0)}%${names ? `  ${c.name}` : ""}`);
+    if (e.fix) L.push(`      did you mean: ${e.fix}`);
+  }
+  L.push(errors.length ? "\nBLOCKED. Nothing was written." : "READY");
+  return L.join("\n");
+}
