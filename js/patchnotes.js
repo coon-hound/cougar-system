@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 159;
+const APP_VERSION = 160;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 160,
+    date: "1 Oct 2026",
+    title: "Act on someone straight from their page",
+    intro: "Open anyone from search or a list and you can log for them without picking them again.",
+    items: [
+      { t: "✚ Report Sick and ◷ Appointment", d: "Both buttons sit under the in-camp status on a person's page and open the form with that person already chosen." },
+      { t: "🧹 Tidier pop-ups", d: "The title bar of every pop-up no longer covers the first line under it." },
+    ],
+  },
   {
     v: 159,
     date: "1 Oct 2026",

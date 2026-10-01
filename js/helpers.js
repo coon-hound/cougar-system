@@ -1275,7 +1275,8 @@ const conductScopeBadge = v => {
   const col = conductScopeColor(v);
   return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${conductScopeLabel(v)}</span>`;
 };
-const statusBadge = s => badge(s, s === "Active" ? "green" : s === "Warded" ? "red" : "orange");
+// A blank status renders nothing, never the word "undefined".
+const statusBadge = s => s ? badge(s, s === "Active" ? "green" : s === "Warded" ? "red" : "orange") : "";
 const typeBadge = t => badge(t, t === "RSI" ? "orange" : t === "Injury" ? "red" : "yellow");
 const awardBadge = s => { const a = getAward(s); const c = { "Gold★": "purple", Gold: "yellow", Silver: "accent", Pass: "green", Fail: "red", "N/A": "accent" }; return badge(a, c[a] || "accent"); };
 const pct = (a, b) => b ? Math.round(a / b * 100) : 0;

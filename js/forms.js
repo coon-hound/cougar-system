@@ -22,7 +22,7 @@ function openPerson(d4) {
   let html = p.role === "Commander"
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander · ${getPlt(p) ? "PL " + getPlt(p) : "COY HQ"}${p.status ? ` — ${statusBadge(p.status)}` : ""}
         <button class="btn btn-icon" style="margin-left:6px" onclick="openCommanderForm('${p.id}')" title="Edit commander (rank, name, platoon)">✎</button></div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} — ${statusBadge(p.status)}</div>`;
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id}${p.status ? ` — ${statusBadge(p.status)}` : ""}</div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ────────
   // Reflects the shared out-of-camp computation. The lever is state-specific:
@@ -46,6 +46,16 @@ function openPerson(d4) {
       ? `<span style="font-size:10px;color:var(--dim)">(via ${campInfo.kind} record)</span>`
       : forcedInHere ? `<span style="font-size:10px;color:var(--dim)">(would be out: ${escapeAttr(forcedInHere.reason || "")}; resets tomorrow)</span>` : ""}
     ${campBtn}
+  </div>`;
+
+  // The forms people most often open right after looking someone up, with the
+  // man already chosen. Usage data (Sep 2026) had 619 person opens and 251
+  // picks of a soldier in the very next form's 4D dropdown.
+  const act = (fn, tel, ico, label) =>
+    `<button type="button" class="quick-act" data-tel="person:${tel}" onclick="${fn}"><span class="quick-ico" aria-hidden="true">${ico}</span><span>${label}</span></button>`;
+  html += `<div class="quick-acts person-acts">
+    ${act(`openMedicalForm('', { d4: '${d4}' })`, "report_sick", "✚", "Report Sick")}
+    ${act(`openAppointmentForm('', { d4: '${d4}' })`, "appointment", "◷", "Appointment")}
   </div>`;
 
   // ── Profile section ──────────────────────────────────
@@ -483,7 +493,9 @@ function medExtraStatusChanged(sel) {
   if (wrap) wrap.style.display = sel.value === "__new__" ? "flex" : "none";
 }
 
-function openMedicalForm(id) {
+function openMedicalForm(id, prefill) {
+  // `prefill` ({ d4 }) is only honored for a new entry - the person sheet opens
+  // this with the man already chosen, so the 4D is not picked twice.
   const e = id ? STATE.medical.find(x => x.id === id) : null;
   const dateVal = e ? displayDateToISO(e.date) || todayISO() : todayISO();
   const startVal = e ? displayDateToISO(e.startDate) || dateVal : todayISO();
@@ -495,7 +507,7 @@ function openMedicalForm(id) {
       <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
       <div style="display:flex;flex-direction:column;gap:10px">
         ${e ? editHint : ""}
-        <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
+        <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || prefill?.d4 || "")}</div>
         ${formField("f-date", "Date Reported Sick", "date", "", `required value="${dateVal}" min="2020-01-01" max="2099-12-31"`)}
         ${formField("f-reason", "Reason", "text", "Fever, sore throat...", `required maxlength="200" value="${escapeAttr(e?.reason)}"`)}
         ${formField("f-location", "Location (only if reported sick outside)", "text", "e.g. Lim Clinic and Surgery", `maxlength="200" value="${escapeAttr(e?.location)}"`)}

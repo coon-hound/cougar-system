@@ -315,7 +315,11 @@ tbody tr:last-child td{border-bottom:none}
    doesn't bleed through. ::before is the mobile drag handle (see media query);
    it lives on the header, not .modal, because .modal is the scroll container
    and a handle drawn there would scroll away. */
-.modal-header{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-22px -24px 16px;padding:20px 24px 12px;background:var(--surface);border-bottom:1px solid var(--border);border-radius:var(--r4) var(--r4) 0 0}
+/* Sticky `top` is measured from the scroll box's padding edge, so it must be
+   minus the .modal's top padding. At top:0 the header sat 22px (20px on a
+   phone) lower than its own negative margin put it, and covered the first 6px
+   of every sheet - the person sheet's rank / 4D line was cut through. */
+.modal-header{position:sticky;top:-22px;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-22px -24px 16px;padding:20px 24px 12px;background:var(--surface);border-bottom:1px solid var(--border);border-radius:var(--r4) var(--r4) 0 0}
 .modal-header h3{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);min-width:0}
 .modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;min-width:36px;min-height:36px;line-height:1;border-radius:var(--rp);flex-shrink:0;transition:color var(--d2) var(--ez),background-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
 .modal-close:active{transform:scale(.9)}
@@ -335,6 +339,7 @@ tbody tr:last-child td{border-bottom:none}
 /* Dashboard quick actions: the three most-opened forms, one tap from landing. */
 .quick-acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 14px}
 .quick-act{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);color:var(--text);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.person-acts{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:12px}
 .quick-act>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quick-ico{color:var(--accent);font-size:14px;line-height:1}
 .quick-act:active{transform:scale(.97)}
@@ -678,6 +683,9 @@ button.dty-slot{cursor:pointer}
      gutters, so a wider cell would push the last day off-screen. */
   .dty-seg button,.seg button{min-height:44px;font-size:12.5px}
   .quick-act{flex-direction:column;gap:5px;min-height:58px;font-size:12px}
+  /* On the person sheet they are secondary to the record itself: one line. */
+  .person-acts .quick-act{flex-direction:row;gap:8px;min-height:46px;font-size:13px}
+  .person-acts .quick-ico{font-size:15px}
   .quick-ico{font-size:17px}
   .dty-daynav button{min-height:50px}
   .dty-daylabel{font-size:14px}
@@ -812,7 +820,7 @@ button.dty-slot{cursor:pointer}
      are the real dismissals. */
   .modal-overlay{padding:0;align-items:flex-end;justify-content:center}
   .modal,.modal.wide{max-width:100%;width:100%;max-height:92vh;max-height:92dvh;height:auto;border-radius:var(--r4) var(--r4) 0 0;padding:20px 16px calc(28px + env(safe-area-inset-bottom,0));border-bottom:none;border-left:none;border-right:none;animation:sheet-in var(--d4) var(--spring) both}
-  .modal-header{margin:-20px -16px 14px;padding:22px 16px 11px;border-radius:var(--r4) var(--r4) 0 0}
+  .modal-header{top:-20px;margin:-20px -16px 14px;padding:22px 16px 11px;border-radius:var(--r4) var(--r4) 0 0}
   .modal-header::before{content:"";position:absolute;top:8px;left:50%;width:38px;height:4px;margin-left:-19px;border-radius:var(--rp);background:var(--surface3)}
   .modal-header h3{font-size:16px}
 
