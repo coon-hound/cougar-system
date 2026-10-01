@@ -41,6 +41,16 @@ There is no reliable way to tell a UI label from a soldier's name after the fact
 `class` and `id` in this codebase are static markup (`.nav-btn`, `.role-btn`, `#pull-btn`) and carry no data, which makes the descriptor both deterministic and provably clean.
 Anything that needs a friendlier label should carry an explicit `data-tel`.
 
+**Second correction, from the first two weeks of production data:** 12% of all clicks landed in anonymous buckets (`button.btn`, `select`, `input`), so the resolver now does four more things.
+
+- A leading `event.stopPropagation();` is skipped and the handler after it is named, because every row-action button (undo book-out, mark present, edit, delete) opens with one.
+- A form control is suffixed with the job it belongs to: the `<form onsubmit>` handler, else the open task key (`select#f-d4/submitMedical`, `button.btn#f-bo-submit/book_out`), and a submit button is `submit:<handler>`.
+  Without this, the 4D picker was one bucket shared by every form.
+- A field with no id is named by its `onchange`/`oninput` handler.
+- A tap on a `<label>` that labels a control records nothing, because the browser forwards it to the control as a second click (checkbox, input and select alike, verified in Chromium) and both used to count.
+
+The report menu entries carry `data-tel="report:FP"` and so on, because the report type is an argument and arguments are never read.
+
 The guard is an **allow-list, not a deny-list**.
 `scrubName` first deletes any run of two or more digits (a 4D, a date, a phone number - no handler name in this codebase contains a digit at all).
 `isSafeName` then admits only single identifier-shaped tokens: `submitBookOut`, `nav:roster`, `role:Commander`, `button.btn#pull-btn`, `book_out`.

@@ -243,12 +243,12 @@ function renderDashboard(el) {
         <div class="dropdown-wrapper" style="flex:0 0 auto">
           <button class="btn btn-primary" onclick="toggleReportMenu(event)">Generate Report ▾</button>
           <div id="report-menu" class="dropdown-menu hidden">
-            <button type="button" onclick="openReportModal('FP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◱</span>First Parade State</button>
-            <button type="button" onclick="openReportModal('LP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◳</span>Last Parade State</button>
-            <button type="button" onclick="openReportModal('MED'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">✚</span>Medical Status List</button>
-            <button type="button" onclick="openReportModal('MSK'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⊕</span>MSK Report</button>
-            <button type="button" onclick="openReportModal('CONDUCT'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">▤</span>Per-Conduct Chat Format</button>
-            <button type="button" onclick="openCompareModal(); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⇄</span>Compare Parade States</button>
+            <button type="button" data-tel="report:FP" onclick="openReportModal('FP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◱</span>First Parade State</button>
+            <button type="button" data-tel="report:LP" onclick="openReportModal('LP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◳</span>Last Parade State</button>
+            <button type="button" data-tel="report:MED" onclick="openReportModal('MED'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">✚</span>Medical Status List</button>
+            <button type="button" data-tel="report:MSK" onclick="openReportModal('MSK'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⊕</span>MSK Report</button>
+            <button type="button" data-tel="report:CONDUCT" onclick="openReportModal('CONDUCT'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">▤</span>Per-Conduct Chat Format</button>
+            <button type="button" data-tel="report:compare" onclick="openCompareModal(); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⇄</span>Compare Parade States</button>
           </div>
         </div>
       </div>
