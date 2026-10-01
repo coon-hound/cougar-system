@@ -38,6 +38,32 @@ const TELEMETRY = (function () {
   const FLUSH_MS = 60000;          // timer flush cadence
   const NAME_CAP = 48;             // max characters in any recorded name
 
+  // First day whose task OUTCOMES can be believed.
+  //
+  // Before this, closeModal ended every task as an abandonment, so a submit
+  // that succeeded and a form someone backed out of were filed identically —
+  // see the closeModal hook below. The counters from that window are not
+  // recoverable: the split between the two is simply not in the data, and the
+  // audit trail cannot supply it either, because one bulk book-out writes
+  // dozens of rows and one medical edit writes one.
+  //
+  // What IS still sound from that window is everything the bug never touched:
+  // starts, total clicks, dwell, and the count of ENDED sessions (both
+  // outcomes were counted, just under the wrong name). So the click-cost
+  // ranking — the entire point of this feature — reads those days normally,
+  // and only the completed/abandoned split is withheld.
+  //
+  // Set this to the first FULL day on which every device is running the fixed
+  // collector, which is the day AFTER the deploy lands - not the day of it.
+  // The uniform `?v=` bump forces the reload, but it forces it whenever each
+  // phone next opens the app, so the deploy day itself is always a mix of
+  // rows from both collectors and cannot be trusted as a whole.
+  //
+  // If this merge slips past its intended date, move this with it. A cutoff
+  // set earlier than the deploy silently certifies inverted data as measured,
+  // which is the failure this whole constant exists to prevent.
+  const OUTCOMES_VALID_FROM = "2026-10-02";
+
   // ── The task registry ─────────────────────────────────────────────────────
   //
   // A task is a named unit of intent with a start and a terminal. These names
@@ -48,6 +74,14 @@ const TELEMETRY = (function () {
   //
   // `start: null` means an instant task: a one-tap action with no funnel, so
   // it is always a completed task of cost 1.
+  //
+  // `keepsModalOpen: true` marks the few terminals that finish their job
+  // WITHOUT closing the modal — you can copy a report twice without reopening
+  // it. That distinction decides how a clean return is read: for these, it is
+  // the finish; for every other terminal, a return that closed nothing means
+  // the submit bailed out on a validation error and the form is still up. The
+  // unit suite checks each flag against the function's own source, so the two
+  // cannot drift apart silently.
   const TASKS = {
     book_out:        { start: "openBookOutForm",        done: "submitBookOut",        label: "Book Out" },
     book_in:         { start: null,                     done: "markPresentToday",     label: "Book In" },
@@ -59,12 +93,12 @@ const TELEMETRY = (function () {
     attendance:      { start: "openAttendanceForm",     done: "submitAttendance",     label: "Attendance" },
     conduct_detail:  { start: "openConductDetailForm",  done: "submitConductDetail",  label: "Conduct Detail" },
     ippt_entry:      { start: "openIPPTForm",           done: "submitIPPT",           label: "IPPT Entry" },
-    report:          { start: "openReportModal",        done: "copyReportToClipboard", label: "Generate Report" },
-    parade_compare:  { start: "openCompareModal",       done: "copyCompareSummary",   label: "Compare Parade States" },
+    report:          { start: "openReportModal",        done: "copyReportToClipboard", keepsModalOpen: true, label: "Generate Report" },
+    parade_compare:  { start: "openCompareModal",       done: "copyCompareSummary",   keepsModalOpen: true, label: "Compare Parade States" },
     person_lookup:   { start: null,                     done: "openPerson",           label: "Person Lookup" },
     groups:          { start: "openGroupsForm",         done: "submitGroupNames",     label: "Edit Groups" },
     group_members:   { start: "openGroupMembersForm",   done: "submitGroupMembers",   label: "Group Members" },
-    combined_group:  { start: "openCombinedForm",       done: "submitCombined",       label: "Combined Group" },
+    combined_group:  { start: "openCombinedForm",       done: "submitCombined",       keepsModalOpen: true, label: "Combined Group" },
     commander:       { start: "openCommanderForm",      done: "submitCommander",      label: "Add Commander" }
   };
 
@@ -273,8 +307,41 @@ const TELEMETRY = (function () {
   // bubble listener would miss every click inside a modal — which is exactly
   // where the expensive multi-step tasks live.
 
+  // The leading function name of an inline handler — the single most useful
+  // signal in this codebase, since nearly every handler is an inline attribute.
+  // The regex stops at the "(" so an argument can never be captured, and an
+  // identifier cannot start with a digit, so a 4D cannot be the match.
+  //
+  // A leading `event.stopPropagation();` is plumbing, not intent: every
+  // row-action button opens with one so the tap does not also open the row
+  // underneath. Read as-is it matched nothing, and those buttons (undo a
+  // book-out, mark present, edit, delete) all collapsed into one anonymous
+  // "button.btn" — the largest unlabelled bucket in production. So skip the
+  // plumbing and name what it is guarding.
+  const PLUMBING_RE = /^\s*(?:event\.(?:stopPropagation|preventDefault)\(\)\s*;\s*)+/;
+  function handlerName(code) {
+    if (!code) return "";
+    const m = /^\s*([A-Za-z_$][\w$]*)\s*\(/.exec(String(code).replace(PLUMBING_RE, ""));
+    return m ? m[1].slice(0, NAME_CAP) : "";
+  }
+
+  // Which job a control belongs to: the submit handler of its <form>, else the
+  // task in progress. Without this, `select#f-d4` was one bucket shared by every
+  // form that picks a soldier, and "which forms make people pick the same man
+  // twice" could not be answered.
+  function contextFor(el) {
+    for (let p = el && el.parentElement, d = 0; p && d < 40; p = p.parentElement, d++) {
+      if (String(p.tagName || "").toLowerCase() !== "form") continue;
+      const h = handlerName(typeof p.getAttribute === "function" ? p.getAttribute("onsubmit") : "");
+      if (h) return h;
+      break;
+    }
+    return openTask ? openTask.key : "";
+  }
+
   // Resolve a click to a stable descriptor, cheapest signal first. NEVER reads
-  // an element's `.value` and NEVER reads an onclick's arguments.
+  // an element's `.value` and NEVER reads an onclick's arguments. Returns null
+  // for a click that is not worth recording.
   function descriptorFor(target) {
     let el = target;
     for (let depth = 0; el && depth < 8; depth++, el = el.parentElement) {
@@ -283,17 +350,8 @@ const TELEMETRY = (function () {
       const tel = el.getAttribute("data-tel");
       if (tel) return scrubName(tel);
 
-      // The leading function name of the inline handler — the single most
-      // useful signal in this codebase, since all ~176 handlers are inline
-      // onclick attributes. The regex stops at the "(" so an argument can
-      // never be captured, and an identifier cannot start with a digit, so a
-      // 4D cannot be the match. "event.stopPropagation()" does not match
-      // (there is a "." before the paren) and correctly falls through.
-      const oc = el.getAttribute("onclick");
-      if (oc) {
-        const m = /^\s*([A-Za-z_$][\w$]*)\s*\(/.exec(oc);
-        if (m) return m[1].slice(0, NAME_CAP);
-      }
+      const oc = handlerName(el.getAttribute("onclick"));
+      if (oc) return oc;
 
       const nav = el.getAttribute("data-nav");
       if (nav) return "nav:" + scrubName(nav);
@@ -302,7 +360,15 @@ const TELEMETRY = (function () {
       if (role !== null && role !== undefined) return "role:" + (scrubName(role) || "all");
 
       const tag = String(el.tagName || "").toLowerCase();
-      if (tag === "button" || tag === "a" || tag === "select" || tag === "input" || tag === "label") {
+      if (tag === "label" && el.control) {
+        // The browser answers a tap on a label by dispatching a SECOND click on
+        // the control it labels (checkbox, text input and select alike — checked
+        // in Chromium), which this listener also sees. Recording both counted
+        // one tap twice, inflating every task with a ticked box in it. Let the
+        // control's own click be the record.
+        return null;
+      }
+      if (tag === "button" || tag === "a" || tag === "select" || tag === "input" || tag === "textarea" || tag === "label") {
         // Semantic fallback, from MARKUP ONLY: tag, first class, and the
         // element id. Deliberately NOT the element's text.
         //
@@ -315,10 +381,19 @@ const TELEMETRY = (function () {
         // markup (.nav-btn, .role-btn, #pull-btn) and carry no data, which
         // makes the descriptor deterministic AND provably clean. Anything that
         // genuinely needs a friendlier label should carry data-tel.
+        const ctx = contextFor(el);
+        if (tag === "button" && String(el.getAttribute("type") || "").toLowerCase() === "submit" && ctx) {
+          return "submit:" + ctx;
+        }
         const cls = String(el.className || "").split(/\s+/).filter(Boolean)[0] || "";
         const id = String(el.getAttribute("id") || "");
-        const d = tag + (cls ? "." + cls : "") + (id ? "#" + id : "");
-        return scrubName(d) || tag;
+        // A field with no id is still named by what it calls when it changes.
+        const change = id ? "" : handlerName(el.getAttribute("onchange") || el.getAttribute("oninput"));
+        const tail = (id ? "#" + id : "") + (change ? ":" + change : "") + (ctx ? "/" + ctx : "");
+        // The class is the weakest part, so it is the part that goes when a
+        // handler already names the field or the whole would overrun the cap.
+        const withCls = tag + (cls && !change ? "." + cls : "") + tail;
+        return scrubName(withCls.length <= NAME_CAP ? withCls : tag + tail) || tag;
       }
     }
     return null;
@@ -336,6 +411,13 @@ const TELEMETRY = (function () {
   // ── Layer 2: task funnels ─────────────────────────────────────────────────
 
   let openTask = null;   // { key, t0, clicks }
+
+  // How many `done` terminals are currently executing. Every submit in this
+  // app closes its own modal on the way out, so closeModal firing while this
+  // is non-zero is the SUCCESS signal, not a give-up. Async submits keep it
+  // raised until their promise settles, which is when their wrapper's `after`
+  // runs, so the sync and async paths need no special-casing.
+  let doneDepth = 0;
 
   // `clicks` starts at 1, not 0: the tap that opened the form is part of what
   // the task cost. The capture listener runs BEFORE the inline handler, so at
@@ -402,17 +484,43 @@ const TELEMETRY = (function () {
         const instant = !spec.start;
         const ok = wrapGlobal(
           scope, spec.done,
-          instant ? () => beginTask(key) : null,
-          (success) => endTask(success ? "completed" : "error")
+          () => { if (instant) beginTask(key); doneDepth += 1; },
+          (success) => {
+            doneDepth = Math.max(0, doneDepth - 1);
+            // A terminal that closed its own modal has already been recorded
+            // as completed, by the closeModal hook below.
+            if (!openTask) return;
+            if (!success) { endTask("error"); return; }
+            // It returned cleanly having closed nothing. For an instant task
+            // and for the keepsModalOpen terminals that IS the finish. For
+            // anyone else it is a validation bail-out — `alert(...); return;`
+            // with the form still on screen — so the task is still running and
+            // the next thing to happen to it decides its outcome.
+            if (instant || spec.keepsModalOpen) endTask("completed");
+          }
         );
         if (!ok) missing.push(spec.done);
       }
     }
-    // A closing modal with a task still open is an abandonment — a form people
-    // open and back out of is a form with a problem, and that is as interesting
-    // as click cost. The `done` wrappers detach the task BEFORE the original
-    // runs, so a submit that closes its own modal is never miscounted here.
-    wrapGlobal(scope, "closeModal", () => { if (openTask) endTask("abandoned"); }, null);
+    // closeModal is the terminal for nearly every task in this app, and which
+    // outcome it means depends entirely on who called it.
+    //
+    // Called from inside a `done` terminal, it is the submit finishing: the
+    // record is written and the form is being torn down. Called from anywhere
+    // else — the ✕, the backdrop, Escape — the form is being walked away from,
+    // and a form people open and back out of is a form with a problem, which
+    // is as interesting as click cost.
+    //
+    // This used to read `abandoned` unconditionally, on the stated assumption
+    // that the `done` wrappers detached the task before the original ran. They
+    // did not: `after` runs once the original RETURNS, so every successful
+    // submit closed its own modal first and was filed as a give-up, while the
+    // completion that followed found no open task and was dropped. Seven days
+    // of production data came back 0% completion on every modal form.
+    wrapGlobal(scope, "closeModal", () => {
+      if (!openTask) return;
+      endTask(doneDepth > 0 ? "completed" : "abandoned");
+    }, null);
     return missing;
   }
 
@@ -542,9 +650,12 @@ const TELEMETRY = (function () {
         v.opens += d.views[n].n; v.ms += d.views[n].ms;
       }
       for (const n of Object.keys(d.tasks || {})) {
-        const t = tasks[n] || (tasks[n] = { starts: 0, done: 0, aban: 0, clicks: 0, ms: 0 });
+        const t = tasks[n] || (tasks[n] = { starts: 0, done: 0, aban: 0, clicks: 0, ms: 0, stale: 0 });
         const s = d.tasks[n];
         t.starts += s.starts; t.done += s.done; t.aban += s.aban; t.clicks += s.clicks; t.ms += s.ms;
+        // Ended sessions from the pre-fix window, whose outcome was recorded
+        // but whose outcome cannot be believed.
+        if (day < OUTCOMES_VALID_FROM) t.stale += (s.done || 0) + (s.aban || 0);
       }
     }
 
@@ -573,14 +684,19 @@ const TELEMETRY = (function () {
     const spec = TASKS[key] || {};
     const ended = (c.done || 0) + (c.aban || 0);
     const avgClicks = ended ? +(c.clicks / ended).toFixed(1) : 0;
-    const abandonRate = ended ? +((c.aban / ended) * 100).toFixed(0) : 0;
+    // An outcome recorded before the funnel was fixed says nothing, so the
+    // rate is withheld rather than shown as a number that reads as measured.
+    // `ended`, and therefore avgClicks and cost, stay valid either way.
+    const outcomesKnown = !(c.stale > 0);
+    const abandonRate = !outcomesKnown ? null : (ended ? +((c.aban / ended) * 100).toFixed(0) : 0);
     return {
       key,
       label: spec.label || key,
       starts: c.starts || 0,
-      completed: c.done || 0,
-      abandoned: c.aban || 0,
+      completed: outcomesKnown ? (c.done || 0) : null,
+      abandoned: outcomesKnown ? (c.aban || 0) : null,
       ended,
+      outcomesKnown,
       avgClicks,
       abandonRate,
       avgMs: ended ? Math.round((c.ms || 0) / ended) : 0,
@@ -604,7 +720,7 @@ const TELEMETRY = (function () {
     for (const t of ranked) {
       const frequent = t.starts >= Math.max(2, medFreq);
       const expensive = t.avgClicks >= Math.max(3, medCost);
-      const leaky = t.ended >= 3 && t.abandonRate >= 30;
+      const leaky = t.outcomesKnown !== false && t.ended >= 3 && t.abandonRate >= 30;
       if (!frequent && !leaky) continue;
       let verdict, why;
       // Leak first. A form a third of people back out of is a broken form, and
@@ -717,7 +833,7 @@ const TELEMETRY = (function () {
     }, false),
     // Pure internals — exposed so the unit suite can hold them directly.
     scrubName, isSafeName, deviceIdFrom, pruneBuffer, pruneDays, aggregate, rowsFrom,
-    descriptorFor, emptyStore, KEY, BUF_CAP, DAY_CAP,
+    descriptorFor, emptyStore, KEY, BUF_CAP, DAY_CAP, OUTCOMES_VALID_FROM,
     _install: install,
     _wrapGlobal: wrapGlobal,
     _record: record,

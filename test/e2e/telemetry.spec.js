@@ -24,6 +24,10 @@ const { seedAndGoto } = require("./support");
 
 const USAGE_KEY = "cougar-usage-v1";
 
+// The first day whose task outcomes count. Read from the collector itself, so
+// moving the cutoff to the real ship date never strands a pinned clock below.
+const { OUTCOMES_VALID_FROM } = require("../../js/telemetry.js");
+
 // index.html does not yet carry the two new <script> tags (the nav entry and
 // the render() dispatch case are wired separately). Injecting them when they
 // are absent makes this spec pass both before and after that wiring, and it
@@ -208,6 +212,11 @@ test("the insights view is honest when there is nothing to show", async ({ page 
 test("the insights view ranks cost and states a recommendation", async ({ page }) => {
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
+  // Pin the page clock past OUTCOMES_VALID_FROM. Task outcomes are withheld for
+  // days recorded before the funnel fix, so without this the leak verdict below
+  // would depend on what day the suite happens to run — passing tomorrow and
+  // failing today. Timers still run on real time; only the date is fixed.
+  await page.clock.setFixedTime(new Date(OUTCOMES_VALID_FROM + "T09:00:00Z"));
   await gotoWithTelemetry(page);
 
   // Real usage, recorded through the real collector: open and abandon Book Out
@@ -238,5 +247,139 @@ test("the insights view ranks cost and states a recommendation", async ({ page }
   await expect(content.locator(".role-btn", { hasText: "Company" })).toBeVisible();
 
   await page.screenshot({ path: "test-results/telemetry.png", fullPage: true });
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("a successful submit counts as completed, not abandoned", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  await gotoWithTelemetry(page);
+
+  // The whole point of the funnel is to tell a finished job from an abandoned
+  // one. Every submit in this app closes its own modal on the way out, so if
+  // closeModal is what ends the task, a success is indistinguishable from a
+  // give-up — and the click-cost ranking is built on exactly that distinction.
+  await page.evaluate(() => openBookOutForm({ d4: "1401" }));
+  await expect(page.locator("#modal-overlay")).toBeVisible();
+  await page.locator("#f-bo-submit").click();
+  await expect(page.locator("#modal-overlay")).toBeHidden();
+
+  const task = await page.evaluate(() => {
+    const days = TELEMETRY.localDays();
+    for (const d of Object.values(days)) if (d.tasks.book_out) return d.tasks.book_out;
+    return null;
+  });
+  expect(task).not.toBeNull();
+  expect(task.starts).toBe(1);
+  expect(task.done).toBe(1);
+  expect(task.aban).toBe(0);
+
+  // The record really landed. Worth asserting: bookOutToggle no-ops silently
+  // on an id that is not on the roster, and a submit that wrote nothing would
+  // otherwise still close its modal and report itself completed.
+  const isOut = await page.evaluate(() => !!outOfCampMap(todayISO()).get("1401"));
+  expect(isOut).toBe(true);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("a submit that fails validation is not counted as completed", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  page.on("dialog", (d) => d.accept());
+  await gotoWithTelemetry(page);
+
+  // Bailing out on a missing field leaves the modal open and nothing saved.
+  // That is not a completed task, and counting it as one would hide precisely
+  // the forms that are hardest to fill in.
+  await page.evaluate(() => openBookOutForm({}));
+  await expect(page.locator("#modal-overlay")).toBeVisible();
+  await page.locator("#f-bo-submit").click();
+  await expect(page.locator("#modal-overlay")).toBeVisible();
+
+  const afterBail = await page.evaluate(() => {
+    const days = TELEMETRY.localDays();
+    for (const d of Object.values(days)) if (d.tasks.book_out) return d.tasks.book_out;
+    return null;
+  });
+  expect(afterBail.done).toBe(0);
+  expect(afterBail.aban).toBe(0, "still in the form, so neither finished nor given up");
+
+  // Giving up afterwards is the abandonment, and it is counted once.
+  await page.locator(".modal-close").click();
+  await expect(page.locator("#modal-overlay")).toBeHidden();
+  const afterClose = await page.evaluate(() => {
+    const days = TELEMETRY.localDays();
+    for (const d of Object.values(days)) if (d.tasks.book_out) return d.tasks.book_out;
+    return null;
+  });
+  expect(afterClose.done).toBe(0);
+  expect(afterClose.aban).toBe(1);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("outcomes recorded before the funnel fix render as not measured", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  // A day inside the broken window. The same three abandoned Book Outs that
+  // produce a leak verdict above must not produce one here, because back then
+  // a successful submit and a give-up were recorded identically.
+  await page.clock.setFixedTime(new Date("2026-09-16T09:00:00Z"));
+  await gotoWithTelemetry(page);
+
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(() => openBookOutForm({}));
+    await page.locator('.modal [onclick^="setBookOutMode("]').first().click();
+    await page.locator(".modal-close").click();
+  }
+
+  await page.evaluate(() => renderUsage(document.getElementById("content")));
+  const content = page.locator("#content");
+
+  await expect(content).toContainText("not measured");
+  await expect(content).not.toContainText("the form is losing people");
+  // The click cost is unaffected by the bug and must still be ranked and shown.
+  await expect(content).toContainText("Book Out");
+  await expect(content).toContainText("Clicks per task");
+  const taps = await content.locator("table tbody tr", { hasText: "Book Out" }).first().innerText();
+  expect(taps).toMatch(/\d/);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("row buttons, submits, fields and labels resolve to what was tapped", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  await gotoWithTelemetry(page);
+  const features = () => page.evaluate(() => {
+    const out = {};
+    for (const d of Object.values(TELEMETRY.localDays())) {
+      for (const [n, c] of Object.entries(d.features)) out[n] = (out[n] || 0) + c;
+    }
+    return out;
+  });
+
+  // A form field and a wrapping checkbox label, inside the medical form.
+  await page.evaluate(() => openMedicalForm());
+  // selectOption alone sets the value without a tap; a person taps first.
+  await page.locator("#f-status").click();
+  await page.locator("#f-status").selectOption("__new__");
+  await page.locator("label:has(#f-custom-participates)").click();
+  let f = await features();
+  expect(f["select#f-status/submitMedical"], JSON.stringify(f)).toBe(1);
+  // One tap on the label is one record, filed under the control it ticks.
+  expect(f["input#f-custom-participates/submitMedical"]).toBe(1);
+  expect(Object.keys(f).filter((n) => n.startsWith("label"))).toEqual([]);
+  await page.evaluate(() => closeModal());
+
+  // A report menu entry names the report.
+  await page.locator('[onclick^="toggleReportMenu("]').click();
+  await page.locator('[data-tel="report:FP"]').click();
+  f = await features();
+  expect(f["report:FP"]).toBe(1);
+  await page.evaluate(() => closeModal());
+
+  expect(Object.keys(f).every((n) => !/\d/.test(n)), JSON.stringify(f)).toBe(true);
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });

@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 161;
+const APP_VERSION = 157;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,46 +21,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 161,
+    v: 157,
     date: "1 Oct 2026",
-    title: "Picking people, faster",
-    intro: "Choosing who you mean takes fewer taps everywhere.",
+    title: "Fewer taps for the things you do most",
+    intro: "We counted where everyone taps, then moved the most-used things closer and the rarely-used ones out of the way.",
     items: [
-      { t: "☑ Tick several fall-outs at once", d: "In Log Conduct, + Add people opens a checklist of everyone in the conduct's scope. Tick everyone who fell out or reported sick, give them one reason if it is the same, and add them all together. You can still edit each row afterwards." },
-      { t: "⌨ Type to find someone", d: "Every person dropdown in a form has a small box beside it. Type a 4D or part of a name to narrow the list, and if only one person matches they are picked for you." },
-    ],
-  },
-  {
-    v: 160,
-    date: "1 Oct 2026",
-    title: "Act on someone straight from their page",
-    intro: "Open anyone from search or a list and you can log for them without picking them again.",
-    items: [
-      { t: "✚ Report Sick and ◷ Appointment", d: "Both buttons sit under the in-camp status on a person's page and open the form with that person already chosen." },
-      { t: "🧹 Tidier pop-ups", d: "The title bar of every pop-up no longer covers the first line under it." },
-    ],
-  },
-  {
-    v: 159,
-    date: "1 Oct 2026",
-    title: "The dashboard does more in one tap",
-    intro: "The things you open most now start from the dashboard.",
-    items: [
-      { t: "📋 Parade state in one tap", d: "The report button now opens First Parade in the morning and Last Parade from noon. Tap ▾ beside it for every other report." },
-      { t: "⚡ Report Sick, Book Out, Log Conduct", d: "Three buttons under the strength numbers open these forms straight away." },
-      { t: "↻ Re-push moved to Sync & I/O", d: "The green Re-push all buttons are gone from each page. Every edit already saves on its own. If a table ever needs repairing, Sync & I/O has a Re-push button for each one." },
-    ],
-  },
-  {
-    v: 158,
-    date: "1 Oct 2026",
-    title: "Fewer taps to get around",
-    intro: "We counted where everyone taps. Most switches between views went through the ☰ menu, which cost an extra tap every time. On a phone the four views you open most now sit along the bottom of the screen.",
-    items: [
-      { t: "📱 Bottom bar", d: "Dashboard, Medical, Attendance and Roster are one tap from anywhere. Everything else is under More, grouped into Daily, Records and System." },
-      { t: "🔎 Search shows who matched", d: "Results drop down under the search bar with the 4D and the name, so a search by name tells you who you found. The search bar also has its full width back." },
-      { t: "✚ MSK Analytics moved into Medical", d: "Open Medical and switch between the Report Sick Log and MSK Analytics at the top." },
-      { t: "● Tap the sync dot for Sync & I/O", d: "The green dot at the top right now opens Sync & I/O. When it is red, a tap still retries saving." },
+      { t: "📱 Bottom bar", d: "On a phone, Dashboard, Medical, Attendance and Roster are one tap from anywhere. Everything else is under More, grouped into Daily, Records and System. MSK Analytics now lives inside Medical." },
+      { t: "🔎 Search shows who matched", d: "Results drop down under the search bar with the 4D and the name, and the search bar has its full width back." },
+      { t: "📋 Parade state in one tap", d: "The report button opens First Parade in the morning and Last Parade from noon. Tap ▾ beside it for every other report." },
+      { t: "⚡ Report Sick, Book Out, Log Conduct", d: "Three buttons under the strength numbers open these forms straight away. A person's page also has Report Sick and Appointment, with that person already chosen." },
+      { t: "☑ Tick several fall-outs at once", d: "In Log Conduct, + Add people opens a checklist. Tick everyone who fell out or reported sick, give them one reason if it is the same, and add them together." },
+      { t: "⌨ Type to find someone", d: "Every person dropdown in a form has a box beside it. Type a 4D or part of a name, and if only one person matches they are picked for you." },
+      { t: "● Small things", d: "Tap the sync dot for Sync & I/O. The Re-push buttons moved there too, since every edit already saves itself. Pop-up title bars no longer cover the first line under them." },
     ],
   },
   {
