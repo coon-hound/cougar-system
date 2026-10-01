@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 157;
+const APP_VERSION = 158;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 157,
+    v: 158,
     date: "1 Oct 2026",
     title: "Fewer taps for the things you do most",
     intro: "We counted where everyone taps, then moved the most-used things closer and the rarely-used ones out of the way.",
