@@ -381,6 +381,26 @@ tbody tr:last-child td{border-bottom:none}
 
 /* Filter chips above the checklist (participation segment + status families).
    Pill-shaped like the combined-group builder chips, ≥36px tap height. */
+/* Person dropdown with a type-ahead beside it (rosterSelect). */
+.d4-pick{display:flex;gap:6px;align-items:stretch;min-width:0}
+.d4-pick-q{flex:0 0 34%;min-width:0;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box;-webkit-appearance:none;appearance:none}
+.d4-pick-q:focus{outline:none;border-color:rgba(var(--accentRGB),.7)}
+.d4-pick>select{flex:1 1 auto;min-width:0}
+/* Conduct wizard multi-person picker: one checklist for the conduct's scope. */
+.wiz-pick{display:flex;flex-direction:column;gap:8px;margin:0 0 10px;padding:10px;border:1px solid rgba(var(--accentRGB),.4);border-radius:var(--r2);background:var(--surface)}
+.wiz-pick-q{width:100%;min-height:40px;padding:8px 11px;border-radius:var(--r1);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:13px;box-sizing:border-box;-webkit-appearance:none;appearance:none}
+.wiz-pick-q:focus{outline:none;border-color:rgba(var(--accentRGB),.7)}
+.wiz-pick-list{display:flex;flex-direction:column;max-height:264px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface2)}
+.wiz-pick-row{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 12px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.wiz-pick-row:last-child{border-bottom:0}
+.wiz-pick-row[hidden]{display:none}
+.wiz-pick-row input{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)}
+.wiz-pick-row .mono{min-width:38px;color:var(--accentLift);font-weight:700}
+.wiz-pick-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wiz-pick-row:has(input:checked){background:rgba(var(--accentRGB),.12)}
+.wiz-pick-empty{padding:14px 12px;font-size:12px;color:var(--dim)}
+.wiz-pick-actions{display:flex;justify-content:flex-end;gap:8px}
+.wiz-pick-actions .btn{min-height:40px;padding:8px 16px}
 .lc-wiz-filter-chip{padding:8px 13px;min-height:36px;border-radius:var(--rp);border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2;transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez),color var(--d2) var(--ez),transform var(--d1) var(--ez)}
 .lc-wiz-filter-chip:active{transform:scale(.96)}
 .lc-wiz-filter-chip:focus-visible{outline:none;box-shadow:var(--ring)}

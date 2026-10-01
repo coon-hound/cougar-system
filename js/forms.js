@@ -4114,6 +4114,7 @@ function defaultWizardProgram() {
 function openLogConductWizard(attendanceId) {
   const a = attendanceId ? STATE.attendance.find(x => x.id === attendanceId) : null;
   _wizStatusView = { fams: new Set(), part: "all" };
+  _wizPicker = null;
   _logConduct = {
     attendanceId: a?.id || null,
     date: a ? displayDateToISO(a.date) || todayISO() : todayISO(),
@@ -4398,7 +4399,7 @@ function renderLogConductWizard() {
       const picker = row.scope !== undefined
         ? `<select id="wiz-${key}-scope-${i}" class="topbar-select" style="width:100%" onchange="wizUpdateRowScope('${key}', ${i}, this.value)">${wizGroupRowOptions(row.scope)}</select>
            <div id="wiz-${key}-scopehint-${i}" style="font-size:10px;color:var(--dim);margin-top:2px">${wizGroupRowHint(row.scope)}</div>`
-        : rosterSelect(`wiz-${key}-d4-${i}`, true, row.d4, "Recruit", { onchange: `wizUpdateRowD4('${key}', ${i}, this.value)` });
+        : rosterSelect(`wiz-${key}-d4-${i}`, true, row.d4, "Recruit", { onchange: `wizUpdateRowD4('${key}', ${i}, this.value)`, typeahead: false });
       return `
       <div class="lc-wiz-bulk-row" style="display:grid;grid-template-columns:28px minmax(0,1fr) minmax(0,1fr) 32px;gap:8px;align-items:center;padding:8px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);box-sizing:border-box">
         <span class="mono" style="color:var(--muted);font-size:12px;font-weight:700">${row.scope !== undefined ? "⦿" : String(i + 1).padStart(2, "0")}</span>
@@ -4407,22 +4408,22 @@ function renderLogConductWizard() {
         <button type="button" class="btn btn-icon btn-danger" onclick="wizRemoveRow('${key}', ${i})" title="Remove" style="padding:4px 8px">✕</button>
       </div>`;
     }).join("");
+    const picking = _wizPicker && _wizPicker.key === key;
+    const addButtons = `<div style="display:flex;gap:6px">
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizOpenPicker('${key}')">+ Add people</button>
+          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddGroupRow('${key}')" title="Add a whole platoon / program / group / combined group — expands to one row per member on save, all with the same reason">+ Add group</button>
+        </div>`;
     return `<div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap">
         <div style="flex:1;min-width:0">
           <strong style="color:${color};font-size:13px">${label}</strong> <span style="color:var(--muted);font-size:11px" id="wiz-${key}-count">(${wizSectionD4s(key).length})</span>
           <div style="font-size:10px;color:var(--dim);margin-top:2px;line-height:1.45">${helpText}</div>
         </div>
-        <div style="display:flex;gap:6px">
-          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddRow('${key}')">+ Add</button>
-          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddGroupRow('${key}')" title="Add a whole platoon / program / group / combined group — expands to one row per member on save, all with the same reason">+ Add group</button>
-        </div>
+        ${picking ? "" : addButtons}
       </div>
+      ${picking ? wizPickerHtml(key) : ""}
       ${rows ? `<div style="display:flex;flex-direction:column;gap:6px">${rows}</div>` : ""}
-      ${rows ? `<div style="display:flex;gap:6px;margin-top:8px">
-          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddRow('${key}')">+ Add</button>
-          <button type="button" class="btn" style="font-size:12px;padding:6px 12px;white-space:nowrap" onclick="wizAddGroupRow('${key}')" title="Add a whole platoon / program / group / combined group — expands to one row per member on save, all with the same reason">+ Add group</button>
-        </div>` : ""}
+      ${rows && !picking ? `<div style="margin-top:8px">${addButtons}</div>` : ""}
     </div>`;
   };
 
@@ -4591,6 +4592,74 @@ function refreshWizStatusSection() {
   if (filters) filters.innerHTML = wizStatusFiltersHtml();
   if (list) list.innerHTML = wizStatusRowsHtml();
 }
+// ── Multi-person picker ───────────────────────────────────────────────────
+// Adding fall-outs one row at a time cost three taps a man (+ Add, open the
+// row's dropdown, pick) and the wizard averaged ~35 taps a conduct (usage data,
+// Sep 2026: 128 wizAddRow, 105 fall-out picks). The picker lists the conduct's
+// scope as one checklist: tick everyone who fell out, optionally give them one
+// reason, add them all at once. Rows stay individually editable afterwards.
+//
+// Deliberately not on _logConduct: it is view state, and nothing about it
+// should ever be saved with a conduct.
+let _wizPicker = null;   // { key } while open
+
+function wizPickerCandidates(key) {
+  const listed = new Set(wizSectionD4s(key).map(e => e.d4));
+  return conductScopeRoster(_logConduct.program)
+    .filter(r => !listed.has(r.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function wizPickerHtml(key) {
+  const cands = wizPickerCandidates(key);
+  const rows = cands.map(r => `<label class="wiz-pick-row" data-q="${escapeAttr((r.id + " " + (r.name || "")).toLowerCase())}"><input type="checkbox" value="${r.id}" onchange="wizPickCount()"><span class="mono">${r.id}</span><span class="wiz-pick-name">${escapeAttr(r.name || "")}</span></label>`).join("");
+  return `<div class="wiz-pick" id="wiz-pick">
+      <input type="search" id="wiz-pick-q" class="wiz-pick-q" placeholder="Filter by 4D or name" autocomplete="off" oninput="wizPickFilter(this.value)">
+      <div class="wiz-pick-list" id="wiz-pick-list">${rows || `<div class="wiz-pick-empty">Everyone in this conduct's scope is already listed.</div>`}</div>
+      <input type="text" id="wiz-pick-reason" class="wiz-pick-q" maxlength="200" placeholder="Reason for all of them (optional)">
+      <div class="wiz-pick-actions">
+        <button type="button" class="btn" onclick="wizClosePicker()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="wiz-pick-add" onclick="wizPickCommit()" disabled>Add</button>
+      </div>
+    </div>`;
+}
+
+function wizOpenPicker(key) {
+  _wizPicker = { key };
+  renderLogConductWizard();
+  document.getElementById("wiz-pick")?.scrollIntoView({ block: "nearest" });
+}
+function wizClosePicker() {
+  _wizPicker = null;
+  renderLogConductWizard();
+}
+// Filtering and ticking touch the DOM directly: a re-render would drop the
+// keyboard and the list's scroll position mid-gesture.
+function wizPickFilter(q) {
+  const needle = String(q || "").trim().toLowerCase();
+  document.querySelectorAll("#wiz-pick-list .wiz-pick-row").forEach(row => {
+    row.hidden = !!needle && !row.dataset.q.includes(needle);
+  });
+}
+function wizPickCount() {
+  const n = document.querySelectorAll("#wiz-pick-list input:checked").length;
+  const btn = document.getElementById("wiz-pick-add");
+  if (!btn) return;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Add ${n}` : "Add";
+}
+function wizPickCommit() {
+  if (!_wizPicker || !_logConduct) return;
+  const key = _wizPicker.key;
+  const reason = (document.getElementById("wiz-pick-reason")?.value || "").trim();
+  const picked = [...document.querySelectorAll("#wiz-pick-list input:checked")].map(i => i.value);
+  // A row someone added and never filled in is replaced, not left dangling.
+  _logConduct[key] = _logConduct[key].filter(r => r.scope !== undefined || r.d4);
+  picked.forEach(d4 => _logConduct[key].push({ d4, reason }));
+  _wizPicker = null;
+  renderLogConductWizard();
+}
+
 function wizAddRow(section) {
   _logConduct[section].push({ d4: "", reason: "" });
   renderLogConductWizard();
