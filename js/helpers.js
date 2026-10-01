@@ -1275,7 +1275,8 @@ const conductScopeBadge = v => {
   const col = conductScopeColor(v);
   return `<span style="display:inline-block;font-size:10px;font-weight:700;line-height:1.4;color:${col};background:${col}1f;border:1px solid ${col}55;border-radius:10px;padding:2px 9px;white-space:nowrap">${conductScopeLabel(v)}</span>`;
 };
-const statusBadge = s => badge(s, s === "Active" ? "green" : s === "Warded" ? "red" : "orange");
+// A blank status renders nothing, never the word "undefined".
+const statusBadge = s => s ? badge(s, s === "Active" ? "green" : s === "Warded" ? "red" : "orange") : "";
 const typeBadge = t => badge(t, t === "RSI" ? "orange" : t === "Injury" ? "red" : "yellow");
 const awardBadge = s => { const a = getAward(s); const c = { "Gold★": "purple", Gold: "yellow", Silver: "accent", Pass: "green", Fail: "red", "N/A": "accent" }; return badge(a, c[a] || "accent"); };
 const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
@@ -1465,7 +1466,39 @@ function rosterSelect(id = "form-d4", required = true, selected = "", roleFilter
     ? [r.rank, r.name].filter(Boolean).join(" ")
     : `${r.id} ${r.name}`;
   const onchangeAttr = opts.onchange ? ` onchange="${escapeAttr(opts.onchange)}"` : "";
-  return `<select id="${id}" ${required ? "required" : ""}${onchangeAttr} style="width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box"><option value="">Select...</option>${rows.map(r => `<option value="${r.id}" ${r.id === selected ? "selected" : ""}>${optLabel(r)}</option>`).join("")}</select>`;
+  // Inline styling only where no .form-group styles the select: in a form, the
+  // inline `background` used to wipe out the shared chevron and the 12px font
+  // undercut every other field, so the person picker was the odd one out.
+  const style = opts.typeahead === false
+    ? ` style="width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box"`
+    : "";
+  const select = `<select id="${id}" ${required ? "required" : ""}${onchangeAttr}${style}><option value="">Select...</option>${rows.map(r => `<option value="${r.id}" ${r.id === selected ? "selected" : ""}>${escapeAttr(optLabel(r))}</option>`).join("")}</select>`;
+  // Type-ahead beside the dropdown. On a phone a native select of a whole
+  // company is a long wheel to scroll; typing "1402" or a name narrows it, and
+  // a single match is chosen outright. The <select> stays the one source of the
+  // value, so no form reads anything new. `typeahead: false` for pickers that
+  // live in a tight grid (the wizard's rows, which have their own picker).
+  if (opts.typeahead === false) return select;
+  return `<div class="d4-pick"><input type="search" class="d4-pick-q" placeholder="4D / name" autocomplete="off" aria-label="Filter the list by 4D or name" oninput="d4PickFilter(this, '${id}')">${select}</div>`;
+}
+
+// Narrow a rosterSelect's options to those matching `input`'s text. Options are
+// rebuilt rather than hidden: iOS Safari ignores `hidden` on <option> and would
+// still offer the whole company in its wheel. A unique match is selected and a
+// bubbling `change` fired, so inline handlers and wrapping listeners (the IPPT
+// form scores on change) behave exactly as if it had been picked by hand.
+function d4PickFilter(input, id) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  if (!sel._d4All) sel._d4All = [...sel.options].slice(1).map(o => [o.value, o.textContent]);
+  const q = String(input.value || "").trim().toLowerCase();
+  const hits = q ? sel._d4All.filter(([v, t]) => v.toLowerCase().includes(q) || t.toLowerCase().includes(q)) : sel._d4All;
+  const keep = sel.value;
+  sel.innerHTML = `<option value="">${q && !hits.length ? "No match" : "Select..."}</option>` +
+    hits.map(([v, t]) => `<option value="${escapeAttr(v)}">${escapeAttr(t)}</option>`).join("");
+  const next = hits.length === 1 ? hits[0][0] : (hits.some(([v]) => v === keep) ? keep : "");
+  sel.value = next;
+  if (next !== keep) sel.dispatchEvent(new Event("change", { bubbles: true }));
 }
 function formField(id, label, type = "text", placeholder = "", extra = "") {
   const ph = placeholder ? ` placeholder="${placeholder}"` : "";

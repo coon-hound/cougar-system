@@ -27,6 +27,8 @@ function render() {
   // rebuild a few <option>s and means we don't have to remember to call this
   // from every site that mutates STATE.roster (pull, import, edit).
   if (typeof refreshFilterUI === "function") refreshFilterUI();
+  // Both nav bars follow STATE.nav, whoever changed it.
+  if (typeof syncNavActive === "function") syncNavActive();
 
   const el = document.getElementById("content");
   const scoped = filteredRoster();
@@ -135,6 +137,45 @@ function dashAction(label, onclick, title) {
   return `<button class="btn btn-primary" type="button" title="${title}" onclick="${onclick}" style="flex:0 0 auto;font-size:11px">${label}</button>`;
 }
 
+// The parade state is the report this page exists for, and which one is due is
+// a matter of the clock: First Parade in the morning, Last Parade after. So the
+// main half of the button opens that one in a single tap and ▾ keeps the rest.
+// It used to take two taps every time (200 menu opens, 167 report opens in two
+// weeks of usage data).
+function dashDueParade(now = new Date()) {
+  return now.getHours() < 12 ? "FP" : "LP";
+}
+function dashReportButton() {
+  const due = dashDueParade();
+  const item = (type, ico, label) =>
+    `<button type="button" data-tel="report:${type}" onclick="openReportModal('${type}'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">${ico}</span>${label}</button>`;
+  return `<div class="dropdown-wrapper split-btn" style="flex:0 0 auto">
+          <button class="btn btn-primary" type="button" data-tel="report:${due}:quick" onclick="openReportModal('${due}')">${due === "FP" ? "First Parade" : "Last Parade"}</button><button class="btn btn-primary split-caret" type="button" aria-label="More reports" aria-haspopup="menu" onclick="toggleReportMenu(event)">▾</button>
+          <div id="report-menu" class="dropdown-menu hidden" role="menu">
+            ${item("FP", "◱", "First Parade State")}
+            ${item("LP", "◳", "Last Parade State")}
+            ${item("MED", "✚", "Medical Status List")}
+            ${item("MSK", "⊕", "MSK Report")}
+            ${item("CONDUCT", "▤", "Per-Conduct Chat Format")}
+            <div class="dropdown-sep" role="separator"></div>
+            <button type="button" data-tel="report:compare" onclick="openCompareModal(); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⇄</span>Compare Parade States</button>
+          </div>
+        </div>`;
+}
+
+// The three forms people open most (usage data, Sep 2026: Book Out 97,
+// Report Sick 77, Log Conduct 43), each one tap from the landing view instead
+// of a nav switch away.
+function dashQuickActions() {
+  const a = (fn, ico, label) =>
+    `<button type="button" class="quick-act" data-tel="quick:${fn.replace(/\(.*$/, "")}" onclick="${fn}"><span class="quick-ico" aria-hidden="true">${ico}</span><span>${label}</span></button>`;
+  return `<div class="quick-acts">
+      ${a("openMedicalForm()", "✚", "Report Sick")}
+      ${a("openBookOutForm()", "↗", "Book Out")}
+      ${a("openLogConductWizard()", "▤", "Log Conduct")}
+    </div>`;
+}
+
 function renderDashboard(el) {
   // Empty-state guard. The dashboard has nothing meaningful to show until
   // the roster loads, but the message depends on WHY it's empty: an
@@ -240,17 +281,7 @@ function renderDashboard(el) {
           <h2 style="font-size:18px;font-weight:700">Company Strength Board</h2>
           <div style="font-size:11px;color:var(--dim);margin-top:2px">${dateLabel}${isFilterActive() ? ` · <span style="color:var(--accent);font-weight:600">${filterLabel()}</span>` : ""}</div>
         </div>
-        <div class="dropdown-wrapper" style="flex:0 0 auto">
-          <button class="btn btn-primary" onclick="toggleReportMenu(event)">Generate Report ▾</button>
-          <div id="report-menu" class="dropdown-menu hidden">
-            <button type="button" data-tel="report:FP" onclick="openReportModal('FP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◱</span>First Parade State</button>
-            <button type="button" data-tel="report:LP" onclick="openReportModal('LP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◳</span>Last Parade State</button>
-            <button type="button" data-tel="report:MED" onclick="openReportModal('MED'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">✚</span>Medical Status List</button>
-            <button type="button" data-tel="report:MSK" onclick="openReportModal('MSK'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⊕</span>MSK Report</button>
-            <button type="button" data-tel="report:CONDUCT" onclick="openReportModal('CONDUCT'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">▤</span>Per-Conduct Chat Format</button>
-            <button type="button" data-tel="report:compare" onclick="openCompareModal(); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">⇄</span>Compare Parade States</button>
-          </div>
-        </div>
+        ${dashReportButton()}
       </div>
       ${scopeBanner}
     </div>
@@ -262,6 +293,7 @@ function renderDashboard(el) {
       <div class="stat"><label>Non-Active</label><div class="val" style="${statInk(liveRows.length, "--red")}">${liveRows.length}</div><div class="sub">${rcSub(recLive.length, cmdLive.length)}</div></div>
       <div class="stat"><label>Avg Part.</label><div class="val" style="color:var(--accent)">${avgPart}%</div><div class="sub">${STATE.attendance.length ? `${STATE.attendance.length} conduct${STATE.attendance.length === 1 ? "" : "s"}` : "no conducts yet"}</div></div>
     </div>
+    ${dashQuickActions()}
     ${sections}`;
 
   // Charts exist only while the Trends section is open, and only when Chart.js
@@ -659,6 +691,15 @@ function viewMSKRegion(region) {
   document.querySelector(".modal")?.classList.add("wide");
 }
 
+// Medical and MSK Analytics share the Medical nav entry; this strip switches
+// between them. MSK Analytics had its own sidebar entry until Oct 2026 and was
+// opened 5 times in two weeks, for 2 seconds on average - it reads as a
+// facet of Medical, not a destination of its own.
+function medicalSubTabs() {
+  const tab = (nav, label) => `<button type="button" role="tab" aria-selected="${STATE.nav === nav}" data-tel="nav:${nav}" onclick="goNav('${nav}')">${label}</button>`;
+  return `<div class="seg" role="tablist" aria-label="Medical views">${tab("medical", "Report Sick Log")}${tab("mskAnalytics", "MSK Analytics")}</div>`;
+}
+
 function renderMSKAnalytics(el) {
   const today = todayISO();
   if (!_mskAnalyticsStart) {
@@ -752,6 +793,7 @@ function renderMSKAnalytics(el) {
   const regionChip = reg => `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}22;color:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other};margin-right:3px">${reg}</span>`;
 
   el.innerHTML = `
+    ${medicalSubTabs()}
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <div style="min-width:0;flex:1 1 200px">
         <h2 style="font-size:18px;font-weight:700">📊 MSK Analytics${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}]</span>` : ""}</h2>
@@ -1072,7 +1114,6 @@ function renderLeave(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2 style="font-size:18px;font-weight:700">📅 Out / Leave${titleSuffix}</h2>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-success" onclick="pushTab('Leave',STATE.leave)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="openBookOutForm()">+ Log</button>
       </div>
     </div>
@@ -1316,7 +1357,6 @@ function renderRoster(el) {
         <button class="btn" onclick="openCommanderForm()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
         <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
         <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
-        <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
       </div>
     </div>
     ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th><th>Status</th><th>Camp</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
@@ -1364,7 +1404,6 @@ function renderAttendance(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <h2 style="font-size:18px;font-weight:700">Conduct Attendance</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-success" onclick="pushTab('Attendance',STATE.attendance)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="openLogConductWizard()" title="One-shot wizard: date + time + conduct + Status Personnel checklist + bulk Report Sick / Fallout / RSI rows + auto totals + chat-format copy">+ Log Conduct</button>
       </div>
     </div>
@@ -1485,7 +1524,6 @@ function renderConductDetail(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h2 style="font-size:18px;font-weight:700">Conduct Detail${titleSuffix}</h2>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-success" onclick="pushTab('ConductDetail',STATE.conductDetail)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="openConductDetailForm()">+ Log</button>
       </div>
     </div>
@@ -1588,10 +1626,10 @@ function renderMedical(el) {
   };
 
   el.innerHTML = `
+    ${medicalSubTabs()}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Report Sick Log${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.medical.length}]</span>` : ""}</h2>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-success" onclick="pushTab('Medical',STATE.medical)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="openMedicalForm()">+ Log Report Sick</button>
       </div>
     </div>
@@ -1650,7 +1688,6 @@ function renderIPPT(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <h2 style="font-size:18px;font-weight:700">IPPT Tracker${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.ippt.length}]</span>` : ""}</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-success" onclick="pushTab('IPPT',STATE.ippt)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="openIPPTForm()">+ Add</button>
       </div>
     </div>
@@ -2158,7 +2195,6 @@ function renderConducts(el) {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${needsConductMigration() ? `<button class="btn" onclick="maybeRunConductMigration()" title="Open the legacy-data migration modal">🔧 Migrate legacy data</button>` : ""}
         ${duplicateConductIdGroups().length ? `<button class="btn" style="background:rgba(var(--redRGB),.13);border-color:rgba(var(--redRGB),.27);color:var(--red)" onclick="openFixConductIdsModal()" title="Multiple conducts share the same id — records resolve to the wrong name. Fix it.">⚠️ Fix duplicate ids (${duplicateConductIdGroups().length})</button>` : ""}
-        <button class="btn btn-success" onclick="pushTab('Conducts',STATE.conducts)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="promptCreateConduct()">+ New conduct</button>
       </div>
     </div>
