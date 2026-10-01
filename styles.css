@@ -327,6 +327,18 @@ tbody tr:last-child td{border-bottom:none}
 .dropdown-menu{position:absolute;top:100%;right:0;margin-top:6px;background:rgba(29,36,51,.94);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border:1px solid var(--borderHi);border-radius:var(--r2);box-shadow:var(--sh3);z-index:50;min-width:210px;padding:5px;display:flex;flex-direction:column;gap:2px;animation:pop-in var(--d2) var(--spring) both;transform-origin:top right}
 .dropdown-menu button{min-height:36px;padding:9px 12px;font-size:12px;font-weight:500;background:transparent;color:var(--text);border:none;border-radius:var(--r1);cursor:pointer;text-align:left;font-family:inherit;outline:none;transition:background-color var(--d1) var(--ez),color var(--d1) var(--ez)}
 .dropdown-menu button:focus-visible{box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+.dropdown-sep{height:1px;margin:4px 6px;background:var(--border)}
+/* Split button: the due report on the left, the full menu behind ▾. */
+.split-btn{display:inline-flex;align-items:stretch}
+.split-btn>.btn:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+.split-btn>.split-caret{padding:7px 10px;border-top-left-radius:0;border-bottom-left-radius:0;border-left:1px solid rgba(255,255,255,.22);margin-left:-1px}
+/* Dashboard quick actions: the three most-opened forms, one tap from landing. */
+.quick-acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 14px}
+.quick-act{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface);color:var(--text);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.quick-act>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quick-ico{color:var(--accent);font-size:14px;line-height:1}
+.quick-act:active{transform:scale(.97)}
+.quick-act:focus-visible{outline:none;box-shadow:var(--ring)}
 
 /* ── Sync ──────────────────────────────────────────────────*/
 .sync-panel{background:var(--surface);border:1px solid rgba(var(--accentRGB),.32);border-radius:var(--r3);padding:20px;margin-bottom:20px;box-shadow:var(--sh1),var(--lift)}
@@ -654,6 +666,7 @@ button.dty-slot{cursor:pointer}
 .dty-cell-c{font-size:8.5px;font-weight:700;line-height:1.3}
 
 @media (hover:hover){
+  .quick-act:hover{background:var(--surface2);border-color:var(--borderHi)}
   button.dty-slot:hover,.dty-mcell:hover,.dty-pick:hover,.dty-issue:hover,.dty-bal:hover{background:var(--surface3)}
   .dty-seg button:not([aria-selected="true"]):hover,.seg button:not([aria-selected="true"]):hover{color:var(--text)}
 }
@@ -664,6 +677,8 @@ button.dty-slot{cursor:pointer}
      7 x 46 plus gaps is 346 of the 364 a 390px phone leaves after #content's
      gutters, so a wider cell would push the last day off-screen. */
   .dty-seg button,.seg button{min-height:44px;font-size:12.5px}
+  .quick-act{flex-direction:column;gap:5px;min-height:58px;font-size:12px}
+  .quick-ico{font-size:17px}
   .dty-daynav button{min-height:50px}
   .dty-daylabel{font-size:14px}
   .dty-slot{min-height:60px}

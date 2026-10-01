@@ -78,7 +78,7 @@ test("the Generate Report dropdown opens and its items are actually clickable", 
 
   const menu = page.locator("#report-menu");
   await expect(menu).toBeHidden();
-  await page.locator("#content button", { hasText: "Generate Report" }).click();
+  await page.locator("#content .split-caret").click();
   await expect(menu).toBeVisible();
 
   // The regression this guards: the menu painted BEHIND the stat tiles, so the

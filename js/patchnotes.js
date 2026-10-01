@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 158;
+const APP_VERSION = 159;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 159,
+    date: "1 Oct 2026",
+    title: "The dashboard does more in one tap",
+    intro: "The things you open most now start from the dashboard.",
+    items: [
+      { t: "📋 Parade state in one tap", d: "The report button now opens First Parade in the morning and Last Parade from noon. Tap ▾ beside it for every other report." },
+      { t: "⚡ Report Sick, Book Out, Log Conduct", d: "Three buttons under the strength numbers open these forms straight away." },
+      { t: "↻ Re-push moved to Sync & I/O", d: "The green Re-push all buttons are gone from each page. Every edit already saves on its own. If a table ever needs repairing, Sync & I/O has a Re-push button for each one." },
+    ],
+  },
   {
     v: 158,
     date: "1 Oct 2026",

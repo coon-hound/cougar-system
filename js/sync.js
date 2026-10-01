@@ -34,6 +34,16 @@ function renderSync(el) {
         <button class="btn btn-danger" onclick="forceResync()" ${authed ? "" : "disabled"} title="Discard this device's unsynced changes and reload from the sheet. Use if stuck on 'unsaved'.">⟳ Force Resync</button>
       </div>
       <div id="sync-log" class="sync-log card" style="padding:10px"></div>
+      <!-- Re-push lived as a green button beside the primary action on seven
+           view headers. It is a FULL rewrite of the table, which clobbers an
+           edit another phone made meanwhile, so it is a repair tool and lives
+           here with the other repair tools. Normal edits push on their own. -->
+      <h3 style="font-size:14px;color:var(--accent);margin:16px 0 6px">↻ Re-push one table</h3>
+      <p style="font-size:11px;color:var(--muted);margin:0 0 10px;line-height:1.5">Rewrites the whole table from this phone. Only for repairing a table after a sync problem - every normal edit already saves itself, and a rewrite can overwrite another phone's recent change.</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${[["Roster", "roster"], ["Medical", "medical"], ["Attendance", "attendance"], ["ConductDetail", "conductDetail", "Detail"], ["IPPT", "ippt"], ["Leave", "leave"], ["Conducts", "conducts"]]
+          .map(([tab, key, label]) => `<button class="btn" type="button" data-tel="repush:${tab}" onclick="pushTab('${tab}',STATE.${key})" ${authed ? "" : "disabled"}>${label || tab}</button>`).join("")}
+      </div>
     </div>
     <div class="grid-2">
       <div class="card">
