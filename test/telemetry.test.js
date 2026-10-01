@@ -93,9 +93,14 @@ module.exports = async function run() {
 
   await test("report menu entries carry the report type, never data", () => {
     const src = fs.readFileSync(path.join(ROOT, "js/render.js"), "utf8");
-    for (const t of ["FP", "LP", "MED", "MSK", "CONDUCT", "compare"]) {
-      ok(src.includes(`data-tel="report:${t}"`), "report:" + t + " is labelled");
-      ok(T.isSafeName("report:" + t));
+    // The menu is built by dashReportButton: one templated label for the five
+    // reports, a literal one for Compare, and one for the one-tap due report.
+    ok(src.includes('data-tel="report:${type}"'), "menu items are labelled by type");
+    ok(src.includes('data-tel="report:${due}:quick"'), "the one-tap button is labelled");
+    ok(src.includes('data-tel="report:compare"'), "compare is labelled");
+    for (const t of ["FP", "LP", "MED", "MSK", "CONDUCT"]) {
+      ok(src.includes(`item("${t}"`), "report " + t + " is in the menu");
+      ok(T.isSafeName("report:" + t) && T.isSafeName("report:" + t + ":quick"));
     }
   });
 
