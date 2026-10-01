@@ -27,6 +27,10 @@ const { suite, test, ok, eq, throws } = require("./_tap");
 const ROOT = path.resolve(__dirname, "..");
 const T = require(path.join(ROOT, "js/telemetry.js"));
 
+// A day whose task outcomes count. Derived from the cutoff rather than written
+// out, because the cutoff moves to whatever day the funnel fix actually ships.
+const FRESH_DAY = T.OUTCOMES_VALID_FROM;
+
 // Minimal stand-in for a DOM element. descriptorFor only ever uses
 // getAttribute / tagName / className / parentElement — deliberately never
 // `.value` and, since the hardening below, never `.textContent` either.
@@ -49,6 +53,50 @@ module.exports = async function run() {
     eq(T.descriptorFor(btn), "openPerson");
     const nested = el({ tag: "SPAN", parent: el({ tag: "BUTTON", attrs: { onclick: "openMedicalForm('1404','1101')" } }) });
     eq(T.descriptorFor(nested), "openMedicalForm");
+  });
+
+  await test("a stopPropagation prefix is skipped, the guarded handler is named", () => {
+    // Every row-action button opens with event.stopPropagation(); read as-is
+    // they all became one anonymous "button.btn".
+    const undo = el({ tag: "BUTTON", cls: "btn btn-icon", attrs: { onclick: "event.stopPropagation(); undoBookOut('1101')" } });
+    eq(T.descriptorFor(undo), "undoBookOut");
+    const del = el({ tag: "BUTTON", attrs: { onclick: "event.stopPropagation();deleteEntry('leave', '1404', 'leave record')" } });
+    eq(T.descriptorFor(del), "deleteEntry");
+    // Plumbing and nothing else still has no handler to name.
+    const bare = el({ tag: "BUTTON", cls: "btn", attrs: { onclick: "event.stopPropagation()" } });
+    eq(T.descriptorFor(bare), "button.btn");
+  });
+
+  await test("form controls are named by the form they belong to", () => {
+    const form = el({ tag: "FORM", attrs: { onsubmit: "event.preventDefault(); submitMedical(); return false" } });
+    const row = el({ tag: "DIV", parent: form });
+    eq(T.descriptorFor(el({ tag: "BUTTON", cls: "btn btn-primary", attrs: { type: "submit" }, parent: row })), "submit:submitMedical");
+    eq(T.descriptorFor(el({ tag: "SELECT", attrs: { id: "f-d4" }, parent: row })), "select#f-d4/submitMedical");
+    // No id: named by its change handler, never by its value.
+    eq(T.descriptorFor(el({ tag: "SELECT", cls: "f-extra-status", attrs: { onchange: "medExtraStatusChanged(this)" }, parent: row })),
+       "select:medExtraStatusChanged/submitMedical");
+    // Outside any form and any task, descriptors are unchanged.
+    eq(T.descriptorFor(el({ tag: "INPUT", attrs: { id: "search-input" } })), "input#search-input");
+  });
+
+  await test("a label tap is not counted twice", () => {
+    // The browser forwards a label tap to its input as a second click.
+    const input = el({ tag: "INPUT", attrs: { type: "checkbox" } });
+    const label = Object.assign(el({ tag: "LABEL" }), { control: input });
+    eq(T.descriptorFor(label), null);
+    // ...and a <select> too: Chromium forwards to every labelable control.
+    const label2 = Object.assign(el({ tag: "LABEL" }), { control: el({ tag: "SELECT", attrs: { id: "f-status" } }) });
+    eq(T.descriptorFor(label2), null);
+    // A label that labels nothing gets no forwarded click, so it is the record.
+    eq(T.descriptorFor(el({ tag: "LABEL" })), "label");
+  });
+
+  await test("report menu entries carry the report type, never data", () => {
+    const src = fs.readFileSync(path.join(ROOT, "js/render.js"), "utf8");
+    for (const t of ["FP", "LP", "MED", "MSK", "CONDUCT", "compare"]) {
+      ok(src.includes(`data-tel="report:${t}"`), "report:" + t + " is labelled");
+      ok(T.isSafeName("report:" + t));
+    }
   });
 
   await test("a 4D in element text cannot become a descriptor", () => {
@@ -194,7 +242,7 @@ module.exports = async function run() {
 
   await test("the recommendation says what to do, in words", () => {
     const days = {
-      "2026-09-25": {
+      [FRESH_DAY]: {
         features: {}, views: {},
         tasks: {
           book_out:  { starts: 47, done: 45, aban: 2, clicks: 282, ms: 900000 },
@@ -238,7 +286,7 @@ module.exports = async function run() {
 
     // The same counters on a day after the fix are reported normally.
     const fresh = T.summarize({
-      "2026-09-25": { features: {}, views: {},
+      [FRESH_DAY]: { features: {}, views: {},
         tasks: { log_leave: { starts: 12, done: 0, aban: 12, clicks: 60, ms: 200000 } } }
     }, { days: 3650 });
     eq(fresh.tasks[0].outcomesKnown, true);

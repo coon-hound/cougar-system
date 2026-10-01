@@ -62,7 +62,7 @@ const TELEMETRY = (function () {
   // If this merge slips past its intended date, move this with it. A cutoff
   // set earlier than the deploy silently certifies inverted data as measured,
   // which is the failure this whole constant exists to prevent.
-  const OUTCOMES_VALID_FROM = "2026-09-23";
+  const OUTCOMES_VALID_FROM = "2026-10-02";
 
   // ── The task registry ─────────────────────────────────────────────────────
   //
@@ -307,8 +307,41 @@ const TELEMETRY = (function () {
   // bubble listener would miss every click inside a modal — which is exactly
   // where the expensive multi-step tasks live.
 
+  // The leading function name of an inline handler — the single most useful
+  // signal in this codebase, since nearly every handler is an inline attribute.
+  // The regex stops at the "(" so an argument can never be captured, and an
+  // identifier cannot start with a digit, so a 4D cannot be the match.
+  //
+  // A leading `event.stopPropagation();` is plumbing, not intent: every
+  // row-action button opens with one so the tap does not also open the row
+  // underneath. Read as-is it matched nothing, and those buttons (undo a
+  // book-out, mark present, edit, delete) all collapsed into one anonymous
+  // "button.btn" — the largest unlabelled bucket in production. So skip the
+  // plumbing and name what it is guarding.
+  const PLUMBING_RE = /^\s*(?:event\.(?:stopPropagation|preventDefault)\(\)\s*;\s*)+/;
+  function handlerName(code) {
+    if (!code) return "";
+    const m = /^\s*([A-Za-z_$][\w$]*)\s*\(/.exec(String(code).replace(PLUMBING_RE, ""));
+    return m ? m[1].slice(0, NAME_CAP) : "";
+  }
+
+  // Which job a control belongs to: the submit handler of its <form>, else the
+  // task in progress. Without this, `select#f-d4` was one bucket shared by every
+  // form that picks a soldier, and "which forms make people pick the same man
+  // twice" could not be answered.
+  function contextFor(el) {
+    for (let p = el && el.parentElement, d = 0; p && d < 40; p = p.parentElement, d++) {
+      if (String(p.tagName || "").toLowerCase() !== "form") continue;
+      const h = handlerName(typeof p.getAttribute === "function" ? p.getAttribute("onsubmit") : "");
+      if (h) return h;
+      break;
+    }
+    return openTask ? openTask.key : "";
+  }
+
   // Resolve a click to a stable descriptor, cheapest signal first. NEVER reads
-  // an element's `.value` and NEVER reads an onclick's arguments.
+  // an element's `.value` and NEVER reads an onclick's arguments. Returns null
+  // for a click that is not worth recording.
   function descriptorFor(target) {
     let el = target;
     for (let depth = 0; el && depth < 8; depth++, el = el.parentElement) {
@@ -317,17 +350,8 @@ const TELEMETRY = (function () {
       const tel = el.getAttribute("data-tel");
       if (tel) return scrubName(tel);
 
-      // The leading function name of the inline handler — the single most
-      // useful signal in this codebase, since all ~176 handlers are inline
-      // onclick attributes. The regex stops at the "(" so an argument can
-      // never be captured, and an identifier cannot start with a digit, so a
-      // 4D cannot be the match. "event.stopPropagation()" does not match
-      // (there is a "." before the paren) and correctly falls through.
-      const oc = el.getAttribute("onclick");
-      if (oc) {
-        const m = /^\s*([A-Za-z_$][\w$]*)\s*\(/.exec(oc);
-        if (m) return m[1].slice(0, NAME_CAP);
-      }
+      const oc = handlerName(el.getAttribute("onclick"));
+      if (oc) return oc;
 
       const nav = el.getAttribute("data-nav");
       if (nav) return "nav:" + scrubName(nav);
@@ -336,7 +360,15 @@ const TELEMETRY = (function () {
       if (role !== null && role !== undefined) return "role:" + (scrubName(role) || "all");
 
       const tag = String(el.tagName || "").toLowerCase();
-      if (tag === "button" || tag === "a" || tag === "select" || tag === "input" || tag === "label") {
+      if (tag === "label" && el.control) {
+        // The browser answers a tap on a label by dispatching a SECOND click on
+        // the control it labels (checkbox, text input and select alike — checked
+        // in Chromium), which this listener also sees. Recording both counted
+        // one tap twice, inflating every task with a ticked box in it. Let the
+        // control's own click be the record.
+        return null;
+      }
+      if (tag === "button" || tag === "a" || tag === "select" || tag === "input" || tag === "textarea" || tag === "label") {
         // Semantic fallback, from MARKUP ONLY: tag, first class, and the
         // element id. Deliberately NOT the element's text.
         //
@@ -349,10 +381,19 @@ const TELEMETRY = (function () {
         // markup (.nav-btn, .role-btn, #pull-btn) and carry no data, which
         // makes the descriptor deterministic AND provably clean. Anything that
         // genuinely needs a friendlier label should carry data-tel.
+        const ctx = contextFor(el);
+        if (tag === "button" && String(el.getAttribute("type") || "").toLowerCase() === "submit" && ctx) {
+          return "submit:" + ctx;
+        }
         const cls = String(el.className || "").split(/\s+/).filter(Boolean)[0] || "";
         const id = String(el.getAttribute("id") || "");
-        const d = tag + (cls ? "." + cls : "") + (id ? "#" + id : "");
-        return scrubName(d) || tag;
+        // A field with no id is still named by what it calls when it changes.
+        const change = id ? "" : handlerName(el.getAttribute("onchange") || el.getAttribute("oninput"));
+        const tail = (id ? "#" + id : "") + (change ? ":" + change : "") + (ctx ? "/" + ctx : "");
+        // The class is the weakest part, so it is the part that goes when a
+        // handler already names the field or the whole would overrun the cap.
+        const withCls = tag + (cls && !change ? "." + cls : "") + tail;
+        return scrubName(withCls.length <= NAME_CAP ? withCls : tag + tail) || tag;
       }
     }
     return null;
@@ -792,7 +833,7 @@ const TELEMETRY = (function () {
     }, false),
     // Pure internals — exposed so the unit suite can hold them directly.
     scrubName, isSafeName, deviceIdFrom, pruneBuffer, pruneDays, aggregate, rowsFrom,
-    descriptorFor, emptyStore, KEY, BUF_CAP, DAY_CAP,
+    descriptorFor, emptyStore, KEY, BUF_CAP, DAY_CAP, OUTCOMES_VALID_FROM,
     _install: install,
     _wrapGlobal: wrapGlobal,
     _record: record,

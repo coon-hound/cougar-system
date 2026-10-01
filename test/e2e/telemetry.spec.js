@@ -24,6 +24,10 @@ const { seedAndGoto } = require("./support");
 
 const USAGE_KEY = "cougar-usage-v1";
 
+// The first day whose task outcomes count. Read from the collector itself, so
+// moving the cutoff to the real ship date never strands a pinned clock below.
+const { OUTCOMES_VALID_FROM } = require("../../js/telemetry.js");
+
 // index.html does not yet carry the two new <script> tags (the nav entry and
 // the render() dispatch case are wired separately). Injecting them when they
 // are absent makes this spec pass both before and after that wiring, and it
@@ -212,7 +216,7 @@ test("the insights view ranks cost and states a recommendation", async ({ page }
   // days recorded before the funnel fix, so without this the leak verdict below
   // would depend on what day the suite happens to run — passing tomorrow and
   // failing today. Timers still run on real time; only the date is fixed.
-  await page.clock.setFixedTime(new Date("2026-10-01T09:00:00Z"));
+  await page.clock.setFixedTime(new Date(OUTCOMES_VALID_FROM + "T09:00:00Z"));
   await gotoWithTelemetry(page);
 
   // Real usage, recorded through the real collector: open and abandon Book Out
@@ -341,5 +345,41 @@ test("outcomes recorded before the funnel fix render as not measured", async ({ 
   const taps = await content.locator("table tbody tr", { hasText: "Book Out" }).first().innerText();
   expect(taps).toMatch(/\d/);
 
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("row buttons, submits, fields and labels resolve to what was tapped", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  await gotoWithTelemetry(page);
+  const features = () => page.evaluate(() => {
+    const out = {};
+    for (const d of Object.values(TELEMETRY.localDays())) {
+      for (const [n, c] of Object.entries(d.features)) out[n] = (out[n] || 0) + c;
+    }
+    return out;
+  });
+
+  // A form field and a wrapping checkbox label, inside the medical form.
+  await page.evaluate(() => openMedicalForm());
+  // selectOption alone sets the value without a tap; a person taps first.
+  await page.locator("#f-status").click();
+  await page.locator("#f-status").selectOption("__new__");
+  await page.locator("label:has(#f-custom-participates)").click();
+  let f = await features();
+  expect(f["select#f-status/submitMedical"], JSON.stringify(f)).toBe(1);
+  // One tap on the label is one record, filed under the control it ticks.
+  expect(f["input#f-custom-participates/submitMedical"]).toBe(1);
+  expect(Object.keys(f).filter((n) => n.startsWith("label"))).toEqual([]);
+  await page.evaluate(() => closeModal());
+
+  // A report menu entry names the report.
+  await page.locator('[onclick^="toggleReportMenu("]').click();
+  await page.locator('[data-tel="report:FP"]').click();
+  f = await features();
+  expect(f["report:FP"]).toBe(1);
+  await page.evaluate(() => closeModal());
+
+  expect(Object.keys(f).every((n) => !/\d/.test(n)), JSON.stringify(f)).toBe(true);
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
