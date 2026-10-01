@@ -27,6 +27,8 @@ function render() {
   // rebuild a few <option>s and means we don't have to remember to call this
   // from every site that mutates STATE.roster (pull, import, edit).
   if (typeof refreshFilterUI === "function") refreshFilterUI();
+  // Both nav bars follow STATE.nav, whoever changed it.
+  if (typeof syncNavActive === "function") syncNavActive();
 
   const el = document.getElementById("content");
   const scoped = filteredRoster();
@@ -659,6 +661,15 @@ function viewMSKRegion(region) {
   document.querySelector(".modal")?.classList.add("wide");
 }
 
+// Medical and MSK Analytics share the Medical nav entry; this strip switches
+// between them. MSK Analytics had its own sidebar entry until Oct 2026 and was
+// opened 5 times in two weeks, for 2 seconds on average - it reads as a
+// facet of Medical, not a destination of its own.
+function medicalSubTabs() {
+  const tab = (nav, label) => `<button type="button" role="tab" aria-selected="${STATE.nav === nav}" data-tel="nav:${nav}" onclick="goNav('${nav}')">${label}</button>`;
+  return `<div class="seg" role="tablist" aria-label="Medical views">${tab("medical", "Report Sick Log")}${tab("mskAnalytics", "MSK Analytics")}</div>`;
+}
+
 function renderMSKAnalytics(el) {
   const today = todayISO();
   if (!_mskAnalyticsStart) {
@@ -752,6 +763,7 @@ function renderMSKAnalytics(el) {
   const regionChip = reg => `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other}22;color:${MSK_REGION_COLORS[reg] || MSK_REGION_COLORS.Other};margin-right:3px">${reg}</span>`;
 
   el.innerHTML = `
+    ${medicalSubTabs()}
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <div style="min-width:0;flex:1 1 200px">
         <h2 style="font-size:18px;font-weight:700">📊 MSK Analytics${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}]</span>` : ""}</h2>
@@ -1588,6 +1600,7 @@ function renderMedical(el) {
   };
 
   el.innerHTML = `
+    ${medicalSubTabs()}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Report Sick Log${isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.medical.length}]</span>` : ""}</h2>
       <div style="display:flex;gap:8px">

@@ -143,6 +143,7 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 .nav-btn.active>.nav-ico{color:var(--accent)}
 @media (hover:hover) and (pointer:fine){.nav-btn:hover>.nav-ico{color:var(--muted)}}
 .nav-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+.nav-group{padding:14px 16px 5px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:var(--dim)}
 #sidebar-footer{margin-top:auto;padding:14px;border-top:1px solid var(--border);font-size:10px;line-height:1.6;color:var(--dim);font-variant-numeric:tabular-nums}
 
 /* ── Main / topbar ─────────────────────────────────────────*/
@@ -151,6 +152,18 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 #topbar .topbar-search-icon{font-size:15px;color:var(--dim);line-height:1}
 #topbar input{flex:1;max-width:350px;min-height:34px;padding:8px 13px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;transition:border-color var(--d2) var(--ez)}
 #topbar input::placeholder{color:var(--dim)}
+#topbar input[type=search]{-webkit-appearance:none;appearance:none}
+/* Search results: inline chips on desktop, a dropdown under the bar on a
+   phone (mobile block). Each hit says 4D AND name - a search by name has to
+   say who matched. */
+#search-results{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
+#search-results:empty{display:none}
+.search-hit{display:inline-flex;align-items:center;gap:7px;min-height:30px;padding:4px 10px;border:1px solid rgba(var(--accentRGB),.45);border-radius:var(--r1);background:rgba(var(--accentRGB),.16);color:var(--text);font:inherit;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+.search-hit .mono{color:var(--accentLift);font-weight:700}
+.search-hit .mono:empty{display:none}
+.search-hit:active{transform:scale(.97)}
+.search-hit:focus-visible{outline:none;box-shadow:var(--ring)}
+.search-none{font-size:11px;color:var(--dim);padding:4px 6px}
 #topbar input:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 #topbar-filters{margin-left:auto;display:flex;gap:6px;align-items:center}
 #topbar-filters .filter-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600}
@@ -159,7 +172,7 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
    hidden behind ☰ on mobile). Green=saved, orange=saving, red=NOT saved.
    The red state is the one that has to survive glare, so it goes solid fill
    + white text rather than the tinted wash the other two states use. */
-#sync-status{flex-shrink:0;border:1px solid transparent;border-radius:var(--rp);padding:6px 12px;font:inherit;font-size:11px;font-weight:700;line-height:1;white-space:nowrap;background:none;color:var(--muted);transition:transform var(--d1) var(--ez)}
+#sync-status{flex-shrink:0;cursor:pointer;border:1px solid transparent;border-radius:var(--rp);padding:6px 12px;font:inherit;font-size:11px;font-weight:700;line-height:1;white-space:nowrap;background:none;color:var(--muted);transition:transform var(--d1) var(--ez)}
 #sync-status.s-ok{color:var(--green);background:rgba(var(--greenRGB),.14);border-color:rgba(var(--greenRGB),.3)}
 #sync-status.s-syncing{color:var(--orange);background:rgba(var(--orangeRGB),.14);border-color:rgba(var(--orangeRGB),.3)}
 #sync-status.s-error{color:#fff;background:var(--red);border-color:var(--red);cursor:pointer;animation:sync-pulse 1.3s ease-in-out infinite;box-shadow:0 0 0 1px rgba(var(--redRGB),.35),0 2px 10px -2px rgba(var(--redRGB),.5)}
@@ -322,7 +335,9 @@ tbody tr:last-child td{border-bottom:none}
 .sync-log div:last-child{border-bottom:none}
 
 /* Hamburger button — only shown on mobile via the media query below. */
-#mobile-nav-toggle{display:none;background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;padding:4px 10px;line-height:1;border-radius:var(--r1)}
+/* Phone-only bottom bar (see the mobile block). Absent on desktop, where the
+   sidebar is always on screen. */
+#tabbar{display:none}
 #sidebar-backdrop{position:fixed;inset:0;background:rgba(3,6,13,.5);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:150;animation:veil-in var(--d2) var(--ez) both}
 /* Mobile filter toggle — desktop hides it, mobile shows it as the entry
    point to the scope filter popover. */
@@ -421,7 +436,7 @@ tbody tr:last-child td{border-bottom:none}
   .lc-wiz-status-row:hover{border-color:var(--borderHi)}
   .lc-wiz-filter-chip:hover:not(.active){background:var(--surface3);border-color:var(--borderHi);color:var(--text)}
   .cmp-details summary:hover{color:var(--text)}
-  #mobile-nav-toggle:hover,#mobile-filter-toggle:hover{background:var(--surface2)}
+  #mobile-filter-toggle:hover{background:var(--surface2)}
   #sync-status.s-ok:hover,#sync-status.s-syncing:hover{filter:brightness(1.12)}
 }
 
@@ -431,10 +446,12 @@ tbody tr:last-child td{border-bottom:none}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   #sidebar{background:var(--surface)}
   #topbar{background:var(--surface)}
+  #tabbar{background:var(--surface)}
   .modal-overlay{background:rgba(3,6,13,.82)}
   .dropdown-menu{background:var(--surface2)}
   #sidebar-backdrop{background:rgba(3,6,13,.7)}
   #topbar-filters{background:var(--surface)}
+  #search-results{background:var(--surface)}
 }
 
 /* ── Mobile (≤768px) ───────────────────────────────────────
@@ -468,10 +485,12 @@ tbody tr:last-child td{border-bottom:none}
 .dty-foot{font-size:11px;color:var(--dim);padding:2px 2px 10px;line-height:1.5}
 .dty-chev{flex:0 0 12px;color:var(--dim);font-size:12px}
 
-.dty-seg{display:flex;background:var(--field);border:1px solid var(--border);border-radius:var(--r2);padding:3px;margin-bottom:12px}
-.dty-seg button{flex:1 1 0;min-width:0;min-height:40px;border:0;border-radius:var(--r1);background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background-color var(--d2) var(--ez),color var(--d2) var(--ez)}
-.dty-seg button[aria-selected="true"]{background:var(--surface2);color:var(--text);box-shadow:var(--sh1),var(--lift)}
-.dty-seg button:focus-visible{outline:none;box-shadow:var(--ring)}
+.dty-seg,.seg{display:flex;background:var(--field);border:1px solid var(--border);border-radius:var(--r2);padding:3px;margin-bottom:12px}
+/* Two facets of one view, so it never stretches across a desktop screen. */
+.seg{max-width:380px}
+.dty-seg button,.seg button{flex:1 1 0;min-width:0;min-height:40px;border:0;border-radius:var(--r1);background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background-color var(--d2) var(--ez),color var(--d2) var(--ez)}
+.dty-seg button[aria-selected="true"],.seg button[aria-selected="true"]{background:var(--surface2);color:var(--text);box-shadow:var(--sh1),var(--lift)}
+.dty-seg button:focus-visible,.seg button:focus-visible{outline:none;box-shadow:var(--ring)}
 
 /* The arrows are the control, so they are real 46px targets, not glyphs. */
 .dty-daynav{display:flex;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:12px;box-shadow:var(--sh1),var(--lift)}
@@ -636,7 +655,7 @@ button.dty-slot{cursor:pointer}
 
 @media (hover:hover){
   button.dty-slot:hover,.dty-mcell:hover,.dty-pick:hover,.dty-issue:hover,.dty-bal:hover{background:var(--surface3)}
-  .dty-seg button:not([aria-selected="true"]):hover{color:var(--text)}
+  .dty-seg button:not([aria-selected="true"]):hover,.seg button:not([aria-selected="true"]):hover{color:var(--text)}
 }
 
 @media(max-width:768px){
@@ -644,7 +663,7 @@ button.dty-slot{cursor:pointer}
      rather than reflowing. The person calendar is the one thing pinned -
      7 x 46 plus gaps is 346 of the 364 a 390px phone leaves after #content's
      gutters, so a wider cell would push the last day off-screen. */
-  .dty-seg button{min-height:44px;font-size:12.5px}
+  .dty-seg button,.seg button{min-height:44px;font-size:12.5px}
   .dty-daynav button{min-height:50px}
   .dty-daylabel{font-size:14px}
   .dty-slot{min-height:60px}
@@ -677,7 +696,18 @@ button.dty-slot{cursor:pointer}
   #sidebar-footer{font-size:11px;padding:14px}
 
   /* Hamburger visible, backdrop ready to be revealed */
-  #mobile-nav-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px}
+  /* Bottom bar: Dashboard, Medical, Attendance, Roster, More. A flex child of
+     #main below #content rather than position:fixed, so #content's scroll
+     area ends where the bar begins with no padding to keep in step, and the
+     bar never floats over a bottom-sheet modal (those sit on the overlay). */
+  #tabbar{display:flex;flex-shrink:0;gap:2px;padding:4px 6px calc(4px + env(safe-area-inset-bottom,0));border-top:1px solid var(--border);background:rgba(28,25,23,.86);-webkit-backdrop-filter:blur(20px) saturate(1.6);backdrop-filter:blur(20px) saturate(1.6)}
+  .tab-btn{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:52px;padding:6px 2px;border:0;border-radius:var(--r2);background:none;color:var(--dim);font:inherit;font-size:10.5px;font-weight:600;letter-spacing:.01em;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:color var(--d2) var(--ez),transform var(--d1) var(--ez)}
+  .tab-btn>span:last-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab-ico{font-size:18px;line-height:1}
+  .tab-btn.active{color:var(--accentLift)}
+  .tab-btn:active{transform:scale(.94)}
+  .tab-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+  .nav-group{padding:16px 18px 6px;font-size:10.5px}
 
   /* Topbar is now a single short row: hamburger | search | filter toggle.
      The scope-filter selects live in a popover panel below the topbar
@@ -685,7 +715,15 @@ button.dty-slot{cursor:pointer}
   #topbar{flex-wrap:nowrap;padding:8px 12px;gap:8px}
   #topbar .topbar-search-icon{display:none}
   #topbar input{flex:1 1 auto;min-width:0;max-width:none;font-size:14px;padding:10px 13px;min-height:40px}
-  #search-results{order:99;flex-basis:100%;margin-top:4px}  /* drops below row if any */
+  /* Results drop down under the bar instead of sharing its one row. In the row
+     they took flex-basis:100% even when EMPTY, which crushed the search field
+     to ~77px on a 390px phone and stacked the hits three rows deep. */
+  #search-results{position:absolute;top:100%;left:0;right:0;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:2px;padding:6px 8px 8px;background:rgba(20,25,36,.96);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border-bottom:1px solid var(--border);border-radius:0 0 var(--r3) var(--r3);box-shadow:var(--sh3);z-index:49;animation:pop-in var(--d2) var(--ez) both;transform-origin:top center}
+  .search-hit{min-height:48px;padding:10px 12px;gap:12px;font-size:14px;font-weight:500;border:0;border-radius:var(--r2);background:transparent;white-space:normal;text-align:left}
+  /* Kept even when empty (a commander) so every name starts in one column. */
+  .search-hit .mono,.search-hit .mono:empty{display:inline-block;min-width:40px;font-size:14px}
+  .search-hit:active{background:var(--surface2);transform:none}
+  .search-none{font-size:13px;padding:12px}
 
   /* The "Scope" toggle — shows current filter state ("All", "P1", "P1S2"). */
   #mobile-filter-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:56px;min-height:40px;padding:6px 11px;border-radius:var(--r2);border:1px solid var(--border);background:var(--surface2);color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.03em;flex-shrink:0;transition:color var(--d2) var(--ez),border-color var(--d2) var(--ez),transform var(--d1) var(--ez)}

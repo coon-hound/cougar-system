@@ -1,19 +1,41 @@
 // Bootstrap: handle invite redemption from ?token=…, wire up nav + search,
 // load local cache, render, then auto-sync.
 
-document.querySelectorAll(".nav-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    STATE.nav = btn.dataset.nav;
-    render();
-    // On mobile, navigating to a new tab should auto-close the slide-out menu
-    // so the user isn't left staring at the sidebar overlay.
-    closeMobileSidebar();
+// ── Navigation ───────────────────────────────────────────
+// Two controls drive STATE.nav: the sidebar (.nav-btn, the drawer on a phone)
+// and the phone's bottom bar (#tabbar). Neither owns the highlight - render()
+// calls syncNavActive() on every paint, so any code that sets STATE.nav (a
+// deep link, showUsage, a sub-tab) leaves both bars telling the truth.
+
+// The bottom bar's four destinations. Anything else lights up "More".
+const TABBAR_NAVS = ["dashboard", "medical", "attendance", "roster"];
+// Views that live inside another view's nav entry.
+const NAV_PARENT = { mskAnalytics: "medical" };
+
+function syncNavActive() {
+  const nav = NAV_PARENT[STATE.nav] || STATE.nav;
+  document.querySelectorAll(".nav-btn, #tabbar [data-nav]").forEach(b => {
+    b.classList.toggle("active", b.dataset.nav === nav);
   });
+  document.getElementById("tabbar-more")?.classList.toggle("active", !TABBAR_NAVS.includes(nav));
+}
+
+function goNav(nav) {
+  // Tapping the view you are already on is the back-to-top gesture.
+  if (STATE.nav === nav) document.getElementById("content")?.scrollTo(0, 0);
+  STATE.nav = nav;
+  render();
+  // On mobile, navigating should close the slide-out menu so the user isn't
+  // left staring at the sidebar overlay.
+  closeMobileSidebar();
+}
+
+document.querySelectorAll(".nav-btn, #tabbar [data-nav]").forEach(btn => {
+  btn.addEventListener("click", () => goNav(btn.dataset.nav));
 });
 
-// ── Mobile sidebar toggle ────────────────────────────────
+// ── Mobile sidebar ───────────────────────────────────────
+// On a phone the sidebar is a drawer, opened from the bottom bar's More.
 function openMobileSidebar() {
   document.getElementById("sidebar")?.classList.add("open");
   document.getElementById("sidebar-backdrop")?.classList.remove("hidden");
@@ -22,7 +44,7 @@ function closeMobileSidebar() {
   document.getElementById("sidebar")?.classList.remove("open");
   document.getElementById("sidebar-backdrop")?.classList.add("hidden");
 }
-document.getElementById("mobile-nav-toggle")?.addEventListener("click", openMobileSidebar);
+document.getElementById("tabbar-more")?.addEventListener("click", openMobileSidebar);
 document.getElementById("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
 
 document.getElementById("search-input").addEventListener("input", e => {
@@ -32,7 +54,20 @@ document.getElementById("search-input").addEventListener("input", e => {
   // Search respects the global scope filter so results don't show recruits the
   // user has explicitly scoped out of view.
   const matches = filteredRoster().filter(r => r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)).slice(0, 5);
-  res.innerHTML = matches.map(r => `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openPerson('${r.id}')">${r.id}</button>`).join("");
+  // 4D and name together: a search by name has to say WHO matched, and a
+  // commander has no 4D worth showing (displayId blanks it).
+  res.innerHTML = matches.map(r => {
+    const id = displayId(r.id);
+    return `<button type="button" class="search-hit" onclick="openPerson('${r.id}')"><span class="mono">${id}</span><span>${escapeAttr(displayPersonLabel(r.id))}</span></button>`;
+  }).join("") || `<div class="search-none">No match in scope</div>`;
+});
+// Opening a result clears the search. On a phone the results are a dropdown
+// over the content, and leaving it up after the person sheet closes would
+// cover the view underneath.
+document.getElementById("search-results").addEventListener("click", e => {
+  if (!e.target.closest(".search-hit")) return;
+  document.getElementById("search-input").value = "";
+  document.getElementById("search-results").innerHTML = "";
 });
 
 // ── Global platoon/section filter ────────────────────────
@@ -322,7 +357,6 @@ async function refreshIdentity() {
 // Reach it with #usage in the URL, or call showUsage() from the console.
 function showUsage() {
   STATE.nav = "usage";
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
   render();
   closeMobileSidebar();
 }

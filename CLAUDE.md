@@ -48,6 +48,7 @@ Archiving is sticky by design: un-archiving is a psql `update ... set deleted_at
 - **`conducts.updated_at` is not a creation time** (`conducts_touch` rewrites it on every UPDATE), and the Sheets import stamped all 109 imported rows with one timestamp AFTER the intake 16 cutoff.
 Anything selecting conducts by age keeps all of them or none; name the ids.
 - **An IPPT is (series, attempt), never attempt alone.** `series` is `BMT` (the five BMT IPPTs) or `KH` (Keat Hong, the current phase), and attempt numbers restart per series, so "IPPT 1" names two different days. Read it through `ipptSeriesOf` (it dates legacy rows that have no field) and order across series with `ipptOrderKey`. Results arrive as screenshots of the IPPT app and go in through `scripts/ippt-import.mjs` - see [docs/IPPT-IMPORT.md](docs/IPPT-IMPORT.md).
+- **Navigate with `goNav(nav)`, and never set a nav highlight by hand.** Two controls drive `STATE.nav` (the sidebar `.nav-btn`s and the phone's bottom `#tabbar`), and `render()` calls `syncNavActive()` on every paint, so anything that sets `STATE.nav` leaves both bars right. A view that lives inside another's entry is listed in `NAV_PARENT` (`mskAnalytics` -> `medical`). On a phone there is no hamburger: the drawer opens from More (`#tabbar-more`), and a spec at 390px reaches the four daily views via `#tabbar [data-nav=...]`.
 - **Derived state is derived.** Out-of-camp status and the movement board are computed from their source records, never stored separately. Do not introduce a second copy.
 
 ## The Postgres backend

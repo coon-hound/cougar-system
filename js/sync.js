@@ -106,13 +106,16 @@ function syncTimingSummary() {
 
 // The always-visible topbar pill (#sync-status). kind ∈ ok | syncing | error.
 // `onTap` makes it a tap-to-retry button (used for the unsaved/error state).
+// Otherwise it opens Sync & I/O: people tapped the green pill expecting it to
+// do something (36 taps in Sep 2026 that did nothing), and with Sync moved to
+// the bottom of the sidebar this is its shortest route.
 function updateSyncPill(kind, text, onTap) {
   const el = document.getElementById("sync-status");
   if (!el) return;
   el.className = kind === "error" ? "s-error" : kind === "syncing" ? "s-syncing" : "s-ok";
   el.textContent = text;
-  el.onclick = onTap || null;
-  el.title = onTap ? "Tap to retry syncing" : "Sync status";
+  el.onclick = onTap || (() => { goToSyncTab(); if (typeof closeMobileSidebar === "function") closeMobileSidebar(); });
+  el.title = onTap ? "Tap to retry syncing" : "Sync status - tap for Sync & I/O";
 }
 
 function setSyncIndicator(text, color) {

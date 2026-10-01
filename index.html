@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cougar Company Data System</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=156">
+<link rel="stylesheet" href="styles.css?v=158">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 </head>
@@ -17,16 +17,21 @@
     <small>40 SAR COUGAR</small>
     <h2>Data System</h2>
   </div>
+  <!-- Grouped by how often each view is opened (usage_daily, Sep 2026): the
+       daily five first, records next, system last. Medical holds MSK
+       Analytics as a sub-tab rather than a sidebar entry of its own. -->
+  <div class="nav-group">Daily</div>
   <button class="nav-btn active" data-nav="dashboard"><span class="nav-ico" aria-hidden="true">▤</span><span>Dashboard</span></button>
-  <button class="nav-btn" data-nav="roster"><span class="nav-ico" aria-hidden="true">☰</span><span>Roster</span></button>
-  <button class="nav-btn" data-nav="attendance"><span class="nav-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
-  <button class="nav-btn" data-nav="detail"><span class="nav-ico" aria-hidden="true">⌕</span><span>Detail</span></button>
   <button class="nav-btn" data-nav="medical"><span class="nav-ico" aria-hidden="true">✚</span><span>Medical</span></button>
-  <button class="nav-btn" data-nav="ippt"><span class="nav-ico" aria-hidden="true">▲</span><span>IPPT</span></button>
+  <button class="nav-btn" data-nav="attendance"><span class="nav-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
+  <button class="nav-btn" data-nav="roster"><span class="nav-ico" aria-hidden="true">☰</span><span>Roster</span></button>
   <button class="nav-btn" data-nav="leave"><span class="nav-ico" aria-hidden="true">↗</span><span>Out / Leave</span></button>
-  <button class="nav-btn" data-nav="duty"><span class="nav-ico" aria-hidden="true">◫</span><span>Duty</span></button>
-  <button class="nav-btn" data-nav="mskAnalytics"><span class="nav-ico" aria-hidden="true">◆</span><span>MSK Analytics</span></button>
+  <div class="nav-group">Records</div>
+  <button class="nav-btn" data-nav="detail"><span class="nav-ico" aria-hidden="true">⌕</span><span>Detail</span></button>
+  <button class="nav-btn" data-nav="ippt"><span class="nav-ico" aria-hidden="true">▲</span><span>IPPT</span></button>
   <button class="nav-btn" data-nav="conducts"><span class="nav-ico" aria-hidden="true">⊞</span><span>Conducts</span></button>
+  <button class="nav-btn" data-nav="duty"><span class="nav-ico" aria-hidden="true">◫</span><span>Duty</span></button>
+  <div class="nav-group">System</div>
   <button class="nav-btn" data-nav="access" hidden><span class="nav-ico" aria-hidden="true">⊡</span><span>Access</span></button>
   <button class="nav-btn" data-nav="sync"><span class="nav-ico" aria-hidden="true">↻</span><span>Sync & I/O</span></button>
   <div id="sidebar-footer">
@@ -41,10 +46,9 @@
 <!-- MAIN -->
 <div id="main">
   <div id="topbar">
-    <button id="mobile-nav-toggle" aria-label="Open menu">☰</button>
     <span class="topbar-search-icon" aria-hidden="true">⌕</span>
-    <input id="search-input" placeholder="Search 4D or Name...">
-    <div id="search-results" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+    <input id="search-input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Search 4D or Name...">
+    <div id="search-results"></div>
     <button id="mobile-filter-toggle" aria-label="Open scope filter">All</button>
     <div id="topbar-filters">
       <span class="filter-label">Scope</span>
@@ -63,6 +67,15 @@
     <button id="sync-status" class="s-syncing" type="button" title="Sync status">⟳ …</button>
   </div>
   <div id="content"></div>
+  <!-- Phone-only bottom bar. The four views behind ~90% of navigation, one tap
+       each from anywhere; More opens the full sidebar for the rest. -->
+  <nav id="tabbar" aria-label="Main">
+    <button type="button" class="tab-btn active" data-nav="dashboard"><span class="tab-ico" aria-hidden="true">▤</span><span>Dashboard</span></button>
+    <button type="button" class="tab-btn" data-nav="medical"><span class="tab-ico" aria-hidden="true">✚</span><span>Medical</span></button>
+    <button type="button" class="tab-btn" data-nav="attendance"><span class="tab-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
+    <button type="button" class="tab-btn" data-nav="roster"><span class="tab-ico" aria-hidden="true">☰</span><span>Roster</span></button>
+    <button type="button" class="tab-btn" id="tabbar-more" data-tel="nav:more" aria-label="More views"><span class="tab-ico" aria-hidden="true">⋯</span><span>More</span></button>
+  </nav>
 </div>
 
 <!-- MODAL -->
@@ -80,19 +93,19 @@
   Plain scripts (not modules) so this works under file:// too.
   Load order matters: state → api → ippt-scoring → helpers → parade-compare → render → forms → sync → main.
 -->
-<script src="js/state.js?v=156"></script>
-<script src="js/api.js?v=156"></script>
-<script src="js/ippt-scoring.js?v=156"></script>
-<script src="js/helpers.js?v=156"></script>
-<script src="js/parade-compare.js?v=156"></script>
-<script src="js/render.js?v=156"></script>
-<script src="js/render-usage.js?v=156"></script>
-<script src="js/forms.js?v=156"></script>
-<script src="js/patchnotes.js?v=156"></script>
-<script src="js/sync.js?v=156"></script>
-<script src="js/main.js?v=156"></script>
+<script src="js/state.js?v=158"></script>
+<script src="js/api.js?v=158"></script>
+<script src="js/ippt-scoring.js?v=158"></script>
+<script src="js/helpers.js?v=158"></script>
+<script src="js/parade-compare.js?v=158"></script>
+<script src="js/render.js?v=158"></script>
+<script src="js/render-usage.js?v=158"></script>
+<script src="js/forms.js?v=158"></script>
+<script src="js/patchnotes.js?v=158"></script>
+<script src="js/sync.js?v=158"></script>
+<script src="js/main.js?v=158"></script>
 <!-- Telemetry loads LAST, after every global it wraps already exists. It is a
      passive observer: if it fails, the app must behave as though it were absent. -->
-<script src="js/telemetry.js?v=156"></script>
+<script src="js/telemetry.js?v=158"></script>
 </body>
 </html>

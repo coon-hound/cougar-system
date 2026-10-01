@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 156;
+const APP_VERSION = 158;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 158,
+    date: "1 Oct 2026",
+    title: "Fewer taps to get around",
+    intro: "We counted where everyone taps. Most switches between views went through the ☰ menu, which cost an extra tap every time. On a phone the four views you open most now sit along the bottom of the screen.",
+    items: [
+      { t: "📱 Bottom bar", d: "Dashboard, Medical, Attendance and Roster are one tap from anywhere. Everything else is under More, grouped into Daily, Records and System." },
+      { t: "🔎 Search shows who matched", d: "Results drop down under the search bar with the 4D and the name, so a search by name tells you who you found. The search bar also has its full width back." },
+      { t: "✚ MSK Analytics moved into Medical", d: "Open Medical and switch between the Report Sick Log and MSK Analytics at the top." },
+      { t: "● Tap the sync dot for Sync & I/O", d: "The green dot at the top right now opens Sync & I/O. When it is red, a tap still retries saving." },
+    ],
+  },
   {
     v: 156,
     date: "28 Sep 2026",
