@@ -525,9 +525,11 @@ export function formatSwapReport(plan, { names = false } = {}) {
 //
 // A man posted from one section to another, and a late enlistee joining one,
 // are the same operation seen from the seat's side: a section's MEMBERSHIP
-// changes, and every section whose membership changed is re-dealt
-// alphabetically into seats 1..n - the section he leaves closes up behind him
-// (as a departure does) and the one he joins opens a seat in name order.
+// changes. The section he leaves closes up behind him (as a departure does);
+// the one he joins seats him AFTER its last man. Unlike the intake reseat this
+// is NOT alphabetical: dealing a newcomer in by name renumbers everyone below
+// him, and a 4D is what commanders know a man by. Several newcomers to one
+// section go on the end in name order among themselves.
 //
 // They are planned TOGETHER, in one pass, on purpose. "Move A out of 7-2 and
 // enlist B into 7-2" run as two separate operations re-deals 7-2 twice: the men
@@ -631,17 +633,29 @@ export function planTransfer({ roster, moves = [], enlistees = [] }) {
   for (const sect of [...touched].sort()) {
     const stay = index.members.filter((m) => m.id.slice(0, 2) === sect && !destOf.has(m.id));
     const arrive = index.members.filter((m) => destOf.get(m.id) === sect);
+    // Close only the seats vacated by THIS move. Pre-existing gaps stay in
+    // place, and arrivals go after the highest remaining seat.
+    const man = (m) => ({ kind: "man", name: m.name, oldId: m.id, pid: m.pid ?? null });
+    const byName = (a, b) => a.name.localeCompare(b.name, "en");
+    const departed = [...destOf.keys()].filter(id => id.slice(0,2)===sect).map(id=>Number(id.slice(2)));
+    const existing = [...stay].sort((a,b)=>a.id.localeCompare(b.id)).map(m=>({
+      ...man(m), bed:Number(m.id.slice(2))-departed.filter(n=>n<Number(m.id.slice(2))).length,
+    }));
+    const lastBed=Math.max(0,...existing.map(m=>m.bed));
     const seats = [
-      ...[...stay, ...arrive].map((m) => ({ kind: "man", name: m.name, oldId: m.id, pid: m.pid ?? null })),
-      ...incoming.filter((e) => e.to === sect).map((e) => ({ kind: "new", name: e.name, ref: e.ref })),
-    ].sort((a, b) => a.name.localeCompare(b.name, "en"));
+      ...existing,
+      ...[
+        ...arrive.map(man),
+        ...incoming.filter((e) => e.to === sect).map((e) => ({ kind: "new", name: e.name, ref: e.ref })),
+      ].sort(byName).map((m,i)=>({...m,bed:lastBed+i+1})),
+    ];
 
-    if (seats.length > 99) {
-      issues.push({ level: "error", message: `section ${sect} would have ${seats.length} men; a 4D has only two digits for the seat` });
+    if (seats.some(m=>m.bed>99)) {
+      issues.push({ level: "error", message: `section ${sect} has no seat after its last man; a 4D has only two digits for the seat` });
       continue;
     }
-    const rows = seats.map((s, i) => {
-      const newId = `${sect}${pad2(i + 1)}`;
+    const rows = seats.map(s => {
+      const newId = `${sect}${pad2(s.bed)}`;
       if (s.kind === "new") inserts.push({ newId, name: s.name, ref: s.ref });
       else if (s.oldId !== newId) moved.push({ oldId: s.oldId, newId, name: s.name, pid: s.pid });
       return { oldId: s.kind === "new" ? "" : s.oldId, newId, name: s.name };

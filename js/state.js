@@ -43,8 +43,8 @@ const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 //   v3 "cougar-data-v3"  - intake 16 before platoon 9 was re-sectioned
 //   v5 "cougar-data-v5"  - before section 9-4 closed up behind a departure
 //   v6 "cougar-data-v6"  - before a man moved 7-2 -> 9-4 and a late enlistee joined 7-2
-const STORAGE_KEY = "cougar-data-v7";
-const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5", "cougar-data-v6"];
+const STORAGE_KEY = "cougar-data-v9";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5", "cougar-data-v6", "cougar-data-v7", "cougar-data-v8"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
@@ -440,6 +440,7 @@ const STATE = {
   // poll to decide which tabs to auto-refresh. Persisted WITH the data (not a
   // separate key) so a reloaded stale tab pushes with the rev it actually last
   // saw — a desynced rev would defeat the staleness check.
+  seatEpoch: null,
   rev: {},
   charts: {}
 };
@@ -718,6 +719,7 @@ function saveLocal() {
     // know the tab yet, the command team would be lost outright, which is
     // worse than the per-device map this replaced.
     duty: STATE.duty, calendar: STATE.calendar, oilRule: STATE.oilRule,
+    seatEpoch: STATE.seatEpoch ?? null,
     rev: STATE.rev || {}
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
@@ -733,6 +735,7 @@ function loadLocal() {
   if (STORAGE_KEY_LEGACY.some(k => localStorage.getItem(k))) {
     STORAGE_KEY_LEGACY.forEach(k => localStorage.removeItem(k));
     [DIRTY_KEY, DIRTY_OPS_KEY].forEach(k => localStorage.removeItem(k));
+    if (typeof discardStaleSeating === "function") discardStaleSeating();
   }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -752,6 +755,7 @@ function loadLocal() {
     STATE.oilRule = normalizeOilRule(d.oilRule);
     STATE.msk = normalizeMSK(d.msk);
     STATE.conducts = padD4OnLayer(Array.isArray(d.conducts) ? d.conducts : []);
+    STATE.seatEpoch = Number.isSafeInteger(d.seatEpoch) ? d.seatEpoch : null;
     STATE.rev = (d.rev && typeof d.rev === "object") ? d.rev : {};
   } catch { /* fall through to empty state */ }
   migrateLegacyDutyRoster();

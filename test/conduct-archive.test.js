@@ -45,7 +45,7 @@ module.exports = async function () {
   // ── Numbering ───────────────────────────────────────────────────────────
   suite("conduct archive - the migration slots in cleanly");
 
-  await test("0010 is the highest number, and no number is claimed twice", () => {
+  await test("0010 remains present, and no migration number is claimed twice", () => {
     // A past incident shipped two migrations both calling themselves 0005. The
     // files apply in lexical order, so a collision means one of them is skipped
     // or applied in an order nobody chose. Not gapless: 0008 is held by an
@@ -54,7 +54,6 @@ module.exports = async function () {
     const nums = files.map((f) => f.slice(0, 4));
     eq(nums.length, new Set(nums).size, `one migration per number: ${files.join(", ")}`);
     ok(nums.includes("0010"), "0010_conduct_archive.sql is present");
-    ok(nums.every((n) => n <= "0010"), "nothing is numbered after it");
   });
 
   // ── The keeper list ─────────────────────────────────────────────────────

@@ -252,6 +252,8 @@ async function tryRedeemInviteFromURL() {
     maybeRestoreDirty();
   }
 
+  if (typeof showSeatingNotice === "function") showSeatingNotice();
+
   // Ask the backend who this device is signed in as, and whether it may hand
   // out access. Deliberately AFTER the first render: it is one extra round
   // trip and nothing on screen depends on it, so it must not delay the app

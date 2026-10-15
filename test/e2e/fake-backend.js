@@ -32,6 +32,12 @@ const REV_TABS = Object.keys(STATE_KEY);
 // gets (body, callNumber) and may return a response object to override the
 // default (used to inject 503 / 401 / conflict).
 function makeBackend(opts = {}) {
+  // A full snapshot includes empty tables authoritatively. Start with the
+  // synthetic fixture so browser tests do not depend on retaining stale cache.
+  const fixture = require("./fixtures/demo-seed.json");
+  const cached = Object.values(fixture).find(v => v && Array.isArray(v.roster)) || {};
+  const seed = Object.fromEntries(Object.entries(STATE_KEY).map(([tab,key]) => [tab,cached[key] || []]));
+  opts = { ...opts, seed: { ...seed, ...(opts.seed || {}) } };
   const tabs = {};       // tab -> array of row objects
   const revs = {};       // tab -> integer revision
   for (const t of REV_TABS) { tabs[t] = []; revs[t] = 1; }

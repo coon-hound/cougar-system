@@ -329,6 +329,7 @@ async function main() {
   const { default: postgres } = await import("postgres");
   const sql = postgres(DATABASE_URL, { prepare: false, max: 4 });
   try {
+    const [{ epoch: seatEpoch }] = await sql`select seating_epoch() as epoch`;
     const current = await currentIntake(sql);
     if (!current) {
       console.error("No current intake. Apply supabase/migrations/0004_intake.sql first.");
@@ -385,6 +386,7 @@ async function main() {
     }
 
     const result = await sql.begin(async (tx) => {
+      await tx`select begin_seating_change(${seatEpoch})`;
       // 1. Give the outgoing cohort its real name, if it is still 'bootstrap'.
       //    intake_log's FK cascades; the stamped columns are plain text and are
       //    rewritten explicitly.

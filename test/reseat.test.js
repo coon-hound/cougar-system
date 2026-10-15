@@ -427,24 +427,51 @@ async function main() {
   const transfer = (opts) => P.planTransfer({ roster: opts.roster ?? ROSTER, moves: opts.moves ?? [], enlistees: opts.enlistees ?? [] });
   const R = await import(pathToFileURL(path.join(ROOT, "scripts/reseat.mjs")).href);
 
-  await test("a man posted to another section: the one he leaves closes up, the one he joins deals him in alphabetically", () => {
+  await test("a man posted to another section: the one he leaves closes up, the one he joins seats him LAST", () => {
     const p = transfer({ moves: [{ who: "BRAVO LIM", to: "52" }] });
     ok(p.ok, JSON.stringify(p.issues));
-    eq(moveMap(p), { "5102": "5201", "5103": "5102", "5201": "5202", "5202": "5203" });
+    eq(moveMap(p), { "5102": "5203", "5103": "5102" }, "DELTA and ECHO keep their 4Ds");
     eq(p.inserts, []);
   });
 
-  await test("a move out and an enlistee in to the same section are dealt ONCE - nobody else churns", () => {
-    // Run as two operations this would shuffle CHARLIE up to 5102 and straight
-    // back down to 5103, collecting a seat he never really held.
+  await test("an enlistee goes on the end of his section, even when his name sorts first", () => {
+    const p = transfer({ enlistees: [{ name: "AARON KOH", to: "51" }] });
+    ok(p.ok, JSON.stringify(p.issues));
+    eq(p.inserts.map((i) => i.newId), ["5104"]);
+    eq(p.moves, [], "nobody already seated moves");
+  });
+
+  await test("a late enlistee preserves existing vacancies and the IDs beyond them", () => {
+    const p=transfer({roster:ROSTER.filter(r=>r.id!=="5102"),enlistees:[{name:"AARON KOH",to:"51"}]});
+    ok(p.ok,JSON.stringify(p.issues));
+    eq(p.moves,[]);
+    eq(p.inserts.map(r=>r.newId),["5104"]);
+  });
+  await test("a newcomer cannot overflow the last 4D even when the section has gaps", () => {
+    const p=transfer({roster:[{id:"5199",name:"ALPHA SYNTHETIC",role:"Recruit",pid:"P-A"}],enlistees:[{name:"ZULU KOH",to:"51"}]});
+    ok(!p.ok);
+    ok(/no seat after its last man/.test(p.issues[0].message));
+  });
+
+  await test("a section not seated alphabetically keeps its order - newcomers never re-sort it", () => {
+    const roster = [
+      { id: "5101", name: "CHARLIE NG", role: "Recruit", pid: "P-C" },
+      { id: "5102", name: "ALPHA TAN", role: "Recruit", pid: "P-A" },
+    ];
+    const p = transfer({ roster, enlistees: [{ name: "ZULU KOH", to: "51" }, { name: "BRAVO KOH", to: "51" }] });
+    ok(p.ok, JSON.stringify(p.issues));
+    eq(p.moves, []);
+    eq(p.inserts.map((i) => [i.newId, i.name]), [["5103", "BRAVO KOH"], ["5104", "ZULU KOH"]]);
+  });
+
+  await test("a move out and an enlistee in to the same section are dealt ONCE", () => {
     const p = transfer({
       moves: [{ who: "5102", to: "52" }],
       enlistees: [{ name: "BRAVO KOH", to: "51" }],
     });
     ok(p.ok, JSON.stringify(p.issues));
-    eq(p.inserts.map((i) => i.newId), ["5102"], "the enlistee takes the seat just vacated");
-    ok(!("5103" in moveMap(p)), "CHARLIE NG does not move at all");
-    eq(moveMap(p)["5102"], "5201");
+    eq(moveMap(p), { "5102": "5203", "5103": "5102" }, "CHARLIE closes up once, nobody shuffles back");
+    eq(p.inserts.map((i) => i.newId), ["5103"]);
   });
 
   await test("a section is named as 94, 9-4 or P9S4, and nothing else", () => {

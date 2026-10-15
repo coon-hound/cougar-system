@@ -30,6 +30,8 @@ const API = arg("api", "http://127.0.0.1:8000/");
 const TOKEN = arg("token", "dev-token");
 
 const post = async (body) => {
+  const rev = await (await fetch(`${API}?action=revCheck&auth=${encodeURIComponent(TOKEN)}`)).json();
+  body = { ...body, seatEpoch: rev.seatEpoch };
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "text/plain" },
