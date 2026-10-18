@@ -102,6 +102,59 @@ test.beforeAll(async () => {
 test.afterAll(async () => { if (legacy) legacy.kill(); await sql.end(); });
 test.beforeEach(seed);
 
+test("a staged name-only repair rejects stale legacy writes and preserves unreviewed history", async ({ page }) => {
+  const N = await import(pathToFileURL(path.join(ROOT, "scripts/repair-names.mjs")));
+  const R = await import(pathToFileURL(path.join(ROOT, "scripts/repair-roster.mjs")));
+  const incidentAt = "2026-10-07T06:59:43.709837Z";
+  const ids = ["8408", "9302", "9303"];
+  for (const id of ids) {
+    await sql`insert into intake_log(at,intake,pid,name,old_d4,new_d4,matched_by)
+      values (${incidentAt}::text::timestamptz,'bootstrap',${'P-TEST-'+id},${syntheticName(id)},${id},${id},'move')`;
+    await sql`update roster set name='SYNTHETIC WRONG OCCUPANT' where id=${id}`;
+  }
+  const original = new Map((await rawRows()).map(r=>[r.raw.id,r.raw]));
+  const manifest = { version:1, incidentAt, names:ids.map(id=>({id,pid:'P-TEST-'+id,name:syntheticName(id),
+    expectedFingerprint:R.fingerprint(original.get(id)),verified:true,source:'synthetic independently verified identity'})) };
+  const wrong = structuredClone(manifest); wrong.names[0].name='SYNTHETIC GUESS';
+  await expect(N.repairNames(sql,wrong)).rejects.toThrow('registered name changed');
+  const stale = structuredClone(manifest); stale.names[1].expectedFingerprint='0'.repeat(64);
+  await expect(N.repairNames(sql,stale,{apply:true,checksum:R.manifestChecksum(stale)})).rejects.toThrow('changed since preview');
+  expect(await sql`select * from roster_name_guards`).toHaveLength(0);
+  const initial = await dbFingerprint();
+  const preview = await N.repairNames(sql,manifest);
+  expect(await dbFingerprint()).toBe(initial);
+  // Exercise the exact staged deployment: no seating_state visible yet.
+  await sql`alter table seating_state rename to seating_state_deferred`;
+  try {
+    expect((await N.repairNames(sql,manifest,{apply:true,checksum:preview.checksum})).records).toBe(3);
+    const after = new Map((await rawRows()).map(r=>[r.raw.id,r.raw]));
+    for (const id of ids) {
+      const { name: beforeName, updated_at: beforeTime, ...before } = original.get(id);
+      const { name, updated_at: afterTime, ...rest } = after.get(id);
+      expect(name).toBe(syntheticName(id));
+      expect(rest).toEqual(before);
+    }
+    const guarded = await dbFingerprint();
+    const rejected = await post({action:'upsertRow',tab:'Roster',row:{id:'8408',name:'SYNTHETIC WRONG OCCUPANT',email:'stale@example.invalid'}},'http://127.0.0.1:58002/');
+    expect(rejected.error).toBeTruthy();
+    expect(await dbFingerprint()).toBe(guarded);
+    const batch = await post({action:'applyOps',tab:'Roster',ops:[
+      {op:'upsert',row:{id:'8407',name:syntheticName('8407'),notes:'SYNTHETIC valid unrelated edit'}},
+      {op:'upsert',row:{id:'8408',name:'SYNTHETIC WRONG OCCUPANT'}},
+    ]},'http://127.0.0.1:58002/');
+    expect(batch.applied).toBe(1);
+    expect(batch.failed).toBe(1);
+    expect(batch.results[1].error).toContain('Verified roster name changed');
+    expect((await rawRows()).find(r=>r.raw.id==='8408').raw).toEqual(after.get('8408'));
+    expect((await N.repairNames(sql,manifest,{apply:true,checksum:preview.checksum})).records).toBe(0);
+    const accepted = await post({action:'upsertRow',tab:'Roster',row:{id:'8408',name:syntheticName('8408'),notes:'SYNTHETIC legitimate edit'}},'http://127.0.0.1:58002/');
+    expect(accepted.error).toBeUndefined();
+    expect((await read('readAll','http://127.0.0.1:58002/')).roster.find(r=>r.id==='8408').name).toBe(syntheticName('8408'));
+  } finally { await sql`alter table seating_state_deferred rename to seating_state`; }
+  await boot(page);
+  for (const id of ids) await expect(page.locator('#content tbody tr').filter({has:page.locator('td',{hasText:new RegExp(`^${id}$`)})})).toContainText(syntheticName(id));
+});
+
 test("the pre-fix backend reproduces the stale-phone overwrite", async ({ page }) => {
   await boot(page, "http://127.0.0.1:58002/");
   await openBookOut(page);
