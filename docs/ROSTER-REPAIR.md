@@ -4,6 +4,27 @@ The October reseat exposed a mismatch between a stable person (`people.pid`) and
 A cached roster action could send an old occupant's entire profile to the new occupant's seat.
 The protection and repair are separate deployments: protect writes first, repair only after complete verification.
 
+## Staged names only
+
+An explicitly authorized name-only repair can defer profiles and linked history.
+Apply `0013_verified_names.sql` first; it is independent of the epoch migration
+and rejects stale names through the currently deployed legacy Edge Function.
+Register only the reviewed people. The guard follows PID across seating changes;
+a later legitimate name correction must update its registered name deliberately.
+It does not certify or repair any other profile field or linked record.
+
+Keep an encrypted, restorable pre-repair backup outside the checkout. Prepare a
+private manifest with `version:1`, the exact `incidentAt`, and a `names` array of
+`id`, `pid`, `name`, `expectedFingerprint`, `verified:true` and `source`.
+Each name must agree with both the stable registry and the incident seating log.
+Use `scripts/repair-names.mjs <private-manifest>` for a read-only preview, then
+`--apply --checksum <preview-checksum>` for the authorized transaction.
+The transaction checks every raw-row fingerprint, locks seating and profile
+changes, installs each name guard, changes only `name`, writes audit entries and
+bumps the roster revision. It also advances the epoch if that migration exists.
+Read back all names through the deployed API and test stale-write rejection.
+The wider verified repair remains gated on its complete field/history review.
+
 ## Protection and compatibility
 
 Apply `0012_seating_epoch.sql`, deploy the updated Edge Function, then deploy the frontend.

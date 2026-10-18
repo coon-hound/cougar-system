@@ -67,6 +67,8 @@ const asAdmin = () => {
 };
 
 async function gotoDuty(page, who) {
+  // The slot assertions need a weekday; Sunday intentionally has no duties.
+  await page.clock.setFixedTime(new Date("2026-10-12T04:00:00Z"));
   await seedAndGoto(page);
   await page.evaluate(SEED_DUTY);
   await page.evaluate(who);
