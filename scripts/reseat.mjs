@@ -32,7 +32,7 @@
 //
 // MOVES AND LATE ENLISTEES (--move, --enlist): one man posted to another
 // section, or a new man seated in one. Only the sections whose membership
-// changes are re-dealt, alphabetically, all in one pass - see planTransfer.
+// changes are touched in one pass; newcomers go after the existing men.
 //
 //   node scripts/reseat.mjs --move "ALPHA TAN" 94 --move 7103 72
 //   COUGAR_ENC_KEY=... node scripts/reseat.mjs --enlist late.csv
@@ -265,7 +265,7 @@ export function resolveEnlistees(enlistees, { people, archived, seatedPids, inta
  * dealt them (with a returnee's archived history carried onto the new seat),
  * the people registry, the intake_log and the rev bump - one transaction.
  */
-async function applyPlan(sql, { intake, cutoff, moves, inserts = [], matchedBy, encKey, hash }) {
+async function applyPlan(sql, { intake, cutoff, moves, inserts = [], matchedBy, encKey, hash, seatEpoch }) {
   const tables = await d4Tables(sql);
   const oldIds = moves.map((m) => m.oldId);
   const carried = await countRows(sql, tables, oldIds, intake);
@@ -279,6 +279,7 @@ async function applyPlan(sql, { intake, cutoff, moves, inserts = [], matchedBy, 
   const pidMap = Object.fromEntries(moves.filter((m) => m.pid).map((m) => [m.pid, m.newId]));
 
   return sql.begin(async (tx) => {
+    await tx`select begin_seating_change(${seatEpoch})`;
     const n = {};
 
     for (const map of moves.length ? [toTemp, toNew] : []) {
@@ -449,6 +450,7 @@ async function main() {
   const { default: postgres } = await import("postgres");
   const sql = postgres(DATABASE_URL, { prepare: false });
   try {
+    const [{ epoch: seatEpoch }] = await sql`select seating_epoch() as epoch`;
     const [{ label: intake, cutoff_date: cutoffDate }] =
       await sql`select label, cutoff_date from intakes where is_current limit 1`;
     const cutoff = cutoffDate instanceof Date ? cutoffDate.toISOString().slice(0, 10) : String(cutoffDate ?? "");
@@ -504,7 +506,7 @@ async function main() {
     }
 
     const touched = await applyPlan(sql, {
-      intake, cutoff, moves: plan.moves, inserts, encKey: COUGAR_ENC_KEY, hash,
+      intake, cutoff, moves: plan.moves, inserts, encKey: COUGAR_ENC_KEY, hash, seatEpoch,
       matchedBy: args.swap ? "swap" : transfer ? "move" : "reseat",
     });
 

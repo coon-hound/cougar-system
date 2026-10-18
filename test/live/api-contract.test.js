@@ -75,7 +75,10 @@ async function GET(params) {
   return { status: res.status, body: await res.json() };
 }
 
-const post = async (b) => (await POST(b)).body;
+const post = async (b) => {
+  const epoch = (await GET({ action: "revCheck" })).body.seatEpoch;
+  return (await POST({ ...b, seatEpoch: epoch })).body;
+};
 const get = async (p) => (await GET(p)).body;
 const revOf = async (tab) => (await get({ action: "revCheck" })).revs[tab];
 const rowsOf = async (tab) => (await get({ action: "read", tab })).rows;

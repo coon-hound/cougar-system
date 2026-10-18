@@ -35,3 +35,28 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-16
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:integrity
+        env:
+          PG_BIN: /usr/lib/postgresql/16/bin
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integrity-traces
+          path: test-results/
+          retention-days: 7

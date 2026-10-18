@@ -90,6 +90,7 @@ async function main() {
   const { default: postgres } = await import("postgres");
   const sql = postgres(DATABASE_URL, { prepare: false });
   try {
+    const [{ epoch: seatEpoch }] = await sql`select seating_epoch() as epoch`;
     const [{ label: intake }] = await sql`select label from intakes where is_current limit 1`;
     const roster = await sql`
       select "id", "name", "role", "pid" from roster
@@ -131,6 +132,7 @@ async function main() {
     const pidMap = Object.fromEntries(plan.moves.filter((m) => m.pid).map((m) => [m.pid, m.newId]));
 
     const touched = await sql.begin(async (tx) => {
+      await tx`select begin_seating_change(${seatEpoch})`;
       const n = { archived: {}, renumbered: {} };
       const oldId = plan.man.id;
       const key = plan.archiveKey;

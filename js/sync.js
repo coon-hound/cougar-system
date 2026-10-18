@@ -160,6 +160,13 @@ function refreshSyncIndicator() {
     setSyncIndicator("● Syncing…", "var(--orange)");
     return;
   }
+  if (_seatingBlocked) {
+    updateSyncPill("error", "⚠ Refresh roster", refreshSeating);
+    el.textContent = "Seating changed - refresh the roster before saving";
+    el.onclick = refreshSeating;
+    el.style.color = "var(--red)";
+    return;
+  }
   const dirtyCount = (STATE.dirty && STATE.dirty.size) || 0;
   if (dirtyCount > 0) {
     // Loud, tappable "not saved" state — both in the sidebar and the topbar pill.
@@ -238,7 +245,7 @@ function loadDirtyOps() {
       if (!STATE.dirty || !STATE.dirty.has(tab)) continue;
       const modes = d.tabs[tab];
       if (Array.isArray(modes)) {
-        const valid = modes.filter(m => m && typeof m.type === "string");
+        const valid = modes.filter(m => m && typeof m.type === "string").map(m => ({ ...m, seatEpoch: m.seatEpoch ?? null }));
         if (valid.length) map.set(tab, valid);
       }
     }
@@ -254,10 +261,10 @@ function coalesceModes(modes) {
   const out = [];
   for (const m of modes) {
     if (m.type === "upsert" && m.row && m.row.id != null) {
-      const i = out.findIndex(o => o.type === "upsert" && o.row && String(o.row.id) === String(m.row.id));
+      const i = out.findIndex(o => o.type === "upsert" && o.seatEpoch === m.seatEpoch && o.row && String(o.row.id) === String(m.row.id));
       if (i >= 0) out.splice(i, 1);
     } else if (m.type === "delete" && m.id != null) {
-      const i = out.findIndex(o => o.type === "upsert" && o.row && String(o.row.id) === String(m.id));
+      const i = out.findIndex(o => o.type === "upsert" && o.seatEpoch === m.seatEpoch && o.row && String(o.row.id) === String(m.id));
       if (i >= 0) out.splice(i, 1);
     }
     out.push(m);
@@ -379,10 +386,50 @@ function setPullInFlight(promise) {
 const _writeQueue = new Map();    // tabName → array of pending modes
 const _draining = new Map();      // tabName → promise of the active drain loop
 
+// A seating transition invalidates every old 4D-bound operation, including
+// in-memory queues, persistent stashes and open modals. Never auto-merge it.
+let _seatingRefresh = null;
+let _seatingNotice = false;
+let _seatingBlocked = false;
+function discardStaleSeating(notify = true) {
+  _seatingNotice = _seatingNotice || notify;
+  _seatingBlocked = _seatingBlocked || notify;
+  STATE.seatEpoch = null;
+  cancelAutoRetry();
+  for (const q of _writeQueue.values()) q.length = 0;
+  _dirtyOps.clear();
+  STATE.dirty = new Set();
+  _lastConflictedReplace = null;
+  _lastSyncError = null;
+  localStorage.removeItem(DIRTY_KEY);
+  localStorage.removeItem(DIRTY_OPS_KEY);
+  localStorage.removeItem(STORAGE_KEY);
+  STATE.rev = {};
+  for (const key of Object.values(TAB_TO_STATE)) STATE[key] = [];
+  if (typeof closeModal === "function") closeModal();
+}
+function showSeatingNotice() {
+  if (!_seatingNotice) return;
+  showSyncBanner("Seating changed. Old unsaved edits were discarded to protect the correct person. Check the refreshed roster before editing again.");
+}
+async function refreshSeating() {
+  if (_seatingRefresh) return _seatingRefresh;
+  discardStaleSeating();
+  const pull = API.pullAll();
+  _seatingRefresh = pull;
+  setPullInFlight(pull);
+  try { await pull; if (typeof render === "function") render(); }
+  catch (e) { _lastSyncError = e.message; }
+  finally { _seatingRefresh = null; showSeatingNotice(); }
+}
+
 // Single chokepoint for every write. Enqueues the op for its tab and starts a
 // drain loop if one isn't already running. mode dispatches to the right
 // primitive (see dispatchWrite). Returns the drain promise.
 function autoSync(tabName, mode) {
+  // Snapshot both the payload and the epoch before any pull can replace STATE.
+  mode = JSON.parse(JSON.stringify({ ...mode,
+    seatEpoch: Object.prototype.hasOwnProperty.call(mode, "seatEpoch") ? mode.seatEpoch : (STATE.seatEpoch ?? null) }));
   // Already known to be missing from the deployed backend. The edit is in
   // STATE and saveLocal has persisted it; queueing it would buy one failed
   // round trip per keystroke and nothing else.
@@ -428,6 +475,10 @@ async function drainTab(tabName) {
           clearSyncedOps(tabName, mode.type === "applyOps" ? (mode.modes || []) : [mode]);
         }
       } catch (e) {
+        if (e && e.name === "SeatingChangedError") {
+          await refreshSeating();
+          continue;
+        }
         if (e && e.batchUnsupported) {
           // Deployed backend predates applyOps. Fall back to per-row dispatch
           // for the rest of the session: put the original granular modes back
@@ -512,12 +563,14 @@ function takeBatch(q) {
   const granular = m => (m.type === "upsert" || m.type === "delete" || m.type === "append");
   if (_batchUnsupported || !granular(q[0])) return q.shift();
   const run = [];
-  while (q.length && granular(q[0]) && run.length < BATCH_MAX) run.push(q.shift());
+  const epoch = q[0].seatEpoch;
+  while (q.length && q[0].seatEpoch === epoch && granular(q[0]) && run.length < BATCH_MAX) run.push(q.shift());
   if (run.length === 1) return run[0];
   const modes = coalesceModes(run);
   if (modes.length === 1) return modes[0];
   return {
     type: "applyOps",
+    seatEpoch: epoch,
     modes,
     ops: modes.map(m =>
       m.type === "upsert" ? { op: "upsert", row: m.row } :
@@ -536,13 +589,14 @@ function takeBatch(q) {
 //   { type: "replace",    data } → API.pushTab (full overwrite, bulk only)
 function dispatchWrite(tabName, mode) {
   if (!STATE.authToken) return Promise.reject(new Error("Not authenticated"));
-  if (mode.type === "append")      return API.appendRow(tabName, mode.row);
-  if (mode.type === "appendMany")  return API.post({ action: "appendMany", tab: tabName, rows: mode.rows, baseRev: STATE.rev[tabName] });
-  if (mode.type === "upsert")      return API.upsertRow(tabName, mode.row);
-  if (mode.type === "delete")      return API.deleteRowById(tabName, mode.id);
-  if (mode.type === "applyOps")    return API.post({ action: "applyOps", tab: tabName, ops: mode.ops, baseRev: STATE.rev[tabName] });
-  if (mode.type === "replace")     return API.pushTab(tabName, mode.data);
-  return Promise.reject(new Error(`Unknown autoSync mode: ${mode.type}`));
+  const actions = { append: "append", appendMany: "appendMany", upsert: "upsertRow", delete: "deleteRowById", applyOps: "applyOps", replace: "write" };
+  if (!actions[mode.type]) return Promise.reject(new Error(`Unknown autoSync mode: ${mode.type}`));
+  return API.post({ action: actions[mode.type], tab: tabName,
+    ...(mode.type === "replace" ? { data: mode.data } :
+        mode.type === "appendMany" ? { rows: mode.rows } :
+        mode.type === "applyOps" ? { ops: mode.ops } :
+        mode.type === "delete" ? { id: mode.id } : { row: mode.row }),
+    baseRev: STATE.rev[tabName], seatEpoch: mode.seatEpoch ?? null });
 }
 
 // ── Backoff / retry policy helpers ───────────────────────
@@ -622,6 +676,7 @@ async function runWrite(tabName, mode) {
     throw new TabUnknownError(res.error, tabName);
   }
   if (res && res.error) throw new Error(res.error);
+  if (res && res.seatEpoch != null && res.seatEpoch !== STATE.seatEpoch) throw new SeatingChangedError();
   if (res && res.rev != null) { STATE.rev[tabName] = res.rev; saveLocal(); }
   return res;
 }
@@ -645,13 +700,14 @@ async function resolveConflict(tabName, mode, serverRev) {
     const pull = API.pullTabs([tabName]);
     setPullInFlight(pull);   // the 20s poll and the write queue must see this pull
     try { await pull; } catch (e) { /* keep going */ }
+    if (mode.seatEpoch !== (STATE.seatEpoch ?? null)) throw new SeatingChangedError();
     if (serverRev != null) STATE.rev[tabName] = serverRev;
     if (typeof render === "function") render();
     const snap = _lastConflictedReplace;
     showSyncBanner(
       `"${tabName}" changed on another device - your bulk change was NOT saved. It is held on this device.`,
       "Push mine anyway",
-      () => autoSync(snap.tab, { type: "replace", data: snap.data })
+      () => autoSync(snap.tab, { type: "replace", data: snap.data, seatEpoch: mode.seatEpoch })
     );
     return { ok: true, refreshed: true };   // tab now matches server; not dirty
   }
@@ -659,6 +715,7 @@ async function resolveConflict(tabName, mode, serverRev) {
   setPullInFlight(pull);
   try { await pull; }
   catch (e) { return { conflict: true, serverRev }; }   // couldn't refresh → bubble up
+  if (mode.seatEpoch !== (STATE.seatEpoch ?? null)) throw new SeatingChangedError();
   // Belt-and-suspenders: make baseRev reflect the server even if the partial
   // read didn't carry a rev, so the retry isn't guaranteed to re-conflict.
   if (serverRev != null && (STATE.rev[tabName] == null || Number(STATE.rev[tabName]) < Number(serverRev))) {
@@ -699,6 +756,7 @@ async function retryAllDirty() {
   if (!STATE.dirty || STATE.dirty.size === 0) return;
   const tabs = [...STATE.dirty];
   for (const tab of tabs) {
+    if (!STATE.dirty.has(tab)) continue;
     const ops = _dirtyOps.get(tab);
     if (ops && ops.length) {
       // Replay the exact failed granular ops — each OCC-merges on top of any
@@ -956,6 +1014,10 @@ async function autoRefreshTick(reason) {
     refreshSyncIndicator();
 
     // Which sheet tabs have a server revision ahead of ours?
+    if (res.seatEpoch != null && res.seatEpoch !== STATE.seatEpoch) {
+      await refreshSeating();
+      return;
+    }
     const changed = Object.keys(res.revs).filter(sheet =>
       Number(res.revs[sheet]) > Number(STATE.rev[sheet] || 0)
     );
@@ -1110,6 +1172,10 @@ async function autoSyncOnLaunch() {
       const res = await timed("revCheck", "revCheck (launch)", () => API.revCheck());
       _lastCheckedAt = Date.now();
       if (res && !res.error && res.revs) {
+        if (res.seatEpoch != null && res.seatEpoch !== STATE.seatEpoch) {
+          await refreshSeating();
+          return;
+        }
         const changed = Object.keys(res.revs).filter(s => Number(res.revs[s]) > Number(STATE.rev[s] || 0));
         // NEVER pull over a tab that has unsynced local edits (dirty) - that
         // would drop the edit. Mirror autoRefreshTick: pull only the safely
@@ -1140,6 +1206,7 @@ async function autoSyncOnLaunch() {
     refreshSyncIndicator();
     syncLog(`Auto-sync on launch: full pull from ${data.sheetName}`, "var(--green)");
     render();
+    showSeatingNotice();
   } catch (e) {
     if (e.name === "AuthError") {
       noteAuthFailed();
