@@ -541,14 +541,21 @@ export function formatSwapReport(plan, { names = false } = {}) {
 // Men are named with resolveMan, the same strict matcher the swap and the
 // departure use: a 4D, or a name that resolves to exactly one roster row.
 
-const SECT_RE = /^([1-9])([1-9])$/;
+// "01" is COY HQ: enlistees posted to company HQ hold 01xx, clear of the
+// commanders' 00xx (getPlt in js/helpers.js files platoon 0 under COY HQ).
+const SECT_RE = /^(?:[1-9][1-9]|01)$/;
+const COY_HQ_SECT = "01";
+export const sectLabel = (sect) => (sect === COY_HQ_SECT ? "COY HQ" : `${sect[0]}-${sect[1]}`);
 
 /**
  * Parse a target section: "94", "9-4", "9/4" or "P9S4" all mean platoon 9,
- * section 4. Returns "94", or "" when it is not a section.
+ * section 4; "HQ" or "01" mean COY HQ. Returns "94" / "01", or "" when it is
+ * not a section.
  */
 export function parseSect(raw) {
-  const s = String(raw ?? "").toUpperCase().replace(/^P/, "").replace(/[^0-9]/g, "");
+  const t = String(raw ?? "").trim().toUpperCase();
+  if (/^(COY\s*)?HQ$/.test(t)) return COY_HQ_SECT;
+  const s = t.replace(/^P/, "").replace(/[^0-9]/g, "");
   return SECT_RE.test(s) ? s : "";
 }
 
@@ -585,7 +592,7 @@ export function planTransfer({ roster, moves = [], enlistees = [] }) {
       continue;
     }
     if (man.id.slice(0, 2) === to) {
-      issues.push({ level: "error", message: `${side}: ${man.id} is already in section ${to[0]}-${to[1]}` });
+      issues.push({ level: "error", message: `${side}: ${man.id} is already in section ${sectLabel(to)}` });
       continue;
     }
     destOf.set(man.id, to);
@@ -688,7 +695,7 @@ export function formatTransferReport(plan, { names = false } = {}) {
   L.push("TRANSFER");
   L.push("");
   for (const s of plan.sections) {
-    L.push(`  SECTION ${s.sect[0]}-${s.sect[1]} — ${s.rows.length}`);
+    L.push(`  SECTION ${sectLabel(s.sect)} — ${s.rows.length}`);
     for (const r of s.rows) {
       const mark = !r.oldId ? "  NEW" : r.oldId === r.newId ? "  (unchanged)" : `  <- ${r.oldId}`;
       L.push(`    ${r.newId}${mark}${who(r.name)}`);

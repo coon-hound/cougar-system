@@ -1421,7 +1421,7 @@ function createGroupThenPick() {
 function openGroupMembersForm(name) {
   const recruits = STATE.roster.filter(r => r.role !== "Commander");
   const byPlt = {};
-  recruits.forEach(r => { const p = getPlt(r) || "?"; (byPlt[p] = byPlt[p] || []).push(r); });
+  recruits.forEach(r => { const p = getPlt(r) || "HQ"; (byPlt[p] = byPlt[p] || []).push(r); });
   const blocks = Object.keys(byPlt).sort().map(p => {
     const rows = byPlt[p].sort((a, b) => String(a.id).localeCompare(String(b.id))).map(r => `
       <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;background:var(--surface2)">
@@ -1432,7 +1432,7 @@ function openGroupMembersForm(name) {
       </label>`).join("");
     return `<div style="margin-bottom:8px">
       <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;cursor:pointer">
-        <input type="checkbox" onchange="groupToggleAll(this, '${escapeAttr(p)}')" style="width:14px;height:14px;cursor:pointer"> Platoon ${p} <span style="font-weight:400">(${byPlt[p].length})</span>
+        <input type="checkbox" onchange="groupToggleAll(this, '${escapeAttr(p)}')" style="width:14px;height:14px;cursor:pointer"> ${p === "HQ" ? "COY HQ" : "Platoon " + p} <span style="font-weight:400">(${byPlt[p].length})</span>
       </label>
       <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
     </div>`;
