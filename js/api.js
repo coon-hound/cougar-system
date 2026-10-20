@@ -144,6 +144,11 @@ const API = {
   async revokeAccess(d4, what, device) {
     return this.post({ action: "revokeAccess", d4, what, device });
   },
+  // The change log (admin only, refused by the backend without can_invite).
+  // opts: { limit, before, tab, d4, failed }; `before` is the oldest id held.
+  async auditLog(opts) {
+    return this.post({ action: "auditLog", ...(opts || {}) }, { timeoutMs: 20000 });
+  },
 
   async pullAll() {
     // readAll moves every tab in one response - give it double the timeout.

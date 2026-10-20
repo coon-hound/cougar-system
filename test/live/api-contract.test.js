@@ -507,11 +507,49 @@ module.exports = async function run() {
     ok(pre.headers.get("access-control-allow-origin"), "and CORS preflight is answered");
   });
 
+  // ── Change log ────────────────────────────────────────────────────────────
+  suite("live API: change log");
+
+  // auditLog is admin-only, so which half is checkable depends on the token:
+  // an admin token proves the log names each uploaded row, any other proves
+  // the refusal. Both are the contract.
+  const me = await post({ action: "whoami" });
+
+  await test("auditLog is refused without can_invite, with a 403 body", async () => {
+    const res = await post({ action: "auditLog" });
+    if (me.canInvite) { ok(Array.isArray(res.entries), "an admin token gets entries"); return; }
+    eq(res.code, 403, "403 is carried in the body");
+    ok(!res.entries, "and no entries leak");
+  });
+
+  await test("a bulk upload is logged row by row, with who and what", async () => {
+    if (!me.canInvite) { ok(true, "skipped: token is not an admin"); return; }
+    const ids = [T("A1"), T("A2")];
+    await post({ action: "appendMany", tab: "Leave", rows: ids.map((id) =>
+      ({ id, d4: TEST_4D, type: "Leave", reason: `audit ${id}` })) });
+    await post({ action: "applyOps", tab: "Leave", ops: [
+      { op: "upsert", row: { id: ids[0], reason: "audit edited" } }] });
+
+    const log = (await post({ action: "auditLog", tab: "Leave", limit: 20 })).entries;
+    const mine = log.filter((e) => ids.includes(e.row_id));
+    const added = mine.filter((e) => e.kind === "added");
+    eq(added.map((e) => e.row_id).sort(), ids, "each uploaded row has its own entry");
+    ok(added.every((e) => e.person === me.person), "attributed to the uploading token");
+    eq(added[0].record.d4, TEST_4D, "an added entry carries what was uploaded");
+
+    const edit = mine.find((e) => e.kind === "edited");
+    eq(edit.changes.map((c) => [c.field, c.from, c.to]),
+       [["reason", "audit T_A1", "audit edited"]],
+       "an edit carries only the field that moved, before and after");
+    ok(!log.some((e) => e.action === "appendMany" || e.action === "applyOps"),
+       "the batch envelopes are not shown twice");
+  });
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
   suite("live API: cleanup");
 
   await test("test fixtures are removed", async () => {
-    for (const id of [T("L1"), T("L2"), T("L4"), T("L6")]) {
+    for (const id of [T("L1"), T("L2"), T("L4"), T("L6"), T("A1"), T("A2")]) {
       await post({ action: "deleteRowById", tab: "Leave", id });
     }
     await post({ action: "deleteRowById", tab: "Roster", id: TEST_4D });
