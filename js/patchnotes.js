@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 163;
+const APP_VERSION = 164;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,19 +21,13 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 163,
+    v: 164,
     date: "20 Oct 2026",
-    title: "Fewer taps for the things you do most",
-    intro: "We counted where everyone taps, then moved the most-used things closer and the rarely-used ones out of the way.",
+    title: "Menu is back",
+    intro: "The bottom bar from the last update did not work, so it has been taken out while we fix it.",
     items: [
-      { t: "📱 Bottom bar", d: "On a phone, Dashboard, Medical, Attendance and Roster are one tap from anywhere. Everything else is under More, grouped into Daily, Records and System. MSK Analytics now lives inside Medical." },
-      { t: "🔎 Search shows who matched", d: "Results drop down under the search bar with the 4D and the name, and the search bar has its full width back." },
-      { t: "📋 Parade state in one tap", d: "The report button opens First Parade in the morning and Last Parade from noon. Tap ▾ beside it for every other report." },
-      { t: "⚡ Report Sick, Book Out, Log Conduct", d: "Three buttons under the strength numbers open these forms straight away. A person's page also has Report Sick and Appointment, with that person already chosen." },
-      { t: "☑ Tick several fall-outs at once", d: "In Log Conduct, + Add people opens a checklist. Tick everyone who fell out or reported sick, give them one reason if it is the same, and add them together." },
-      { t: "⌨ Type to find someone", d: "Every person dropdown in a form has a box beside it. Type a 4D or part of a name, and if only one person matches they are picked for you." },
-      { t: "● Small things", d: "Tap the sync dot for Sync & I/O. The Re-push buttons moved there too, since every edit already saves itself. Pop-up title bars no longer cover the first line under them." },
-    ],
+      { t: "☰ Menu button", d: "Tap ☰ at the top to reach every page, as before." }
+    ]
   },
   {
     v: 162,
