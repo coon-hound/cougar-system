@@ -54,17 +54,24 @@ function cssColorA(name, alpha, fallback) {
 // 4D code (e.g. "C1114" → plt=1, sect=1, bed=14). The sheet column may not
 // always exist, so we fall back to parsing the 4D so the scope filter works
 // regardless of sheet schema.
+//
+// Platoon digit 0 is COY HQ. Commanders hold 00xx; enlistees posted to company
+// HQ hold 01xx, so they file under COY HQ on the parade state, in no platoon
+// or section scope, exactly like an untagged commander.
+const isCoyHqD4 = id => /^0\d{3}$/.test(String(id || ""));
 function getPlt(r) {
   // Commanders are coy-level — they have no platoon by default. Forcing
   // empty here ensures the 4D parser doesn't extract "0" from a 00xx id.
   if (r.role === "Commander") return r.plt != null && r.plt !== "" ? String(r.plt) : "";
   if (r.plt !== "" && r.plt != null) return String(r.plt);
+  if (isCoyHqD4(r.id)) return "";
   const m = String(r.id || "").match(/(\d)/);
   return m ? m[1] : "";
 }
 function getSect(r) {
   if (r.role === "Commander") return r.sect != null && r.sect !== "" ? String(r.sect) : "";
   if (r.sect !== "" && r.sect != null) return String(r.sect);
+  if (isCoyHqD4(r.id)) return "";
   const m = String(r.id || "").match(/\d(\d)/);
   return m ? m[1] : "";
 }
