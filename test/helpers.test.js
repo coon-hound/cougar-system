@@ -333,4 +333,14 @@ module.exports = async function run() {
     ok(/^[0-9a-z]+$/.test(prefix(first)), "base36 time prefix");
     ok(parseInt(prefix(first), 36) > 0, "decodes to a real timestamp");
   });
+  suite("helpers: COY HQ enlistees (01xx)");
+
+  await test("an enlistee on a 01xx 4D is in no platoon or section and files under COY HQ", () => {
+    const hq = { id: "0101", role: "Recruit" }, man = { id: "9401", role: "Recruit" };
+    const h = loadHelpers({ ...baseState(), roster: [hq, man] });
+    eq([h.getPlt(hq), h.getSect(hq)], ["", ""]);
+    eq([h.getPlt(man), h.getSect(man)], ["9", "4"]);
+    eq(h.paradeBlockOf(hq), "COY HQ");
+    eq(h.paradeBlocks(), ["COY HQ", "PL 9"], "no phantom PL 0 block");
+  });
 };

@@ -1317,7 +1317,7 @@ function renderRoster(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <select id="roster-mount" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver, from each man's role">
+        <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver, from each man's role">
           ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
         </select>
         <button class="btn" onclick="openCommanderForm()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
@@ -1363,7 +1363,7 @@ function renderRoster(el) {
       const campCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${campBadge}${campToggle}</div>`;
       return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}
-    </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No personnel in ${filterLabel()}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
+    </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No ${mf ? MOUNT_LABEL[mf].toLowerCase() + " " : ""}personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
 }
 
 function renderAttendance(el) {

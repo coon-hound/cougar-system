@@ -479,6 +479,17 @@ async function main() {
     eq(["9", "904", "", "0-4"].map(P.parseSect), ["", "", "", ""]);
   });
 
+  await test("COY HQ is a section: HQ enlistees are seated 01xx, clear of the commanders' 00xx", () => {
+    eq(["HQ", "hq", "COY HQ", "01"].map(P.parseSect), ["01", "01", "01", "01"]);
+    eq(["00", "02", "0"].map(P.parseSect), ["", "", ""]);
+    const roster = [...ROSTER, { id: "0001", name: "ZULU COMMANDER", role: "Commander", pid: "P-Z" }];
+    const p = transfer({ roster, enlistees: [{ name: "AARON KOH", to: "HQ" }, { name: "BRAVO KOH", to: "HQ" }] });
+    ok(p.ok, JSON.stringify(p.issues));
+    eq(p.moves, []);
+    eq(p.inserts.map((i) => i.newId), ["0101", "0102"]);
+    ok(/SECTION COY HQ/.test(P.formatTransferReport(p)));
+  });
+
   await test("an enlistee already on the roster is refused, not seated twice", () => {
     const p = transfer({ enlistees: [{ name: "TAN ALPHA", to: "52" }] });
     ok(!p.ok);

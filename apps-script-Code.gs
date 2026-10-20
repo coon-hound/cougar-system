@@ -1615,8 +1615,8 @@ function tgFindUser(chatId) {
     if (String(rows[i].id) === String(chatId) || String(rows[i].chatId) === String(chatId)) {
       var u = rows[i];
       u.d4 = tgPadD4(u.d4);
-      u.plt = u.d4.charAt(0);
-      u.sect = u.d4.charAt(1);
+      u.plt = tgIsCoyHq(u.d4) ? "" : u.d4.charAt(0);
+      u.sect = tgIsCoyHq(u.d4) ? "" : u.d4.charAt(1);
       return u;
     }
   }
@@ -1659,10 +1659,10 @@ function tgConfirmRegistration(chatId) {
   tgUpsertUser(u);
   if (d.role === "Commander") {
     tgSetState(chatId, { step: "reg_sections" });
-    tgSend(chatId, "You're a commander ✅. Which section(s) do you command? e.g. P1S3 (comma-separate for multiple).");
+    tgSend(chatId, "You're a commander ✅. Which section(s) do you command? e.g. P1S3, or HQ for company HQ men (comma-separate for multiple).");
   } else {
     tgClearState(chatId);
-    tgSendMenu(chatId, "✅ Registered: " + tgRank(d) + " " + d.name + " (C" + d.d4 + "), Platoon " + d.d4.charAt(0) + " Section " + d.d4.charAt(1) + ".\nWhenever you feel unwell, tap below or type /reportsick.");
+    tgSendMenu(chatId, "✅ Registered: " + tgRank(d) + " " + d.name + " (C" + d.d4 + "), " + tgUnitLong(d.d4) + ".\nWhenever you feel unwell, tap below or type /reportsick.");
   }
 }
 
@@ -1691,8 +1691,20 @@ function tgRosterLookup(d4) {
 }
 
 // Returns ALL commanders who own this section (a section can have more than one).
+// Platoon digit 0 is COY HQ: commanders hold 00xx, enlistees posted to HQ hold
+// 01xx (getPlt in js/helpers.js). An HQ man has no section, so he is announced
+// as COY HQ and pings the commanders who registered "HQ" as a section they own.
+function tgIsCoyHq(d4) { return /^0\d{3}$/.test(tgPadD4(d4)); }
+function tgUnitLong(d4) {
+  d4 = tgPadD4(d4);
+  return tgIsCoyHq(d4) ? "COY HQ" : "Platoon " + d4.charAt(0) + " Section " + d4.charAt(1);
+}
+function tgUnitShort(user) {
+  return user.plt ? "P" + user.plt + " S" + user.sect : "COY HQ";
+}
+
 function tgFindSectionCmds(plt, sect) {
-  var key = ("P" + plt + "S" + sect).toUpperCase();
+  var key = plt ? ("P" + plt + "S" + sect).toUpperCase() : "HQ";
   var out = [];
   var rows = readTab("TgUsers");
   if (!rows || rows.error) return out;
@@ -1837,7 +1849,7 @@ function tgHandleMessage(msg) {
     if (!user) { tgSend(chatId, "You're not registered yet. Send /start."); return; }
     var wd4 = tgPadD4(user.d4);
     tgSend(chatId, "You're registered as " + tgRN(user) +
-      (user.role === "Commander" ? "" : " · Platoon " + wd4.charAt(0) + " Section " + wd4.charAt(1)) + ".",
+      (user.role === "Commander" ? "" : " · " + tgUnitLong(wd4)) + ".",
       kb([[btn("🔄 Not me — re-register", "reg:again")]]));
     return;
   }
@@ -1878,7 +1890,7 @@ function tgHandleMessage(msg) {
         ? ((match.rank ? match.rank + " " : "") + match.name)
         : (tgRank(match) + " " + match.name + " (C" + state.d4 + ")");
       tgSend(chatId, "Please confirm — you're registering as:\n\n" + who +
-        "\nPlatoon " + state.d4.charAt(0) + " Section " + state.d4.charAt(1) + "\n\nIs this you?",
+        "\n" + tgUnitLong(state.d4) + "\n\nIs this you?",
         kb([[btn("✅ Yes, that's me", "reg:confirm")], [btn("🔄 No, re-enter", "reg:redo")]]));
       return;
     }
@@ -1898,7 +1910,7 @@ function tgHandleMessage(msg) {
   // Stateful free-text steps.
   switch (state.step) {
     case "reg_sections": {
-      var owned = text.toUpperCase().replace(/[^0-9PS,\s]/g, "").replace(/\s+/g, "").trim();
+      var owned = text.toUpperCase().replace(/[^0-9PSHQ,\s]/g, "").replace(/\s+/g, "").trim();
       var cu = tgFindUser(chatId); cu.sectionsOwned = owned; tgUpsertUser(cu); tgClearState(chatId);
       tgSendMenu(chatId, "✅ Registered as commander for: " + owned + "\nYou'll be pinged in the group when your recruits report sick.");
       return;
@@ -1965,7 +1977,7 @@ function tgHandleCallback(cb) {
     tgSetState(chatId, { step: "toolate_done" });            // claim immediately so a repeat tap is a no-op
     tgStripKeyboard(cb);
     var sc0 = tgFindSectionCmds(user.plt, user.sect);
-    tgGroupNotify("⚠️ FEELING UNWELL (past report-sick cut-off) — " + tgRN(user) + " · P" + user.plt + " S" + user.sect + "\nWill report sick in camp at next book-in.", sc0);
+    tgGroupNotify("⚠️ FEELING UNWELL (past report-sick cut-off) — " + tgRN(user) + " · " + tgUnitShort(user) + "\nWill report sick in camp at next book-in.", sc0);
     tgSend(chatId, "📨 Your SC has been notified. Book in as normal and report sick at first parade.");
     tgClearState(chatId);
     tgSendMenu(chatId, "What would you like to do?");
@@ -2078,7 +2090,7 @@ function tgFinalizeRequest(chatId, user, state, informed) {
   upsertRow("ReportSick", row);
 
   var sc = tgFindSectionCmds(user.plt, user.sect);
-  var gtext = "🤒 REPORT SICK — " + tgRN(user) + " · P" + user.plt + " S" + user.sect + "\n" +
+  var gtext = "🤒 REPORT SICK — " + tgRN(user) + " · " + tgUnitShort(user) + "\n" +
     "Context: " + (state.context === "InCamp" ? "In camp" : "Out of camp") + "\n" +
     "Reason: " + (state.reason || "-") +
     (state.clinic ? ("\nClinic: " + state.clinic) : "") + "\n" +
@@ -2178,7 +2190,7 @@ function tgCompleteMC(chatId, state, url, fileId) {
   // Caption (no Drive link — the photo itself is shown in the group). The
   // Drive copy is still kept in ReportSick.mcUrl for the records/dashboard.
   tgGroupNotify(
-    "📄 MC SUBMITTED — " + tgRN(user) + " · P" + user.plt + " S" + user.sect + "\n" +
+    "📄 MC SUBMITTED — " + tgRN(user) + " · " + tgUnitShort(user) + "\n" +
     "Status + duration: read from the MC image below — please record it in the system.", sc, fileId);
 
   if (medOk) {
@@ -2200,7 +2212,7 @@ function tgCompleteNoStatus(chatId, state) {
     if (rs) { rs.status = "NIL"; rs.state = "NoStatus"; upsertRow("ReportSick", rs); }
   }
   var sc = tgFindSectionCmds(user.plt, user.sect);
-  tgGroupNotify("ℹ️ NO STATUS — " + tgRN(user) + " · P" + user.plt + " S" + user.sect + "\nMO saw him, no status given.", sc);
+  tgGroupNotify("ℹ️ NO STATUS — " + tgRN(user) + " · " + tgUnitShort(user) + "\nMO saw him, no status given.", sc);
   tgSend(chatId, "Noted — no status given, you're fit for normal duties. Remember to still book in on time. 💪");
   tgClearState(chatId);
   tgSendMenu(chatId, "What would you like to do?");
