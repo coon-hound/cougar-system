@@ -99,7 +99,8 @@ const TELEMETRY = (function () {
     groups:          { start: "openGroupsForm",         done: "submitGroupNames",     label: "Edit Groups" },
     group_members:   { start: "openGroupMembersForm",   done: "submitGroupMembers",   label: "Group Members" },
     combined_group:  { start: "openCombinedForm",       done: "submitCombined",       keepsModalOpen: true, label: "Combined Group" },
-    commander:       { start: "openCommanderForm",      done: "submitCommander",      label: "Add Commander" }
+    commander:       { start: "openCommanderForm",      done: "submitCommander",      label: "Add Commander" },
+    billet:          { start: "openBilletForm",         done: "submitBillet",         label: "Edit Role" }
   };
 
   // Human-readable labels for the views, used by the insights read-out. Keyed

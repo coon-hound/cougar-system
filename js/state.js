@@ -491,7 +491,10 @@ function normalizeRoster(roster) {
       // Ad-hoc group membership: comma-delimited group names (e.g. "Guard,Range
       // Party"). Persistent (not day-scoped). Defaulted so the column survives a
       // full re-push (writeTab derives headers from the first row's keys).
-      groups: rest.groups != null ? String(rest.groups) : ""
+      groups: rest.groups != null ? String(rest.groups) : "",
+      // Section role ("1 LMG", "GL", "2 MAT"…). Free text, "" = unassigned.
+      // Not `role` (Commander/Recruit) and not `appt` (a commander's VC/SC).
+      billet: rest.billet != null ? String(rest.billet) : ""
     };
   });
 }
