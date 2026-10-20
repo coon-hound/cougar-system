@@ -109,6 +109,70 @@ function groupMembers(name) {
   return (STATE.roster || []).filter(r => r.role !== "Commander" && recruitInGroup(r, name));
 }
 
+// ── Secondary roles + qualifications ─────────────────────────────
+// Both live on the roster row like `groups`: comma-delimited strings in
+// roster.extra, so no migration. Unlike groups they cover commanders too - a
+// commander's range or safety qualification matters when planning a conduct.
+//   secondaryRoles: "Medic, Runner"
+//   quals:          "CPR@2027-03-31, Range Safety"   (@date = optional expiry)
+const QUAL_EXPIRING_DAYS = 30;
+const splitTags = s => String(s || "").split(",").map(x => x.trim()).filter(Boolean);
+const getSecondaryRoles = r => splitTags(r && r.secondaryRoles);
+function getQuals(r) {
+  return splitTags(r && r.quals).map(item => {
+    const at = item.lastIndexOf("@");
+    const date = at > 0 ? item.slice(at + 1).trim() : "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? { name: item.slice(0, at).trim(), expires: date }
+      : { name: item, expires: "" };
+  });
+}
+// One entry per name (last wins), so a re-award replaces the old expiry.
+function serializeQuals(list) {
+  const byName = new Map();
+  (list || []).forEach(q => {
+    const name = String(q.name || "").trim();
+    if (name) byName.set(name, String(q.expires || "").trim());
+  });
+  return [...byName].map(([name, exp]) => exp ? `${name}@${exp}` : name).join(", ");
+}
+// "valid" | "expiring" (within QUAL_EXPIRING_DAYS) | "expired". No expiry = valid.
+function qualState(q, dateIso) {
+  if (!q || !q.expires) return "valid";
+  const left = daysBetween(dateIso || todayISO(), q.expires);
+  if (left === null) return "valid";
+  return left < 0 ? "expired" : left <= QUAL_EXPIRING_DAYS ? "expiring" : "valid";
+}
+// Qual names and roles must not carry the delimiters their storage uses.
+function tagNameOk(s) { return !!s && !/[,@|]/.test(s); }
+function allQualNames() {
+  const set = new Set();
+  (STATE.roster || []).forEach(r => getQuals(r).forEach(q => set.add(q.name)));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+function allSecondaryRoleNames() {
+  const set = new Set();
+  (STATE.roster || []).forEach(r => getSecondaryRoles(r).forEach(x => set.add(x)));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+// Everyone holding a qual (commanders included), with its state on a date.
+function qualHolders(name, dateIso) {
+  const out = [];
+  (STATE.roster || []).forEach(r => {
+    const q = getQuals(r).find(x => x.name === name);
+    if (q) out.push({ r, q, state: qualState(q, dateIso) });
+  });
+  return out;
+}
+// Chip for one qual on a person: green valid, amber expiring, struck grey expired.
+function qualChip(q, dateIso) {
+  const st = qualState(q, dateIso);
+  const exp = q.expires ? ` · exp ${isoToDisplayDate(q.expires)}` : "";
+  const title = escapeAttr(`${q.name}${q.expires ? ` - expires ${isoToDisplayDate(q.expires)}` : ""}${st === "expired" ? " (EXPIRED)" : ""}`);
+  if (st === "expired") return `<span class="badge qual-expired" title="${title}">${escapeHtml(q.name)}${exp}</span>`;
+  return `<span class="badge badge-${st === "expiring" ? "yellow" : "green"}" title="${title}">🎓 ${escapeHtml(q.name)}${st === "expiring" ? exp : ""}</span>`;
+}
+
 // ── Combined groups (saved set-formulas) ─────────────────────────
 // A scope token → the recruit d4s it selects (commanders always excluded).
 // Tokens: "company" | "plt:N" | "grp:NAME". THE resolver shared by

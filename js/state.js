@@ -494,7 +494,12 @@ function normalizeRoster(roster) {
       groups: rest.groups != null ? String(rest.groups) : "",
       // Section role ("1 LMG", "GL", "2 MAT"…). Free text, "" = unassigned.
       // Not `role` (Commander/Recruit) and not `appt` (a commander's VC/SC).
-      billet: rest.billet != null ? String(rest.billet) : ""
+      billet: rest.billet != null ? String(rest.billet) : "",
+      // Extra roles ("Medic, Runner") and qualifications ("CPR@2027-03-31, Range
+      // Safety"), comma-delimited like groups. Parsed by getSecondaryRoles /
+      // getQuals in helpers.js. Commanders carry them too.
+      secondaryRoles: rest.secondaryRoles != null ? String(rest.secondaryRoles) : "",
+      quals: rest.quals != null ? String(rest.quals) : ""
     };
   });
 }

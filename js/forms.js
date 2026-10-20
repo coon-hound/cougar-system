@@ -23,7 +23,8 @@ function openPerson(d4) {
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander · ${getPlt(p) ? "PL " + getPlt(p) : "COY HQ"}${p.status ? ` — ${statusBadge(p.status)}` : ""}
         <button class="btn btn-icon" style="margin-left:6px" onclick="openCommanderForm('${p.id}')" title="Edit commander (rank, name, platoon)">✎</button></div>`
     : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} · <strong style="color:var(--text)">${p.billet ? escapeHtml(p.billet) : "No role"}</strong> — ${statusBadge(p.status)}
-        <button class="btn btn-icon" style="margin-left:6px" onclick="openBilletForm('${p.id}')" title="Edit role (1 LMG, GL, 2 MAT…)">✎</button></div>`;
+        <button class="btn btn-icon" style="margin-left:6px" onclick="openRolesForm('${p.id}')" title="Edit role, other roles and qualifications">✎</button></div>`;
+  html += rolesStripHtml(p);
 
   // ── In/out-of-camp status + Book Out / Book In ────────
   // Reflects the shared out-of-camp computation. The lever is state-specific:
@@ -1607,26 +1608,186 @@ function submitCommander() {
 // A recruit's section role. The list only suggests - roles are free text, so a
 // one-off ("2 LMG / Gunner") never needs a code change.
 const BILLET_SUGGESTIONS = [
-  "1 LMG", "2 LMG", "GL", "2 MAT", "GPMG Main", "GPMG Assistant", "Steel Net",
-  "Medic", "Runner", "PC Runner"
+  "1 LMG", "2 LMG", "GL", "M203", "LAW SS", "LAW 2IC", "MAT SS", "MAT 2IC",
+  "GPMG Main", "GPMG Assistant", "Steel Net", "Medic", "Runner", "PC Runner"
 ];
-function openBilletForm(d4) {
-  const r = STATE.roster.find(x => x.id === d4 && x.role !== "Commander"); if (!r) return;
-  openModal(`Role - ${r.name}`, `
-    <form onsubmit="event.preventDefault(); submitBillet('${d4}'); return false">
+// Same idea for extra roles and qualifications: suggestions, never a fixed list.
+const SECONDARY_ROLE_SUGGESTIONS = ["Medic", "Runner", "PC Runner", "Signaller", "Driver", "Storeman", "IC Ammo", "Safety Marshal"];
+const QUAL_SUGGESTIONS = [
+  "CPR", "AED", "First Aid", "Combat Medic", "Range Safety Officer", "Range Conducting Officer",
+  "Live Firing Safety", "Water Safety", "Lifeguard", "Class 3 Licence", "Class 4 Licence",
+  "Military Driver", "Signals", "Rappelling", "Physical Training Instructor"
+];
+// Suggestions plus whatever the roster already uses, so a near-duplicate
+// ("CPR" vs "Cpr") shows up right next to the original.
+const tagDatalist = (id, suggestions, used) =>
+  `<datalist id="${id}">${[...new Set([...used, ...suggestions])].map(v => `<option value="${escapeAttr(v)}">`).join("")}</datalist>`;
+
+// Roles + qualifications strip on a person's card. Empty = one muted link.
+// A recruit edits it through the ✎ beside his role; a commander's header ✎
+// is the commander form, so the strip carries its own.
+function rolesStripHtml(p) {
+  const roles = getSecondaryRoles(p);
+  const quals = getQuals(p).sort((a, b) => a.name.localeCompare(b.name));
+  if (!roles.length && !quals.length) {
+    return `<div style="margin:-6px 0 12px"><button class="btn btn-icon" style="font-size:11px;padding:3px 9px;color:var(--muted)" onclick="openRolesForm('${p.id}')">+ roles &amp; quals</button></div>`;
+  }
+  const today = todayISO();
+  return `<div class="tag-row" style="margin:-6px 0 12px">
+    ${roles.map(x => badge(escapeHtml(x), "accent")).join("")}
+    ${quals.map(q => qualChip(q, today)).join("")}
+    ${p.role === "Commander" ? `<button class="btn btn-icon" style="font-size:11px;padding:2px 7px" onclick="openRolesForm('${p.id}')" title="Edit roles and qualifications">✎</button>` : ""}
+  </div>`;
+}
+
+const qualRowHtml = (q = { name: "", expires: "" }) => `
+  <div data-qual-row style="display:grid;grid-template-columns:minmax(0,1fr) 140px 32px;gap:6px;align-items:center">
+    <input data-qual-name type="text" maxlength="40" list="f-qual-list" placeholder="e.g. CPR" value="${escapeAttr(q.name)}">
+    <input data-qual-exp type="date" min="2020-01-01" max="2099-12-31" value="${escapeAttr(q.expires)}" title="Expiry (leave blank if it doesn't expire)">
+    <button type="button" class="btn btn-icon btn-danger" style="padding:4px 8px" onclick="this.closest('[data-qual-row]').remove()" title="Remove">✕</button>
+  </div>`;
+function rolesAddQualRow() {
+  document.getElementById("f-qual-rows")?.insertAdjacentHTML("beforeend", qualRowHtml());
+  const rows = document.querySelectorAll("#f-qual-rows [data-qual-name]");
+  rows[rows.length - 1]?.focus();
+}
+
+// One editor for everything a person is used for: primary role (recruits
+// only - a commander's is his appointment), extra roles, qualifications.
+function openRolesForm(d4) {
+  const r = STATE.roster.find(x => x.id === d4); if (!r) return;
+  const isCmd = r.role === "Commander";
+  const quals = getQuals(r);
+  openModal(`Roles & quals - ${isCmd && r.rank ? r.rank + " " : ""}${r.name}`, `
+    <form onsubmit="event.preventDefault(); submitRoles('${d4}'); return false">
       <div style="display:flex;flex-direction:column;gap:10px">
-        ${formField("f-billet", "Role", "text", "1 LMG", `maxlength="40" list="f-billet-list" value="${escapeAttr(r.billet)}"`)}
+        ${isCmd ? "" : `${formField("f-billet", "Role", "text", "1 LMG", `maxlength="40" list="f-billet-list" value="${escapeAttr(r.billet)}"`)}
         <datalist id="f-billet-list">${BILLET_SUGGESTIONS.map(b => `<option value="${escapeAttr(b)}">`).join("")}</datalist>
-        <div style="font-size:11px;color:var(--muted);margin-top:-4px">Leave blank if he has no role yet.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:-4px">Leave blank if he has no role yet.</div>`}
+        ${formField("f-roles2", "Other roles", "text", "Medic, Runner", `maxlength="120" list="f-roles2-list" value="${escapeAttr(getSecondaryRoles(r).join(", "))}"`)}
+        ${tagDatalist("f-roles2-list", SECONDARY_ROLE_SUGGESTIONS, allSecondaryRoleNames())}
+        <div style="font-size:11px;color:var(--muted);margin-top:-4px">Separate with commas.</div>
+        <div class="form-group" style="margin:0">
+          <label>Qualifications <span style="font-weight:400;color:var(--dim)">- expiry optional</span></label>
+          <div id="f-qual-rows" style="display:flex;flex-direction:column;gap:6px">${quals.map(qualRowHtml).join("")}</div>
+          ${tagDatalist("f-qual-list", QUAL_SUGGESTIONS, allQualNames())}
+          <button type="button" class="btn" style="margin-top:6px;font-size:12px" onclick="rolesAddQualRow()">+ Add qualification</button>
+        </div>
         <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>`);
+  if (!quals.length) rolesAddQualRow();
 }
-function submitBillet(d4) {
+function submitRoles(d4) {
   const r = STATE.roster.find(x => x.id === d4); if (!r) return;
-  r.billet = gv("f-billet").trim();
+  const roles = splitTags(gv("f-roles2"));
+  const quals = [...document.querySelectorAll("#f-qual-rows [data-qual-row]")].map(row => ({
+    name: row.querySelector("[data-qual-name]").value.trim(),
+    expires: row.querySelector("[data-qual-exp]").value
+  })).filter(q => q.name);
+  const bad = [...roles, ...quals.map(q => q.name)].find(n => !tagNameOk(n));
+  if (bad) { alert(`"${bad}" can't contain a comma, @ or | character.`); return; }
+  if (r.role !== "Commander") r.billet = gv("f-billet").trim();
+  r.secondaryRoles = [...new Set(roles)].join(", ");
+  r.quals = serializeQuals(quals);
   saveLocal(); closeModal(); render();
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
+}
+
+// ── Qualifications manager (Roster → 🎓 Quals) ────────────────────
+// Who holds what, at a glance, and a bulk award for when a whole course
+// passes at once. Names travel through data-q attributes, never inline JS
+// string literals, so a qual like "Officer's Course" can't break the handler.
+function openQualsForm() {
+  const today = todayISO();
+  const names = allQualNames();
+  const rows = names.length ? names.map(n => {
+    const h = qualHolders(n, today);
+    const c = { valid: 0, expiring: 0, expired: 0 };
+    h.forEach(x => c[x.state]++);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--surface2)">
+      <span style="flex:1;min-width:0;font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis">🎓 ${escapeHtml(n)}</span>
+      ${badge(c.valid, "green")}${c.expiring ? badge(`${c.expiring} expiring`, "yellow") : ""}${c.expired ? `<span class="badge qual-expired">${c.expired} expired</span>` : ""}
+      <button type="button" class="btn" style="padding:4px 10px" data-q="${escapeAttr(n)}" onclick="openQualAwardForm(this.dataset.q)" title="Pick who holds it">✎ Holders</button>
+    </div>`;
+  }).join("") : `<div class="empty-state" style="padding:10px;font-size:11px">No qualifications recorded yet. Award one below, or add them from a person's card.</div>`;
+  openModal("🎓 Qualifications", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.5">Who holds what. Green counts are current; expiring means within ${QUAL_EXPIRING_DAYS} days. Filter the Roster by a qualification, or check who's available for one when logging a conduct.</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${rows}</div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <div class="form-group" style="flex:1;margin:0"><label>Award a qualification</label><input id="f-qual-new" type="text" list="f-qual-new-list" placeholder="e.g. CPR" maxlength="40"></div>
+        ${tagDatalist("f-qual-new-list", QUAL_SUGGESTIONS, names)}
+        <button class="btn btn-primary" onclick="qualNewThenPick()">Pick holders</button>
+      </div>
+    </div>`);
+}
+function qualNewThenPick() {
+  const name = (gv("f-qual-new") || "").trim();
+  if (!name) { alert("Enter a qualification first."); return; }
+  if (!tagNameOk(name)) { alert("A qualification can't contain a comma, @ or | character."); return; }
+  openQualAwardForm(name);
+}
+
+// Holder picker for one qual: everyone (commanders first), by platoon, with the
+// expiry to stamp on newly-ticked people. Saving makes the holders exactly the
+// ticked set; people who already hold it keep their own expiry unless the box
+// to re-date them is ticked.
+function openQualAwardForm(name) {
+  const today = todayISO();
+  const byPlt = {};
+  STATE.roster.forEach(r => {
+    const p = r.role === "Commander" ? "Commanders" : (getPlt(r) || "?");
+    (byPlt[p] = byPlt[p] || []).push(r);
+  });
+  const order = Object.keys(byPlt).sort((a, b) => (a === "Commanders" ? -1 : b === "Commanders" ? 1 : a.localeCompare(b)));
+  const blocks = order.map(p => {
+    const rows = sortByRank(byPlt[p]).map(r => {
+      const q = getQuals(r).find(x => x.name === name);
+      return `<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;cursor:pointer;background:var(--surface2)">
+        <input type="checkbox" data-d4="${r.id}" data-plt="${escapeAttr(p)}" ${q ? "checked" : ""} style="width:14px;height:14px;cursor:pointer">
+        <span class="mono" style="font-weight:700;color:var(--accent);font-size:11px;min-width:34px">${displayId(r.id)}</span>
+        <span style="font-size:12px;flex:1">${displayPersonLabel(r.id)}</span>
+        ${q ? qualChip(q, today) : ""}
+      </label>`;
+    }).join("");
+    return `<div style="margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;cursor:pointer">
+        <input type="checkbox" onchange="groupToggleAll(this, '${escapeAttr(p)}')" style="width:14px;height:14px;cursor:pointer"> ${p === "Commanders" ? p : "Platoon " + p} <span style="font-weight:400">(${byPlt[p].length})</span>
+      </label>
+      <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+    </div>`;
+  }).join("");
+  openModal(`🎓 ${name} - holders`, `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input type="hidden" id="f-award-name" value="${escapeAttr(name)}">
+      <div class="form-row" style="align-items:flex-end">
+        ${formField("f-award-exp", "Expiry for new holders (optional)", "date", "", `min="2020-01-01" max="2099-12-31"`)}
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);padding-bottom:10px;cursor:pointer"><input type="checkbox" id="f-award-redate" style="width:14px;height:14px"> Also re-date existing holders</label>
+      </div>
+      <div id="group-member-list" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">${blocks}</div>
+      <button class="btn btn-primary" onclick="submitQualAward()">Save holders</button>
+    </div>`);
+}
+function submitQualAward() {
+  const name = gv("f-award-name");
+  const exp = gv("f-award-exp");
+  const redate = !!document.getElementById("f-award-redate")?.checked;
+  const want = new Set([...document.querySelectorAll("#group-member-list input[type=checkbox][data-d4]:checked")].map(el => el.dataset.d4));
+  const changed = [];
+  STATE.roster.forEach(r => {
+    const quals = getQuals(r);
+    const had = quals.find(q => q.name === name);
+    let next;
+    if (want.has(r.id) && !had) next = [...quals, { name, expires: exp }];
+    else if (want.has(r.id) && redate && had.expires !== exp) next = quals.map(q => q.name === name ? { name, expires: exp } : q);
+    else if (!want.has(r.id) && had) next = quals.filter(q => q.name !== name);
+    if (!next) return;
+    r.quals = serializeQuals(next);
+    changed.push(r);
+  });
+  saveLocal(); closeModal(); render();
+  if (STATE.apiUrl) changed.forEach(r => autoSync("Roster", { type: "upsert", row: r }));
 }
 
 // EDIT-ONLY since the unified Book Out flow took over adding: an edit is always
@@ -4117,6 +4278,10 @@ let _logConduct = null;
 // families (empty = all); `part` = "all" | "np" | "part".
 let _wizStatusView = { fams: new Set(), part: "all" };
 
+// Ephemeral "Qualified personnel" panel state - planning info only, never
+// saved with the conduct (so it never touches the `program` scope key).
+let _wizQualView = { open: false, quals: new Set() };
+
 // Default program for a NEW conduct: honour the active topbar program scope if
 // one is set, else "Combined". Editing an existing conduct loads the row's own
 // program instead (see openLogConductWizard).
@@ -4128,6 +4293,7 @@ function defaultWizardProgram() {
 function openLogConductWizard(attendanceId) {
   const a = attendanceId ? STATE.attendance.find(x => x.id === attendanceId) : null;
   _wizStatusView = { fams: new Set(), part: "all" };
+  _wizQualView = { open: false, quals: new Set() };
   _logConduct = {
     attendanceId: a?.id || null,
     date: a ? displayDateToISO(a.date) || todayISO() : todayISO(),
@@ -4389,6 +4555,58 @@ const wizGroupRowHint = scope => scope
 // Builds the modal HTML and opens it. Re-rendering is full-replace; row-level
 // mutations that wouldn't change focus or scroll position update DOM directly
 // (e.g. count totals) instead of re-rendering.
+// Qualified personnel: pick the quals a conduct needs, see who holds each and
+// whether they're usable on the conduct date - qual still current, no medical
+// status, in camp. Usable people sort first. Covers commanders too.
+function wizQualPanelHtml() {
+  const names = allQualNames();
+  if (!names.length) return "";
+  const v = _wizQualView;
+  const chips = names.map(n => `<button type="button" class="lc-wiz-filter-chip${v.quals.has(n) ? " active" : ""}" data-q="${escapeAttr(n)}" onclick="wizToggleQual(this.dataset.q)">🎓 ${escapeHtml(n)} (${qualHolders(n, _logConduct.date).filter(h => h.state !== "expired").length})</button>`).join("");
+  return `<details class="card" id="wiz-qual-panel" style="padding:12px 14px;background:var(--surface2);border-radius:8px"${v.open ? " open" : ""} ontoggle="_wizQualView.open = this.open">
+    <summary style="cursor:pointer"><strong style="color:var(--teal);font-size:13px">🎓 Qualified personnel</strong> <span style="color:var(--muted);font-size:11px">- who you can use on this date</span></summary>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${chips}</div>
+    <div id="wiz-qual-list" style="margin-top:8px">${wizQualListHtml()}</div>
+  </details>`;
+}
+function wizQualListHtml() {
+  const w = _logConduct;
+  const picked = [..._wizQualView.quals].filter(n => allQualNames().includes(n));
+  if (!picked.length) return `<div style="font-size:10px;color:var(--dim)">Tap the qualifications this conduct needs.</div>`;
+  const out = outOfCampMap(w.date);
+  const med = {};
+  currentMedicalEffectiveAll(w.date).forEach(e => { med[e.d4] = e.statuses.map(s => s.tag); });
+  return picked.map(n => {
+    const rows = qualHolders(n, w.date).map(h => {
+      const flags = [];
+      if (h.state === "expired") flags.push(`<span class="badge qual-expired">expired ${isoToDisplayDate(h.q.expires)}</span>`);
+      else if (h.state === "expiring") flags.push(badge(`exp ${isoToDisplayDate(h.q.expires)}`, "yellow"));
+      (med[h.r.id] || []).forEach(t => flags.push(medTagBadge(t)));
+      const o = out.get(h.r.id);
+      // A medical absence already shows as its status badge.
+      if (o && o.kind !== "medical") flags.push(badge(o.kind === "leave" ? "Leave" : "Booked out", "orange"));
+      const usable = h.state !== "expired" && !med[h.r.id] && !o;
+      return { usable, html: `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:5px 8px;border-radius:4px;background:var(--surface);${usable ? "" : "opacity:.6"}">
+        <span style="color:${usable ? "var(--green)" : "var(--dim)"}">${usable ? "✓" : "·"}</span>
+        <span class="mono" style="font-weight:700;color:var(--accent);font-size:11px;min-width:34px">${displayId(h.r.id)}</span>
+        <span style="font-size:12px;flex:1;min-width:120px">${displayPersonLabel(h.r.id)}</span>
+        ${flags.length ? `<span class="tag-row" style="margin-left:auto">${flags.join("")}</span>` : ""}
+      </div>`, key: (usable ? "0" : "1") + h.r.id };
+    }).sort((a, b) => a.key.localeCompare(b.key));
+    const ok = rows.filter(x => x.usable).length;
+    return `<div style="margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">🎓 ${escapeHtml(n)} - <span style="color:${ok ? "var(--green)" : "var(--red)"}">${ok} available</span> of ${rows.length}</div>
+      <div style="display:flex;flex-direction:column;gap:3px">${rows.map(x => x.html).join("")}</div>
+    </div>`;
+  }).join("");
+}
+function wizToggleQual(name) {
+  const set = _wizQualView.quals;
+  set.has(name) ? set.delete(name) : set.add(name);
+  const panel = document.getElementById("wiz-qual-panel");
+  if (panel) panel.outerHTML = wizQualPanelHtml();
+}
+
 function renderLogConductWizard() {
   if (!_logConduct) return;
   // Adding/removing a bulk row re-renders the whole modal; capture the scroll
@@ -4474,6 +4692,8 @@ function renderLogConductWizard() {
           <div style="font-size:10px;color:var(--dim);margin-top:4px;line-height:1.45">Who this conduct is for — the whole company, or a narrower scope from the dropdown. The scope drives the status list + total strength.</div>
         </div>
       </div>
+
+      ${wizQualPanelHtml()}
 
       <div class="card" style="padding:12px 14px;margin-bottom:10px;background:var(--surface2);border-radius:8px">
         <div style="margin-bottom:8px">

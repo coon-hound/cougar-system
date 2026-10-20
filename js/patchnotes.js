@@ -23,11 +23,14 @@ const PATCH_NOTES = [
   {
     v: 161,
     date: "20 Oct 2026",
-    title: "Section roles",
-    intro: "Every man now carries his role in the section: 1 LMG, GL, 2 MAT, Steel Net and so on.",
+    title: "Roles and qualifications",
+    intro: "Every man now carries his role in the section (1 LMG, GL, 2 MAT, Steel Net...), and anyone, commanders included, can carry extra roles and qualifications. When you plan a conduct you can see who holds what.",
     items: [
       { t: "🎯 Roles on the roster", d: "The Role column on the Roster tab shows each man's role instead of just \"Recruit\". A dash means he has no role yet." },
-      { t: "✎ Change a role from his card", d: "Open a man and tap ✎ next to his role. Pick from the usual roles or type your own." }
+      { t: "✎ Change a role from his card", d: "Open a man and tap ✎ next to his role. Pick from the usual roles or type your own." },
+      { t: "🎓 Qualifications", d: "Add other roles (Medic, Runner) and qualifications (CPR, Range Safety Officer) from anyone's card, with an expiry date if the qualification runs out. Expiring ones turn amber in the last 30 days; expired ones are struck through." },
+      { t: "🎓 Award to many at once", d: "Roster tab → 🎓 Quals shows who holds each qualification, and lets you tick everyone who just passed a course." },
+      { t: "🔎 Find who holds what", d: "Filter the Roster by a qualification, or search \"medic\". In Log Conduct, open Qualified personnel to see who holds what on that date, with anyone on status or out of camp marked." }
     ]
   },
   {
