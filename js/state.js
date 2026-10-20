@@ -405,6 +405,8 @@ const STATE = {
   // between "All", "Commander", "Recruit" (lets the user see parade-state-style
   // strength without commanders polluting recruit-only views and vice versa).
   filterRole: "",
+  // Roster-tab only, session only: "" | "mounted" | "dismounted" (mountOf).
+  rosterMount: "",
   filterPlt: "",
   filterSect: "",
   // Ad-hoc recruit-group scope: "" = all. Filters every per-recruit view to one
