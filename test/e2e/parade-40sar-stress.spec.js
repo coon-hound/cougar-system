@@ -143,7 +143,7 @@ test("changeover day: yesterday's OLD-format state still compares against today'
     saveLocal(); render();
   });
 
-  await page.locator("button", { hasText: "Generate Report" }).click();
+  await page.locator("#content .split-caret").click();
   await page.locator("#report-menu button", { hasText: "First Parade State" }).click();
   await page.locator("button", { hasText: "Compare with previous" }).click();
   await page.locator("button", { hasText: "🔍 Compare" }).click();
@@ -253,7 +253,7 @@ test("copy archives the new format and the change summary reads it back", async 
   await seedAndGoto(page);
   await seedBusyMorning(page);
 
-  await page.locator("button", { hasText: "Generate Report" }).click();
+  await page.locator("#content .split-caret").click();
   await page.locator("#report-menu button", { hasText: "First Parade State" }).click();
   await page.fill("#rep-time", "0700");
   await page.locator("button[type=submit]", { hasText: "Regenerate" }).click();

@@ -99,14 +99,14 @@ test.describe("Log Conduct wizard: group scoping", () => {
     await page.fill(`.lc-wiz-bulk-row input[oninput="wizUpdateRowReason('fallout', 0, this.value)"]`, "storm cancelled leg");
 
     // A member added individually too is deduped, not double-counted.
-    await page.click(`button[onclick="wizAddRow('fallout')"]`);
+    await page.evaluate(() => wizAddRow("fallout"));
     await page.waitForSelector("#wiz-fallout-d4-1");
     await page.evaluate(() => wizUpdateRowD4("fallout", 1, "2401"));
     expect(await page.$eval("#wiz-stat-fallout", el => el.textContent)).toBe("3");
 
     // The same member in Report Sick triggers the overlap warning via the
     // EXPANDED member set (2401 only appears in fallout through the group).
-    await page.click(`button[onclick="wizAddRow('reportSick')"]`);
+    await page.evaluate(() => wizAddRow("reportSick"));
     await page.waitForSelector("#wiz-reportSick-d4-0");
     await page.evaluate(() => wizUpdateRowD4("reportSick", 0, "2401"));
     expect(await page.$eval("#wiz-overlap-warning", el => el.textContent)).toContain("2401");

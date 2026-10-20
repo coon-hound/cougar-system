@@ -107,9 +107,8 @@ test.describe("people list by rank, highest first", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedAndGoto(page);
     await seedMixed(page);
-    // Navigate the way a phone does: the sidebar is behind the ☰ toggle.
-    await page.click("#mobile-nav-toggle");
-    await page.click('.nav-btn[data-nav="roster"]');
+    // Navigate the way a phone does: Roster is on the bottom bar.
+    await page.click('#tabbar [data-nav="roster"]');
 
     expect(await rosterIds(page)).toEqual(EXPECTED);
     // Nothing overflows the phone: the table scrolls inside its wrapper.

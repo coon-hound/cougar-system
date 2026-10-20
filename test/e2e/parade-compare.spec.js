@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
 
 test("copying an FP state auto-saves a snapshot (before the clipboard attempt)", async ({ page }) => {
   await seedAndGoto(page);
-  await page.locator("button", { hasText: "Generate Report" }).click();
+  await page.locator("#content .split-caret").click();
   await page.locator("#report-menu button", { hasText: "First Parade State" }).click();
   await page.fill("#rep-time", "0700");
   await page.locator("button[type=submit]", { hasText: "Regenerate" }).click();
@@ -47,7 +47,7 @@ test("inline compare in the FP modal: newly-out card + strength delta", async ({
     saveLocal(); render();
   });
 
-  await page.locator("button", { hasText: "Generate Report" }).click();
+  await page.locator("#content .split-caret").click();
   await page.locator("#report-menu button", { hasText: "First Parade State" }).click();
   await page.locator("button", { hasText: "Compare with previous" }).click();
 
@@ -73,7 +73,7 @@ test("inline compare in the FP modal: newly-out card + strength delta", async ({
 
 test("standalone compare: pasted foreign text diffs best-effort", async ({ page }) => {
   await seedAndGoto(page);
-  await page.locator("button", { hasText: "Generate Report" }).click();
+  await page.locator("#content .split-caret").click();
   await page.locator("#report-menu button", { hasText: "Compare Parade States" }).click();
 
   // No snapshots seeded → both sides offer the paste hint; flip both to Paste.
