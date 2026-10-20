@@ -51,4 +51,6 @@ JS
 psql "$COUGAR_INTEGRITY_DB" -v ON_ERROR_STOP=1 -c "insert into auth_tokens(token,person,can_invite) values ('dev-token','SYNTHETIC TEST ADMIN',true)" >> "$RUN/schema.log"
 # Keep the existing real HTTP contract working under the protected protocol.
 COUGAR_API="$COUGAR_INTEGRITY_API" node test/live/api-contract.test.js > "$RUN/contract.log" 2>&1 || { cat "$RUN/contract.log"; exit 1; }
+# Every write above went through the row-history triggers; now restore from them.
+psql "$COUGAR_INTEGRITY_DB" -q -v ON_ERROR_STOP=1 -f test/integrity/row-history.sql > "$RUN/row-history.log" 2>&1 || { cat "$RUN/row-history.log"; exit 1; }
 npx playwright test --config playwright.integrity.config.js "$@"
