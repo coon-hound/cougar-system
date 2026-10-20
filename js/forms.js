@@ -22,7 +22,8 @@ function openPerson(d4) {
   let html = p.role === "Commander"
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander · ${getPlt(p) ? "PL " + getPlt(p) : "COY HQ"}${p.status ? ` — ${statusBadge(p.status)}` : ""}
         <button class="btn btn-icon" style="margin-left:6px" onclick="openCommanderForm('${p.id}')" title="Edit commander (rank, name, platoon)">✎</button></div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} — ${statusBadge(p.status)}</div>`;
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} · <strong style="color:var(--text)">${p.billet ? escapeHtml(p.billet) : "No role"}</strong> — ${statusBadge(p.status)}
+        <button class="btn btn-icon" style="margin-left:6px" onclick="openBilletForm('${p.id}')" title="Edit role (1 LMG, GL, 2 MAT…)">✎</button></div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ────────
   // Reflects the shared out-of-camp computation. The lever is state-specific:
@@ -1601,6 +1602,31 @@ function submitCommander() {
   }
   saveLocal(); closeModal(); render();
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: entry });
+}
+
+// A recruit's section role. The list only suggests - roles are free text, so a
+// one-off ("2 LMG / Gunner") never needs a code change.
+const BILLET_SUGGESTIONS = [
+  "1 LMG", "2 LMG", "GL", "2 MAT", "GPMG Main", "GPMG Assistant", "Steel Net",
+  "Medic", "Runner", "PC Runner"
+];
+function openBilletForm(d4) {
+  const r = STATE.roster.find(x => x.id === d4 && x.role !== "Commander"); if (!r) return;
+  openModal(`Role - ${r.name}`, `
+    <form onsubmit="event.preventDefault(); submitBillet('${d4}'); return false">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${formField("f-billet", "Role", "text", "1 LMG", `maxlength="40" list="f-billet-list" value="${escapeAttr(r.billet)}"`)}
+        <datalist id="f-billet-list">${BILLET_SUGGESTIONS.map(b => `<option value="${escapeAttr(b)}">`).join("")}</datalist>
+        <div style="font-size:11px;color:var(--muted);margin-top:-4px">Leave blank if he has no role yet.</div>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>`);
+}
+function submitBillet(d4) {
+  const r = STATE.roster.find(x => x.id === d4); if (!r) return;
+  r.billet = gv("f-billet").trim();
+  saveLocal(); closeModal(); render();
+  if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
 }
 
 // EDIT-ONLY since the unified Book Out flow took over adding: an edit is always
