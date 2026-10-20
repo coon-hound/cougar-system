@@ -17,21 +17,16 @@
     <small>40 SAR COUGAR</small>
     <h2>Data System</h2>
   </div>
-  <!-- Grouped by how often each view is opened (usage_daily, Sep 2026): the
-       daily five first, records next, system last. Medical holds MSK
-       Analytics as a sub-tab rather than a sidebar entry of its own. -->
-  <div class="nav-group">Daily</div>
   <button class="nav-btn active" data-nav="dashboard"><span class="nav-ico" aria-hidden="true">▤</span><span>Dashboard</span></button>
-  <button class="nav-btn" data-nav="medical"><span class="nav-ico" aria-hidden="true">✚</span><span>Medical</span></button>
-  <button class="nav-btn" data-nav="attendance"><span class="nav-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
   <button class="nav-btn" data-nav="roster"><span class="nav-ico" aria-hidden="true">☰</span><span>Roster</span></button>
-  <button class="nav-btn" data-nav="leave"><span class="nav-ico" aria-hidden="true">↗</span><span>Out / Leave</span></button>
-  <div class="nav-group">Records</div>
+  <button class="nav-btn" data-nav="attendance"><span class="nav-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
   <button class="nav-btn" data-nav="detail"><span class="nav-ico" aria-hidden="true">⌕</span><span>Detail</span></button>
+  <button class="nav-btn" data-nav="medical"><span class="nav-ico" aria-hidden="true">✚</span><span>Medical</span></button>
   <button class="nav-btn" data-nav="ippt"><span class="nav-ico" aria-hidden="true">▲</span><span>IPPT</span></button>
-  <button class="nav-btn" data-nav="conducts"><span class="nav-ico" aria-hidden="true">⊞</span><span>Conducts</span></button>
+  <button class="nav-btn" data-nav="leave"><span class="nav-ico" aria-hidden="true">↗</span><span>Out / Leave</span></button>
   <button class="nav-btn" data-nav="duty"><span class="nav-ico" aria-hidden="true">◫</span><span>Duty</span></button>
-  <div class="nav-group">System</div>
+  <button class="nav-btn" data-nav="mskAnalytics"><span class="nav-ico" aria-hidden="true">◆</span><span>MSK Analytics</span></button>
+  <button class="nav-btn" data-nav="conducts"><span class="nav-ico" aria-hidden="true">⊞</span><span>Conducts</span></button>
   <button class="nav-btn" data-nav="access" hidden><span class="nav-ico" aria-hidden="true">⊡</span><span>Access</span></button>
   <button class="nav-btn" data-nav="changelog" hidden><span class="nav-ico" aria-hidden="true">≡</span><span>Change Log</span></button>
   <button class="nav-btn" data-nav="sync"><span class="nav-ico" aria-hidden="true">↻</span><span>Sync & I/O</span></button>
@@ -47,9 +42,10 @@
 <!-- MAIN -->
 <div id="main">
   <div id="topbar">
+    <button id="mobile-nav-toggle" aria-label="Open menu">☰</button>
     <span class="topbar-search-icon" aria-hidden="true">⌕</span>
-    <input id="search-input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Search 4D or Name...">
-    <div id="search-results"></div>
+    <input id="search-input" placeholder="Search 4D or Name...">
+    <div id="search-results" style="display:flex;gap:4px;flex-wrap:wrap"></div>
     <button id="mobile-filter-toggle" aria-label="Open scope filter">All</button>
     <div id="topbar-filters">
       <span class="filter-label">Scope</span>
@@ -68,15 +64,6 @@
     <button id="sync-status" class="s-syncing" type="button" title="Sync status">⟳ …</button>
   </div>
   <div id="content"></div>
-  <!-- Phone-only bottom bar. The four views behind ~90% of navigation, one tap
-       each from anywhere; More opens the full sidebar for the rest. -->
-  <nav id="tabbar" aria-label="Main">
-    <button type="button" class="tab-btn active" data-nav="dashboard"><span class="tab-ico" aria-hidden="true">▤</span><span>Dashboard</span></button>
-    <button type="button" class="tab-btn" data-nav="medical"><span class="tab-ico" aria-hidden="true">✚</span><span>Medical</span></button>
-    <button type="button" class="tab-btn" data-nav="attendance"><span class="tab-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
-    <button type="button" class="tab-btn" data-nav="roster"><span class="tab-ico" aria-hidden="true">☰</span><span>Roster</span></button>
-    <button type="button" class="tab-btn" id="tabbar-more" data-tel="nav:more" aria-label="More views"><span class="tab-ico" aria-hidden="true">⋯</span><span>More</span></button>
-  </nav>
 </div>
 
 <!-- MODAL -->
