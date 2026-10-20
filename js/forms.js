@@ -22,7 +22,7 @@ function openPerson(d4) {
   let html = p.role === "Commander"
     ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${p.rank ? p.rank + " · " : ""}Commander · ${getPlt(p) ? "PL " + getPlt(p) : "COY HQ"}${p.status ? ` — ${statusBadge(p.status)}` : ""}
         <button class="btn btn-icon" style="margin-left:6px" onclick="openCommanderForm('${p.id}')" title="Edit commander (rank, name, platoon)">✎</button></div>`
-    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} · <strong style="color:var(--text)">${p.billet ? escapeHtml(p.billet) : "No role"}</strong> — ${statusBadge(p.status)}
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">${rosterRank(p)} · ${p.id} · <strong style="color:var(--text)">${p.billet ? escapeHtml(p.billet) : "No role"}</strong> ${mountBadge(p)} — ${statusBadge(p.status)}
         <button class="btn btn-icon" style="margin-left:6px" onclick="openBilletForm('${p.id}')" title="Edit role (1 LMG, GL, 2 MAT…)">✎</button></div>`;
 
   // ── In/out-of-camp status + Book Out / Book In ────────
@@ -1608,7 +1608,7 @@ function submitCommander() {
 // one-off ("2 LMG / Gunner") never needs a code change.
 const BILLET_SUGGESTIONS = [
   "1 LMG", "2 LMG", "GL", "2 MAT", "GPMG Main", "GPMG Assistant", "Steel Net",
-  "Medic", "Runner", "PC Runner"
+  "Medic", "Runner", "PC Runner", "Hunter Driver", "Gunner"
 ];
 function openBilletForm(d4) {
   const r = STATE.roster.find(x => x.id === d4 && x.role !== "Commander"); if (!r) return;
