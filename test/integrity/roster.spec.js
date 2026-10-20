@@ -155,16 +155,21 @@ test("a staged name-only repair rejects stale legacy writes and preserves unrevi
   for (const id of ids) await expect(page.locator('#content tbody tr').filter({has:page.locator('td',{hasText:new RegExp(`^${id}$`)})})).toContainText(syntheticName(id));
 });
 
-test("the pre-fix backend reproduces the stale-phone overwrite", async ({ page }) => {
+// On the pre-fix backend a stale phone used to copy the old occupant's whole
+// profile onto the new one. Field-level saves stop the profile moving even
+// there, but the book-out itself still lands on the wrong man: only the seating
+// version check stops that, which is what the tests below prove.
+test("the pre-fix backend still books out the wrong man, but no longer copies his profile", async ({ page }) => {
   await boot(page, "http://127.0.0.1:58002/");
   await openBookOut(page);
   await swap();
   await page.click("#f-bo-submit");
   await settle(page);
-  const [row] = await sql`select name,pid,email from roster where id='8408'`;
+  const [row] = await sql`select name,pid,email,"outReason" from roster where id='8408'`;
   expect(row.pid).toBe("P-TEST-8409");
-  expect(row.name).toBe(syntheticName("8408"));
-  expect(row.email).toBe("8408@example.invalid");
+  expect(row.name).toBe(syntheticName("8409"));
+  expect(row.email).toBe("8409@example.invalid");
+  expect(row.outReason).toBe("SYNTHETIC appointment");
 });
 
 test("a stale phone cannot overwrite the new occupant; another browser sees the correct roster", async ({ page, context }) => {

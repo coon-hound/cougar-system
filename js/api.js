@@ -161,7 +161,7 @@ const API = {
     // Empty arrays are authoritative too. An old occupant must never survive
     // a full refresh simply because his table is now empty.
     for (const key in PULL_ASSIGN) {
-      if (Array.isArray(data[key])) PULL_ASSIGN[key](data[key]);
+      if (Array.isArray(data[key])) { PULL_ASSIGN[key](data[key]); recordServerRows(key); }
     }
     if (data.seatEpoch != null) {
       STATE.seatEpoch = data.seatEpoch;
@@ -191,7 +191,7 @@ const API = {
     let changed = false;
     for (const { sheet, rows, rev } of fetched) {
       const key = TAB_TO_STATE[sheet];
-      if (key && PULL_ASSIGN[key] && Array.isArray(rows)) { PULL_ASSIGN[key](rows); changed = true; }
+      if (key && PULL_ASSIGN[key] && Array.isArray(rows)) { PULL_ASSIGN[key](rows); recordServerRows(key); changed = true; }
       if (rev != null) STATE.rev[sheet] = rev;
     }
     if (changed) saveLocal();

@@ -1102,7 +1102,11 @@ function upsertRow(tabName, rowData) {
     for (var i = 0; i < idCells.length; i++) {
       if (String(idCells[i][0]) === target) {
         var sheetRow = i + 2;
-        var updatedRow = trimmed.map(function (h) {
+        // Merge, as the Postgres backend does: the app sends only the fields
+        // that changed, so a column it did not send keeps what the sheet holds.
+        var current = sheet.getRange(sheetRow, 1, 1, trimmed.length).getValues()[0];
+        var updatedRow = trimmed.map(function (h, c) {
+          if (!Object.prototype.hasOwnProperty.call(rowData, h)) return current[c];
           var val = rowData[h];
           return val !== undefined && val !== null ? val : "";
         });
