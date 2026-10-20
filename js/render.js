@@ -48,6 +48,7 @@ function render() {
     case "usage": renderUsage(el); break;
     case "sync": renderSync(el); break;
     case "access": renderAccess(el); break;
+    case "changelog": renderChangeLog(el); break;
     default: el.innerHTML = "";
   }
 }

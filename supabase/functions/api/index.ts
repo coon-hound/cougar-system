@@ -339,8 +339,11 @@ async function upsertOne(tx: postgres.TransactionSql, tab: string, row: Record<s
   // log_audit redacts as a second line of defence, but the values are not sent
   // in the first place.
   const [existing] = await tx`
-    select api_row(to_jsonb(t)) as row from ${tx(table)} t where t."id" = ${id}`;
-  const before = existing ? (existing.row as Record<string, unknown>) : null;
+    select api_row(to_jsonb(t)) as row, t.deleted_at is not null as dead
+      from ${tx(table)} t where t."id" = ${id}`;
+  // A soft-deleted row is reused in place, but to the log it is a new record:
+  // its "before" is what the deleted row said, which nobody could see.
+  const before = existing && !existing.dead ? (existing.row as Record<string, unknown>) : null;
   if (!existing) await tx`insert into ${tx(table)} ("id") values (${id})`;
   const sensitiveKeys = Object.keys(real).filter(k => ENCRYPTED.has(k));
   let sensitiveChanged: Record<string, boolean> = {};
@@ -475,6 +478,20 @@ async function writeWholeTab(tx: postgres.TransactionSql, tab: string, data: Rec
   return { rowsWritten: data.length, timestamp: new Date().toISOString() };
 }
 
+// One audit row per record a batch touched, written in the batch's own
+// transaction so history commits exactly when the edit does. Without it a bulk
+// upload is logged as one anonymous "appendMany on PolarFlow" with no row id,
+// which cannot say what was uploaded. Strips _audit from `r`: it carries row
+// contents, and the client has no business receiving them back.
+async function logRowAudit(tx: postgres.TransactionSql, token: string, action: string,
+                           tab: string, rowId: string, r: Record<string, unknown>) {
+  const aud = r._audit as { before?: postgres.JSONValue; after?: postgres.JSONValue; touchedSensitive?: string[] } | undefined;
+  delete r._audit;
+  await tx`select log_audit(${token}, ${action}, ${tab}, ${rowId}, ${!("error" in r)},
+    ${tx.json({ sensitiveWritten: aud?.touchedSensitive ?? [], reason: r.error ?? null } as postgres.JSONValue)},
+    ${aud?.before ? tx.json(aud.before) : null}, ${aud?.after ? tx.json(aud.after) : null})`;
+}
+
 // applyOps — ordered, one transaction, ONE rev bump, and partial success:
 // a single bad op must not abort the rest, so each runs in a savepoint.
 async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<string, unknown>[], token: string) {
@@ -491,15 +508,8 @@ async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<st
           default: return { error: `Unknown op '${op.op}'` };
         }
       }) as Record<string, unknown>;
-      const aud = r._audit as { before?: postgres.JSONValue; after?: postgres.JSONValue; touchedSensitive?: string[] } | undefined;
-      // Keep individual history in the same transaction as its successful edit.
-      await tx`select log_audit(${token}, ${"applyOps:" + String(op.op)}, ${tab},
-        ${String(op.id ?? (op.row as Record<string, unknown>)?.id ?? "")}, ${!("error" in r)},
-        ${tx.json({ sensitiveWritten: aud?.touchedSensitive ?? [], reason: r.error ?? null } as postgres.JSONValue)},
-        ${aud?.before ? tx.json(aud.before) : null}, ${aud?.after ? tx.json(aud.after) : null})`;
-      // _audit is internal: it carries row contents, and the client has no
-      // business receiving them back in a write response.
-      if (r && typeof r === "object" && "_audit" in r) delete (r as Record<string, unknown>)._audit;
+      await logRowAudit(tx, token, "applyOps:" + String(op.op), tab,
+        String(op.id ?? (op.row as Record<string, unknown>)?.id ?? ""), r);
       if (r && "error" in r) { failed++; results.push(r); }
       else { applied++; results.push(r); }
     } catch (e) {
@@ -715,6 +725,55 @@ async function listAccess() {
       from access_overview
      order by coalesce(person, 'zzz'), device_label, at desc`;
   return json({ ok: true, access: rows });
+}
+
+// The change log: who changed what, newest first, for the admin screen.
+//
+// Field-level diffs are computed here rather than shipped as two whole rows,
+// so a phone downloads what moved and not every column twice. Encrypted roster
+// columns arrive already redacted by log_audit ('[changed]' / '[redacted]').
+//
+// Two kinds of row are left out because they say nothing the others do not: a
+// batch envelope whose rows were logged one by one (detail.perRow), and a
+// replayed op that changed nothing (an `x:y` action with neither image).
+// Paged by id, not offset, so rows arriving while you read do not shift pages.
+async function auditLog(body: Record<string, unknown>) {
+  const limit = Math.min(Math.max(Math.trunc(Number(body.limit)) || 100, 1), 200);
+  const before = /^\d+$/.test(String(body.before ?? "")) ? String(body.before) : null;
+  const tab = body.tab ? String(body.tab) : null;
+  const person = body.person ? String(body.person) : null;
+  const d4 = body.d4 ? String(body.d4) : null;
+  const failed = body.failed === true;
+  const rows = await sql`
+    select a.id::text as id, a.at, a.person, t.device_label as device,
+           a.action, a.tab, a.row_id, a.ok, a.detail,
+           case when a.before is null and a.after is not null then 'added'
+                when a.before is not null and a.after is null then 'deleted'
+                when a.before is not null then 'edited' end as kind,
+           coalesce(a.after, a.before) ->> 'd4'   as d4,
+           coalesce(a.after, a.before) ->> 'name' as name,
+           case when a.before is not null and a.after is not null then (
+             select coalesce(jsonb_agg(jsonb_build_object(
+                      'field', c.key, 'from', a.before -> c.key, 'to', c.value)
+                      order by c.key), '[]'::jsonb)
+               from jsonb_each(a.after) c
+              where (a.before -> c.key) is distinct from c.value)
+           end as changes,
+           case when a.before is null or a.after is null
+                then coalesce(a.after, a.before) end as record
+      from audit a
+      left join auth_tokens t on t.token = a.token
+     where (${before}::bigint is null or a.id < ${before}::bigint)
+       and (${tab}::text is null or a.tab = ${tab})
+       and (${person}::text is null or a.person = ${person})
+       and (${d4}::text is null or a.row_id = ${d4}
+            or coalesce(a.after, a.before) ->> 'd4' = ${d4})
+       and (${failed} or a.ok)
+       and not (a.ok and coalesce((a.detail ->> 'perRow')::boolean, false))
+       and not (a.ok and a.action like '%:%' and a.before is null and a.after is null)
+     order by a.id desc
+     limit ${limit}`;
+  return json({ ok: true, entries: rows, more: rows.length === limit });
 }
 
 // Create an invite already tagged to a person. The name and 4D are taken from
@@ -938,6 +997,18 @@ Deno.serve({ port: Number(Deno.env.get("PORT") || 8000), hostname: Deno.env.get(
       });
     }
 
+    // Reading the change log is an admin act like the access screen, but it is
+    // a read, so it is refused and audited on denial without being logged on
+    // success - otherwise every look at the log would add a row to it.
+    if (action === "auditLog") {
+      if (!(await canInvite(auth.token))) {
+        await sql`select log_audit(${auth.token}, ${action}, null, null, false,
+                                   ${sql.json({ reason: "not allowed" })})`;
+        return forbidden();
+      }
+      return await auditLog(body);
+    }
+
     if (action === "listAccess" || action === "createInvite"
         || action === "reissueAccess" || action === "revokeAccess") {
       if (!(await canInvite(auth.token))) {
@@ -1015,9 +1086,12 @@ Deno.serve({ port: Number(Deno.env.get("PORT") || 8000), hostname: Deno.env.get(
         out = await withRev(tab, baseRev, false, body.seatEpoch, async (tx) => {
           let n = 0;
           for (const r of rows) {
-            const res = await appendOne(tx, tab, r);
+            const res = await appendOne(tx, tab, r) as Record<string, unknown>;
             if ("error" in res) return res;
-            if (res.action !== "noop") n++;
+            if (res.action !== "noop") {
+              n++;
+              await logRowAudit(tx, auth.token, "appendMany:append", tab, String(r.id ?? ""), res);
+            }
           }
           // Count APPENDS, not rows accepted: a retried batch whose ids are all
           // present already appended nothing (apps-script-Code.gs:1057). The
@@ -1063,6 +1137,12 @@ Deno.serve({ port: Number(Deno.env.get("PORT") || 8000), hostname: Deno.env.get(
                                ${!out.error && !out.conflict},
                                ${sql.json({
                                  reason: (out.error ?? null) as string | null,
+                                 // How much a batch moved, and that its rows were
+                                 // logged one by one, so the change log can show
+                                 // the rows and skip this envelope.
+                                 ...(action === "applyOps" || action === "appendMany"
+                                   ? { perRow: true } : {}),
+                                 ...(out.rowsWritten != null ? { rows: Number(out.rowsWritten) } : {}),
                                  ...(aud?.touchedSensitive?.length
                                    ? { sensitiveWritten: aud.touchedSensitive }
                                    : {}),
