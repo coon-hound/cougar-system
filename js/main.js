@@ -64,7 +64,9 @@ function searchMatches(q) {
   if (!q) return [];
   // Search respects the global scope filter so results don't show recruits the
   // user has explicitly scoped out of view.
-  return filteredRoster().filter(r => r.id.toLowerCase().includes(q) || String(r.name || "").toLowerCase().includes(q)).slice(0, 5);
+  // Roles and qualifications count too, so "medic" finds the medics.
+  const tagged = r => [r.billet, r.secondaryRoles, ...getQuals(r).map(x => x.name)].join(",").toLowerCase().includes(q);
+  return filteredRoster().filter(r => r.id.toLowerCase().includes(q) || String(r.name || "").toLowerCase().includes(q) || tagged(r)).slice(0, 5);
 }
 // Opening a hit clears the search, so the results are not still sitting under
 // the bar when the card closes.
