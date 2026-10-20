@@ -287,6 +287,8 @@ async function tryRedeemInviteFromURL() {
     maybeRestoreDirty();
   }
 
+  if (typeof showSeatingNotice === "function") showSeatingNotice();
+
   // Ask the backend who this device is signed in as, and whether it may hand
   // out access. Deliberately AFTER the first render: it is one extra round
   // trip and nothing on screen depends on it, so it must not delay the app
@@ -325,7 +327,7 @@ function maybeRestoreDirty() {
 
 // Who is holding this phone, and may they hand out access?
 //
-// The Access tab is hidden in index.html and revealed only if the BACKEND says
+// The Access and Change Log tabs are hidden in index.html and revealed only if the BACKEND says
 // this token has the capability. That is presentation, not protection: js/* is
 // public code, so anyone can unhide the button or call the action directly.
 // The Edge Function refuses it either way. Hiding just spares 25 commanders a
@@ -338,9 +340,11 @@ async function refreshIdentity() {
     // Remember what the server said, so an offline launch still knows who is
     // holding this phone and whether they may edit the duty schedule.
     if (typeof cacheIdentity === "function") cacheIdentity(me);
-    const btn = document.querySelector('.nav-btn[data-nav="access"]');
-    if (btn && me.canInvite) btn.hidden = false;
-    if (STATE.nav === "access") render();
+    for (const nav of ["access", "changelog"]) {
+      const btn = document.querySelector(`.nav-btn[data-nav="${nav}"]`);
+      if (btn && me.canInvite) btn.hidden = false;
+    }
+    if (STATE.nav === "access" || STATE.nav === "changelog") render();
   } catch {
     // An offline launch or an old backend that has never heard of whoami.
     // Neither is an error worth showing: the app works, the tab stays hidden.

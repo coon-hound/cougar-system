@@ -2,14 +2,15 @@
   "name": "cougar-system",
   "version": "1.0.0",
   "private": true,
-  "description": "40 SAR Cougar Company data system — tests for the multi-device sync layer.",
+  "description": "40 SAR Cougar Company data system \u2014 tests for the multi-device sync layer.",
   "scripts": {
     "test": "node test/run.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:all": "node test/run.js && playwright test",
     "test:live": "node test/live/api-contract.test.js",
-    "migrate": "node scripts/migrate-from-sheets.mjs"
+    "migrate": "node scripts/migrate-from-sheets.mjs",
+    "test:integrity": "bash scripts/test-integrity.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.0",

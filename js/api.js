@@ -2,6 +2,11 @@
 // Every data request carries an auth token. The token is obtained by redeeming
 // a single-use invite link via API.redeemInvite() — see js/main.js bootstrap.
 
+const SeatingChangedError = class extends Error {
+  constructor() { super("Seating changed. Your old edits were not saved. Refresh before editing again."); this.name = "SeatingChangedError"; }
+};
+const DATA_WRITE_ACTIONS = new Set(["write", "append", "appendMany", "upsertRow", "applyOps", "deleteRowById"]);
+
 const AuthError = class extends Error {
   constructor(message) { super(message); this.name = "AuthError"; }
 };
@@ -88,11 +93,19 @@ const API = {
     return _fetchJson(url, undefined, opts && opts.timeoutMs);
   },
   async post(body, opts) {
-    return _fetchJson(STATE.apiUrl, {
+    if (DATA_WRITE_ACTIONS.has(body.action) && typeof _seatingBlocked !== "undefined" && _seatingBlocked) {
+      throw new SeatingChangedError();
+    }
+    if (DATA_WRITE_ACTIONS.has(body.action) && !Object.prototype.hasOwnProperty.call(body, "seatEpoch")) {
+      body = { ...body, seatEpoch: STATE.seatEpoch ?? null };
+    }
+    const data = await _fetchJson(STATE.apiUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({ ...body, auth: STATE.authToken })
     }, opts && opts.timeoutMs);
+    if (data && data.reason === "SEATING_CHANGED") throw new SeatingChangedError();
+    return data;
   },
   // Redeem a single-use invite token. Does not require an existing auth token.
   async redeemInvite(token) {
@@ -131,15 +144,28 @@ const API = {
   async revokeAccess(d4, what, device) {
     return this.post({ action: "revokeAccess", d4, what, device });
   },
+  // The change log (admin only, refused by the backend without can_invite).
+  // opts: { limit, before, tab, d4, failed }; `before` is the oldest id held.
+  async auditLog(opts) {
+    return this.post({ action: "auditLog", ...(opts || {}) }, { timeoutMs: 20000 });
+  },
 
   async pullAll() {
     // readAll moves every tab in one response - give it double the timeout.
     const data = await this.get("readAll", "", { timeoutMs: 60000 });
     if (data.error) throw new Error(data.error);
-    // Only replace a STATE array when the response carries rows for it — an
-    // empty array in the response must not wipe local data (matches prior behavior).
+    const epochChanged = data.seatEpoch != null && data.seatEpoch !== STATE.seatEpoch;
+    if (epochChanged && typeof discardStaleSeating === "function") {
+      discardStaleSeating(STATE.seatEpoch != null || (STATE.roster || []).length > 0);
+    }
+    // Empty arrays are authoritative too. An old occupant must never survive
+    // a full refresh simply because his table is now empty.
     for (const key in PULL_ASSIGN) {
-      if (data[key]?.length) PULL_ASSIGN[key](data[key]);
+      if (Array.isArray(data[key])) PULL_ASSIGN[key](data[key]);
+    }
+    if (data.seatEpoch != null) {
+      STATE.seatEpoch = data.seatEpoch;
+      if (typeof _seatingBlocked !== "undefined") _seatingBlocked = false;
     }
     if (data.revs) STATE.rev = data.revs;   // baseline per-tab revisions (sheet-keyed)
     saveLocal();
@@ -156,8 +182,12 @@ const API = {
       // read&tab now returns { rows, rev }; tolerate a bare array too.
       const rows = Array.isArray(res) ? res : (res && res.rows) || [];
       const rev = (res && res.rev != null) ? res.rev : undefined;
-      return { sheet, rows, rev };
+      return { sheet, rows, rev, seatEpoch: res && res.seatEpoch };
     }));
+    if (fetched.some(r => r.seatEpoch != null && r.seatEpoch !== STATE.seatEpoch)) {
+      await this.pullAll();
+      return { changed: true, tabs: Object.keys(TAB_TO_STATE) };
+    }
     let changed = false;
     for (const { sheet, rows, rev } of fetched) {
       const key = TAB_TO_STATE[sheet];

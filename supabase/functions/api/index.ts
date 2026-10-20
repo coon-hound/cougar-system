@@ -24,7 +24,7 @@
 
 import postgres from "npm:postgres@3.4.4";
 
-const BUILD = "2026-09-03-1";
+const BUILD = "2026-10-14-seating-1";
 
 const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, {
   prepare: false,
@@ -173,43 +173,52 @@ async function columnsOf(table: string): Promise<Set<string>> {
 
 // Build the SELECT list. Roster goes through roster_api_row() so the encrypted
 // columns come back decrypted; everything else uses api_row().
-function selectRows(table: string) {
+function selectRows(table: string, db: postgres.Sql = sql) {
   return table === "roster"
-    ? sql`select roster_api_row(t, ${ENC_KEY}) as row from roster t where t.deleted_at is null`
-    : sql`select api_row(to_jsonb(t)) as row from ${sql(table)} t where t.deleted_at is null`;
+    ? db`select roster_api_row(t, ${ENC_KEY}) as row from roster t where t.deleted_at is null`
+    : db`select api_row(to_jsonb(t)) as row from ${db(table)} t where t.deleted_at is null`;
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
 
-async function allRevs(): Promise<Record<string, number>> {
-  const rows = await sql`select tab, rev from revs`;
+async function allRevs(db: postgres.Sql = sql): Promise<Record<string, number>> {
+  const rows = await db`select tab, rev from revs`;
   const out: Record<string, number> = {};
   for (const r of rows) out[r.tab] = Number(r.rev);
   return out;
 }
 
-async function readAll() {
-  const out: Record<string, unknown> = {
-    timestamp: new Date().toISOString(),
-    sheetName: "cougar",
-  };
-  // 12 small tables; parallel round trips keep this well under a second
-  // against the 10-60s the Apps Script readAll used to cost.
-  const results = await Promise.all(
-    REV_TABS.map(async (tab) => [tab, (await selectRows(TABLE[tab])).map((r) => r.row)] as const),
-  );
-  for (const [tab, rows] of results) out[STATE_KEY[tab]] = rows;
-  out.revs = await allRevs();
-  return json(out);
+async function seatingEpoch(db: postgres.Sql): Promise<number> {
+  const [r] = await db`select seating_epoch() as epoch`;
+  return Number(r.epoch);
 }
 
+// Records, revisions and the meaning of their 4Ds must come from one snapshot.
+async function readSnapshot(tab?: string, revisionsOnly = false) {
+  return await sql.begin("isolation level repeatable read read only", async (tx) => {
+    const db = tx as unknown as postgres.Sql;
+    await db`select pg_advisory_xact_lock_shared(6413161608::bigint)`;
+    const seatEpoch = await seatingEpoch(db);
+    const revs = await allRevs(db);
+    if (revisionsOnly) return json({ ok: true, revs, seatEpoch, timestamp: new Date().toISOString() });
+    if (tab) {
+      const rows = (await selectRows(TABLE[tab], db)).map(r => r.row);
+      return json({ rows, rev: revs[tab] ?? null, seatEpoch });
+    }
+    const out: Record<string, unknown> = {
+      timestamp: new Date().toISOString(), sheetName: "cougar", revs, seatEpoch,
+    };
+    for (const name of REV_TABS) {
+      out[STATE_KEY[name]] = (await selectRows(TABLE[name], db)).map(r => r.row);
+    }
+    return json(out);
+  });
+}
+
+async function readAll() { return await readSnapshot(); }
 async function readTab(tab: string) {
-  const table = TABLE[tab];
-  if (!table) return json({ error: `Tab '${tab}' not found` });
-  const rows = (await selectRows(table)).map((r) => r.row);
-  const revs = await allRevs();
-  // read&tab returns {rows, rev}; js/api.js:117 also tolerates a bare array.
-  return json({ rows, rev: revs[tab] ?? null });
+  if (!TABLE[tab]) return json({ error: `Tab '${tab}' not found` });
+  return await readSnapshot(tab);
 }
 
 // ── Writes ──────────────────────────────────────────────────────────────────
@@ -224,11 +233,18 @@ async function withRev<T>(
   tab: string,
   baseRev: unknown,
   enforce: boolean,
+  expectedEpoch: unknown,
   fn: (tx: postgres.TransactionSql) => Promise<T | { error: string }>,
 ): Promise<Record<string, unknown>> {
   const tracked = REV_TABS.includes(tab);
   try {
     return await sql.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock_shared(6413161608::bigint)`;
+      const seatEpoch = await seatingEpoch(tx as unknown as postgres.Sql);
+      if (!Number.isSafeInteger(expectedEpoch) || expectedEpoch !== seatEpoch) {
+        return { error: "Seating changed. Reload before saving; this change was not saved.",
+                 code: 409, reason: "SEATING_CHANGED", seatEpoch };
+      }
       let serverRev: number | null = null;
       if (tracked) {
         const [r] = await tx`select rev from revs where tab = ${tab} for update`;
@@ -258,7 +274,7 @@ async function withRev<T>(
       } else if (tracked) {
         rev = serverRev ?? undefined;
       }
-      return { ok: true, tab, ...(result as object), ...(rev != null ? { rev } : {}) };
+      return { ok: true, tab, seatEpoch, ...(result as object), ...(rev != null ? { rev } : {}) };
     }) as Record<string, unknown>;
   } catch (e) {
     // A lock timeout or serialization failure is the analogue of the old
@@ -323,9 +339,20 @@ async function upsertOne(tx: postgres.TransactionSql, tab: string, row: Record<s
   // log_audit redacts as a second line of defence, but the values are not sent
   // in the first place.
   const [existing] = await tx`
-    select api_row(to_jsonb(t)) as row from ${tx(table)} t where t."id" = ${id}`;
-  const before = existing ? (existing.row as Record<string, unknown>) : null;
+    select api_row(to_jsonb(t)) as row, t.deleted_at is not null as dead
+      from ${tx(table)} t where t."id" = ${id}`;
+  // A soft-deleted row is reused in place, but to the log it is a new record:
+  // its "before" is what the deleted row said, which nobody could see.
+  const before = existing && !existing.dead ? (existing.row as Record<string, unknown>) : null;
   if (!existing) await tx`insert into ${tx(table)} ("id") values (${id})`;
+  const sensitiveKeys = Object.keys(real).filter(k => ENCRYPTED.has(k));
+  let sensitiveChanged: Record<string, boolean> = {};
+  if (sensitiveKeys.length) {
+    const flags = sensitiveKeys.map(k => tx`${k}::text, dec_col(${tx(k)}, ${ENC_KEY}) is distinct from ${str(real[k])}`);
+    const [changes] = await tx`select jsonb_build_object(${joinFrags(tx, flags)}) as flags from ${tx(table)} where "id"=${id}`;
+    sensitiveChanged = changes.flags as Record<string, boolean>;
+  }
+
 
   await tx`
     update ${tx(table)}
@@ -336,7 +363,8 @@ async function upsertOne(tx: postgres.TransactionSql, tab: string, row: Record<s
 
   const after: Record<string, unknown> = { ...(before ?? {}) };
   for (const [k, v] of Object.entries(real)) if (!ENCRYPTED.has(k)) after[k] = str(v);
-  const touchedSensitive = Object.keys(real).filter((k) => ENCRYPTED.has(k));
+  const touchedSensitive = sensitiveKeys;
+  for (const k of sensitiveKeys) if (sensitiveChanged[k]) after[k] = "[changed]";
 
   return {
     action: existing ? "updated" : "appended",
@@ -450,9 +478,23 @@ async function writeWholeTab(tx: postgres.TransactionSql, tab: string, data: Rec
   return { rowsWritten: data.length, timestamp: new Date().toISOString() };
 }
 
+// One audit row per record a batch touched, written in the batch's own
+// transaction so history commits exactly when the edit does. Without it a bulk
+// upload is logged as one anonymous "appendMany on PolarFlow" with no row id,
+// which cannot say what was uploaded. Strips _audit from `r`: it carries row
+// contents, and the client has no business receiving them back.
+async function logRowAudit(tx: postgres.TransactionSql, token: string, action: string,
+                           tab: string, rowId: string, r: Record<string, unknown>) {
+  const aud = r._audit as { before?: postgres.JSONValue; after?: postgres.JSONValue; touchedSensitive?: string[] } | undefined;
+  delete r._audit;
+  await tx`select log_audit(${token}, ${action}, ${tab}, ${rowId}, ${!("error" in r)},
+    ${tx.json({ sensitiveWritten: aud?.touchedSensitive ?? [], reason: r.error ?? null } as postgres.JSONValue)},
+    ${aud?.before ? tx.json(aud.before) : null}, ${aud?.after ? tx.json(aud.after) : null})`;
+}
+
 // applyOps — ordered, one transaction, ONE rev bump, and partial success:
 // a single bad op must not abort the rest, so each runs in a savepoint.
-async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<string, unknown>[]) {
+async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<string, unknown>[], token: string) {
   const results: Record<string, unknown>[] = [];
   let applied = 0, failed = 0;
 
@@ -466,9 +508,8 @@ async function applyOps(tx: postgres.TransactionSql, tab: string, ops: Record<st
           default: return { error: `Unknown op '${op.op}'` };
         }
       }) as Record<string, unknown>;
-      // _audit is internal: it carries row contents, and the client has no
-      // business receiving them back in a write response.
-      if (r && typeof r === "object" && "_audit" in r) delete (r as Record<string, unknown>)._audit;
+      await logRowAudit(tx, token, "applyOps:" + String(op.op), tab,
+        String(op.id ?? (op.row as Record<string, unknown>)?.id ?? ""), r);
       if (r && "error" in r) { failed++; results.push(r); }
       else { applied++; results.push(r); }
     } catch (e) {
@@ -686,6 +727,55 @@ async function listAccess() {
   return json({ ok: true, access: rows });
 }
 
+// The change log: who changed what, newest first, for the admin screen.
+//
+// Field-level diffs are computed here rather than shipped as two whole rows,
+// so a phone downloads what moved and not every column twice. Encrypted roster
+// columns arrive already redacted by log_audit ('[changed]' / '[redacted]').
+//
+// Two kinds of row are left out because they say nothing the others do not: a
+// batch envelope whose rows were logged one by one (detail.perRow), and a
+// replayed op that changed nothing (an `x:y` action with neither image).
+// Paged by id, not offset, so rows arriving while you read do not shift pages.
+async function auditLog(body: Record<string, unknown>) {
+  const limit = Math.min(Math.max(Math.trunc(Number(body.limit)) || 100, 1), 200);
+  const before = /^\d+$/.test(String(body.before ?? "")) ? String(body.before) : null;
+  const tab = body.tab ? String(body.tab) : null;
+  const person = body.person ? String(body.person) : null;
+  const d4 = body.d4 ? String(body.d4) : null;
+  const failed = body.failed === true;
+  const rows = await sql`
+    select a.id::text as id, a.at, a.person, t.device_label as device,
+           a.action, a.tab, a.row_id, a.ok, a.detail,
+           case when a.before is null and a.after is not null then 'added'
+                when a.before is not null and a.after is null then 'deleted'
+                when a.before is not null then 'edited' end as kind,
+           coalesce(a.after, a.before) ->> 'd4'   as d4,
+           coalesce(a.after, a.before) ->> 'name' as name,
+           case when a.before is not null and a.after is not null then (
+             select coalesce(jsonb_agg(jsonb_build_object(
+                      'field', c.key, 'from', a.before -> c.key, 'to', c.value)
+                      order by c.key), '[]'::jsonb)
+               from jsonb_each(a.after) c
+              where (a.before -> c.key) is distinct from c.value)
+           end as changes,
+           case when a.before is null or a.after is null
+                then coalesce(a.after, a.before) end as record
+      from audit a
+      left join auth_tokens t on t.token = a.token
+     where (${before}::bigint is null or a.id < ${before}::bigint)
+       and (${tab}::text is null or a.tab = ${tab})
+       and (${person}::text is null or a.person = ${person})
+       and (${d4}::text is null or a.row_id = ${d4}
+            or coalesce(a.after, a.before) ->> 'd4' = ${d4})
+       and (${failed} or a.ok)
+       and not (a.ok and coalesce((a.detail ->> 'perRow')::boolean, false))
+       and not (a.ok and a.action like '%:%' and a.before is null and a.after is null)
+     order by a.id desc
+     limit ${limit}`;
+  return json({ ok: true, entries: rows, more: rows.length === limit });
+}
+
 // Create an invite already tagged to a person. The name and 4D are taken from
 // the ROSTER, not from whatever the client sent: a client-supplied name would
 // let a tampered request mint a credential labelled as somebody it is not, and
@@ -841,7 +931,7 @@ async function redeemInvite(token: string) {
 
 // ── Router ──────────────────────────────────────────────────────────────────
 
-Deno.serve(async (req) => {
+Deno.serve({ port: Number(Deno.env.get("PORT") || 8000), hostname: Deno.env.get("API_HOST") || "0.0.0.0" }, async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   const url = new URL(req.url);
@@ -860,7 +950,7 @@ Deno.serve(async (req) => {
       if (!auth.ok) return unauthorized();
 
       if (action === "readAll") return await readAll();
-      if (action === "revCheck") return json({ ok: true, revs: await allRevs(), timestamp: new Date().toISOString() });
+      if (action === "revCheck") return await readSnapshot(undefined, true);
       if (action === "read") return await readTab(tab);
       return json({ error: "Unknown action. Use: readAll, revCheck, read&tab=TabName, or ping" });
     }
@@ -907,6 +997,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Reading the change log is an admin act like the access screen, but it is
+    // a read, so it is refused and audited on denial without being logged on
+    // success - otherwise every look at the log would add a row to it.
+    if (action === "auditLog") {
+      if (!(await canInvite(auth.token))) {
+        await sql`select log_audit(${auth.token}, ${action}, null, null, false,
+                                   ${sql.json({ reason: "not allowed" })})`;
+        return forbidden();
+      }
+      return await auditLog(body);
+    }
+
     if (action === "listAccess" || action === "createInvite"
         || action === "reissueAccess" || action === "revokeAccess") {
       if (!(await canInvite(auth.token))) {
@@ -951,7 +1053,7 @@ Deno.serve(async (req) => {
     switch (action) {
       case "write": {
         const data = (body.data ?? []) as Record<string, unknown>[];
-        out = await withRev(tab, baseRev, true, (tx) => {
+        out = await withRev(tab, baseRev, true, body.seatEpoch, (tx) => {
           // Same guard, same wording as writeTab (apps-script-Code.gs:832).
           // Without it an empty payload WIPES the tab for every device: the
           // per-tab "↻ Re-push all" button (js/render.js:1851) calls pushTab
@@ -971,7 +1073,7 @@ Deno.serve(async (req) => {
         break;
       }
       case "append":
-        out = await withRev(tab, baseRev, false, (tx) =>
+        out = await withRev(tab, baseRev, false, body.seatEpoch, (tx) =>
           appendOne(tx, tab, (body.row ?? {}) as Record<string, unknown>));
         break;
       case "appendMany": {
@@ -981,12 +1083,15 @@ Deno.serve(async (req) => {
           out = { error: "Rows must be a non-empty array" };
           break;
         }
-        out = await withRev(tab, baseRev, false, async (tx) => {
+        out = await withRev(tab, baseRev, false, body.seatEpoch, async (tx) => {
           let n = 0;
           for (const r of rows) {
-            const res = await appendOne(tx, tab, r);
+            const res = await appendOne(tx, tab, r) as Record<string, unknown>;
             if ("error" in res) return res;
-            if (res.action !== "noop") n++;
+            if (res.action !== "noop") {
+              n++;
+              await logRowAudit(tx, auth.token, "appendMany:append", tab, String(r.id ?? ""), res);
+            }
           }
           // Count APPENDS, not rows accepted: a retried batch whose ids are all
           // present already appended nothing (apps-script-Code.gs:1057). The
@@ -1000,7 +1105,7 @@ Deno.serve(async (req) => {
         break;
       }
       case "upsertRow":
-        out = await withRev(tab, baseRev, false, (tx) =>
+        out = await withRev(tab, baseRev, false, body.seatEpoch, (tx) =>
           upsertOne(tx, tab, (body.row ?? {}) as Record<string, unknown>));
         break;
       case "applyOps": {
@@ -1008,11 +1113,11 @@ Deno.serve(async (req) => {
         // Same ceiling as MAX_BATCH_OPS (apps-script-Code.gs:1148); the client
         // packs at most 50 (js/sync.js:463) so this is headroom, not a limit.
         if (ops.length > 200) { out = { error: "Too many ops (max 200)" }; break; }
-        out = await withRev(tab, baseRev, false, (tx) => applyOps(tx, tab, ops));
+        out = await withRev(tab, baseRev, false, body.seatEpoch, (tx) => applyOps(tx, tab, ops, auth.token));
         break;
       }
       case "deleteRowById":
-        out = await withRev(tab, baseRev, false, (tx) => deleteOne(tx, tab, body.id));
+        out = await withRev(tab, baseRev, false, body.seatEpoch, (tx) => deleteOne(tx, tab, body.id));
         break;
       default:
         // deleteRow / updateRow were index-based and had no frontend caller.
@@ -1032,6 +1137,12 @@ Deno.serve(async (req) => {
                                ${!out.error && !out.conflict},
                                ${sql.json({
                                  reason: (out.error ?? null) as string | null,
+                                 // How much a batch moved, and that its rows were
+                                 // logged one by one, so the change log can show
+                                 // the rows and skip this envelope.
+                                 ...(action === "applyOps" || action === "appendMany"
+                                   ? { perRow: true } : {}),
+                                 ...(out.rowsWritten != null ? { rows: Number(out.rowsWritten) } : {}),
                                  ...(aud?.touchedSensitive?.length
                                    ? { sensitiveWritten: aud.touchedSensitive }
                                    : {}),

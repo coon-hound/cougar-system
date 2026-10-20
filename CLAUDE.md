@@ -63,6 +63,8 @@ Anything selecting conducts by age keeps all of them or none; name the ids.
 Its report counts what it looked at, not what it removed: a committed run said `conducts_soft_deleted: 110` and actually deleted 1, the other 109 being archived.
 - **A killed migration leaves its transaction open.** `idle_in_transaction_session_timeout` is `0` on this database, so a client killed mid-run holds its row locks until the connection drops, and the next run blocks on them silently. Check `pg_stat_activity` before assuming a rerun is merely slow.
 
+- **Every change to a data table is backed up in `row_history`** (`0014_row_history.sql`), by trigger, as the row stood before it, encrypted columns as ciphertext. Restore with `restore_as_of` / `restore_all_as_of`, dry run first - see [docs/RESTORE.md](docs/RESTORE.md). A new data table needs `select enable_row_history('<table>', <order>)` in its migration, or it has no backup.
+
 ## Personnel data rules
 
 - `*.csv` is gitignored on purpose: real nominal rolls must never land in the repo. `docs/nominal-roll-template.csv` is the one exception and is entirely invented names.

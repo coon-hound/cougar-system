@@ -69,15 +69,12 @@ if [ "$is_be" = 1 ]; then
 fi
 
 if [ "$is_db" = 1 ]; then
-  # Talks to a REAL Postgres + the REAL Edge Function. Skips itself (exit 0,
-  # with a note in the evidence) when no backend is reachable, so this gate is
-  # safe in CI while still being the thing that has to pass before cutover.
   {
     echo
-    echo "## test/live — the real Edge Function over HTTP"
+    echo "## Synthetic full-stack integrity tests (real Postgres, Edge Function and desktop/phone browsers)"
     echo '```'
   } >> "$EV"
-  if node test/live/api-contract.test.js >> "$EV" 2>&1; then :; else pass=0; fi
+  if bash scripts/test-integrity.sh >> "$EV" 2>&1; then :; else pass=0; fi
   echo '```' >> "$EV"
 fi
 

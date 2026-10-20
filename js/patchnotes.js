@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 158;
+const APP_VERSION = 162;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,8 +21,8 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 158,
-    date: "1 Oct 2026",
+    v: 162,
+    date: "20 Oct 2026",
     title: "Fewer taps for the things you do most",
     intro: "We counted where everyone taps, then moved the most-used things closer and the rarely-used ones out of the way.",
     items: [
@@ -34,6 +34,16 @@ const PATCH_NOTES = [
       { t: "⌨ Type to find someone", d: "Every person dropdown in a form has a box beside it. Type a 4D or part of a name, and if only one person matches they are picked for you." },
       { t: "● Small things", d: "Tap the sync dot for Sync & I/O. The Re-push buttons moved there too, since every edit already saves itself. Pop-up title bars no longer cover the first line under them." },
     ],
+  },
+  {
+    v: 161,
+    date: "20 Oct 2026",
+    title: "Section roles",
+    intro: "Every man now carries his role in the section: 1 LMG, GL, 2 MAT, Steel Net and so on.",
+    items: [
+      { t: "🎯 Roles on the roster", d: "The Role column on the Roster tab shows each man's role instead of just \"Recruit\". A dash means he has no role yet." },
+      { t: "✎ Change a role from his card", d: "Open a man and tap ✎ next to his role. Pick from the usual roles or type your own." }
+    ]
   },
   {
     v: 156,

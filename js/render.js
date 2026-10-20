@@ -50,6 +50,7 @@ function render() {
     case "usage": renderUsage(el); break;
     case "sync": renderSync(el); break;
     case "access": renderAccess(el); break;
+    case "changelog": renderChangeLog(el); break;
     default: el.innerHTML = "";
   }
 }
@@ -1365,7 +1366,7 @@ function renderRoster(el) {
       const isCmd = r.role === "Commander";
       const nameCell = isCmd ? `${r.rank ? r.rank + " " : ""}${r.name}` : r.name;
       const idCell = isCmd ? "" : r.id;
-      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `<span style="color:var(--muted)">Recruit</span>`;
+      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`;
       // Book Out / Book In toggle reflecting the shared booked-out flag.
       const effStatuses = effByD4[r.id];
       const statusCell = (effStatuses && effStatuses.length)

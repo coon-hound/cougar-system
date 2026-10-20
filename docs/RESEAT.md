@@ -100,7 +100,7 @@ COUGAR_ENC_KEY=... node scripts/reseat.mjs --enlist late.csv       # seat late e
 node scripts/reseat.mjs --move 7206 94 --enlist late.csv           # both, in ONE pass
 ```
 
-Every section whose membership changes is re-dealt alphabetically: the section he leaves closes up behind him, as a departure does, and the one he joins opens a seat in name order.
+Every section whose membership changes is re-dealt alphabetically: the section he leaves closes up behind him, as a departure does, and the one he joins seats arrivals after existing members.
 `--move` takes a 4D or an exact name, then a section written `94`, `9-4` or `P9S4`, and repeats.
 
 **Put every change into one run.**
@@ -154,6 +154,9 @@ Alphabetical is stable, reproducible from the roster alone, and leaves a section
 ## Immediately after
 
 The script prints this list too. It matters.
+
+The utility now increments the database seating version in the same locked transaction.
+Every operational copy must include this protection before use.
 
 1. **Bump `STORAGE_KEY` in `js/state.js`** and the uniform `?v=` in `index.html`, then deploy.
    This is what forces every phone to drop its cache.
