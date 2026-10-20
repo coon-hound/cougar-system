@@ -253,16 +253,68 @@ function loadDirtyOps() {
   return map;
 }
 
+// Each row as the server last sent or accepted it: stateKey → Map(id → row).
+// An upsert carries only the fields that differ from this copy, so editing one
+// field cannot send back the rest of the record as this phone last saw it -
+// which reverted other commanders' edits, and on 2026-10-11 copied whole
+// profiles onto the wrong men. Memory only: after a reload, until the launch
+// pull lands, a save goes whole, exactly as it did before.
+const _serverRows = new Map();
+
+function serverRowKey(row) {
+  if (!row) return "";
+  if (row.id != null && row.id !== "") return String(row.id);
+  return row["4d"] ? padD4(row["4d"]) : "";
+}
+function recordServerRows(stateKey) {
+  const rows = Array.isArray(STATE[stateKey]) ? JSON.parse(JSON.stringify(STATE[stateKey])) : [];
+  const byId = new Map();
+  for (const r of rows) { const k = serverRowKey(r); if (k) byId.set(k, r); }
+  _serverRows.set(stateKey, byId);
+}
+const sameValue = (a, b) => {
+  const s = v => (v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v));
+  return s(a) === s(b);
+};
+// The row to send for an upsert: id plus the changed fields, null when nothing
+// changed, or the whole row when the server has never sent this one.
+function changedFields(tabName, row) {
+  // An Apps Script deployment older than its merging upsertRow would blank
+  // every field a partial row leaves out, so the Sheet backend still gets
+  // whole rows whatever version is pasted in.
+  if (/script\.google\.com/.test(STATE.apiUrl || "")) return row;
+  const base = _serverRows.get(TAB_TO_STATE[tabName]);
+  const prev = base && base.get(serverRowKey(row));
+  if (!prev) return row;
+  const out = {};
+  for (const k of Object.keys(row)) if (!sameValue(row[k], prev[k])) out[k] = row[k];
+  if (!Object.keys(out).length) return null;
+  if (row.id != null && row.id !== "") out.id = row.id; else out["4d"] = row["4d"];
+  return out;
+}
+// A landed upsert is now what the server holds for those fields.
+function noteServerRows(tabName, modes) {
+  const base = _serverRows.get(TAB_TO_STATE[tabName]);
+  if (!base) return;
+  for (const m of modes) {
+    if (m.type === "upsert" && m.row) {
+      const k = serverRowKey(m.row);
+      if (k) base.set(k, { ...(base.get(k) || {}), ...JSON.parse(JSON.stringify(m.row)) });
+    } else if (m.type === "delete" && m.id != null) base.delete(String(m.id));
+  }
+}
+
 // Order-preserving coalesce of granular modes: a later upsert of a row id
-// supersedes an earlier upsert of it, and a later delete of an id drops any
+// merges over an earlier upsert of it (each carries only its own changed
+// fields, so neither may be dropped), and a later delete of an id drops any
 // earlier upsert of it. The net server effect is identical - the list is just
 // shorter. Shared by the batch builder and the dirty-ops persistence.
 function coalesceModes(modes) {
   const out = [];
-  for (const m of modes) {
+  for (let m of modes) {
     if (m.type === "upsert" && m.row && m.row.id != null) {
       const i = out.findIndex(o => o.type === "upsert" && o.seatEpoch === m.seatEpoch && o.row && String(o.row.id) === String(m.row.id));
-      if (i >= 0) out.splice(i, 1);
+      if (i >= 0) { m = { ...m, row: { ...out[i].row, ...m.row } }; out.splice(i, 1); }
     } else if (m.type === "delete" && m.id != null) {
       const i = out.findIndex(o => o.type === "upsert" && o.seatEpoch === m.seatEpoch && o.row && String(o.row.id) === String(m.id));
       if (i >= 0) out.splice(i, 1);
@@ -397,6 +449,7 @@ function discardStaleSeating(notify = true) {
   STATE.seatEpoch = null;
   cancelAutoRetry();
   for (const q of _writeQueue.values()) q.length = 0;
+  _serverRows.clear();   // its 4Ds may now name other men
   _dirtyOps.clear();
   STATE.dirty = new Set();
   _lastConflictedReplace = null;
@@ -430,6 +483,11 @@ function autoSync(tabName, mode) {
   // Snapshot both the payload and the epoch before any pull can replace STATE.
   mode = JSON.parse(JSON.stringify({ ...mode,
     seatEpoch: Object.prototype.hasOwnProperty.call(mode, "seatEpoch") ? mode.seatEpoch : (STATE.seatEpoch ?? null) }));
+  if (mode.type === "upsert" && mode.row) {
+    const row = changedFields(tabName, mode.row);
+    if (!row) return _draining.get(tabName) || Promise.resolve();
+    mode.row = row;
+  }
   // Already known to be missing from the deployed backend. The edit is in
   // STATE and saveLocal has persisted it; queueing it would buy one failed
   // round trip per keystroke and nothing else.
@@ -470,9 +528,12 @@ async function drainTab(tabName) {
             scheduleAutoRetry();
             syncLog(`${tabName}: ${failed.length} of ${mode.ops.length} batched change${failed.length === 1 ? "" : "s"} failed - will retry.`, "var(--orange)");
           }
+          noteServerRows(tabName, landed);
           clearSyncedOps(tabName, landed);
         } else {
-          clearSyncedOps(tabName, mode.type === "applyOps" ? (mode.modes || []) : [mode]);
+          const landed = mode.type === "applyOps" ? (mode.modes || []) : [mode];
+          noteServerRows(tabName, landed);
+          clearSyncedOps(tabName, landed);
         }
       } catch (e) {
         if (e && e.name === "SeatingChangedError") {
