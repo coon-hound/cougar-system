@@ -21,6 +21,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
+    v: 161,
+    date: "20 Oct 2026",
+    title: "Section roles",
+    intro: "Every man now carries his role in the section: 1 LMG, GL, 2 MAT, Steel Net and so on.",
+    items: [
+      { t: "🎯 Roles on the roster", d: "The Role column on the Roster tab shows each man's role instead of just \"Recruit\". A dash means he has no role yet." },
+      { t: "✎ Change a role from his card", d: "Open a man and tap ✎ next to his role. Pick from the usual roles or type your own." }
+    ]
+  },
+  {
     v: 156,
     date: "28 Sep 2026",
     title: "Platoon 7 and 9 seating",
