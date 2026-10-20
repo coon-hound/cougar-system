@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 162;
+const APP_VERSION = 164;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,15 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 164,
+    date: "20 Oct 2026",
+    title: "Menu is back",
+    intro: "The bottom bar from the last update did not work, so it has been taken out while we fix it.",
+    items: [
+      { t: "☰ Menu button", d: "Tap ☰ at the top to reach every page, as before." }
+    ]
+  },
   {
     v: 162,
     date: "20 Oct 2026",
