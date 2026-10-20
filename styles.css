@@ -207,6 +207,8 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 .badge-accent{background:rgba(var(--accentRGB),.15);color:var(--accentLift);border:1px solid rgba(var(--accentRGB),.32)}
 .badge-teal{background:rgba(var(--tealRGB),.15);color:var(--teal);border:1px solid rgba(var(--tealRGB),.32)}
 .badge-pink{background:rgba(var(--pinkRGB),.15);color:var(--pink);border:1px solid rgba(var(--pinkRGB),.32)}
+.qual-expired{background:var(--surface2);color:var(--dim);border:1px solid var(--border);text-decoration:line-through}
+.tag-row{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 
 /* ── Buttons ───────────────────────────────────────────────
    Four ranks: primary (filled azure), success/danger (tinted, semantic),

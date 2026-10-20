@@ -1285,14 +1285,22 @@ function dashSecAppointments(visible, todayIso) {
 }
 
 
+// Roster-view-only qualification filter ("" = everyone). Not part of the
+// global topbar scope: it answers "who holds X" without narrowing other tabs.
+let _rosterQual = "";
+function setRosterQual(v) { _rosterQual = v || ""; render(); }
+
 function renderRoster(el) {
   const rsiCount = {};
   STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
   // Default order: highest rank first, lowest at the bottom, with the 4D (the
   // order the roster arrives in) as the tie-break so two 3SGs stay stable.
   // sortByRank copies, so STATE.roster itself is never reordered.
-  const scoped = sortByRank(filteredRoster());
   const rosterToday = todayISO();
+  const qualNames = allQualNames();
+  if (_rosterQual && !qualNames.includes(_rosterQual)) _rosterQual = "";
+  const qualOf = r => _rosterQual ? getQuals(r).find(q => q.name === _rosterQual) : null;
+  const scoped = sortByRank(filteredRoster().filter(r => !_rosterQual || qualOf(r)));
   // Camp column reads the SHARED out-of-camp definition (outOfCampMap) so it can
   // never disagree with the dashboard / parade strength — medical and leave count
   // as out here, not just manual book-outs. Colours/labels mirror the dashboard
@@ -1310,22 +1318,36 @@ function renderRoster(el) {
   // don't want the user to silently overwrite the sheet with only their slice.
   const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn" onclick="openCommanderForm()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
         <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
+        <button class="btn" onclick="openQualsForm()" title="Who holds which qualification; award one to many people at once">🎓 Quals</button>
         <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
         <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
       </div>
     </div>
-    ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th><th>Status</th><th>Camp</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
+    ${qualNames.length ? `<div style="display:flex;align-items:center;gap:8px;margin:-8px 0 12px;flex-wrap:wrap">
+      <select class="topbar-select" onchange="setRosterQual(this.value)" title="Show only holders of one qualification">
+        <option value="">🎓 Any qualification</option>
+        ${qualNames.map(n => `<option value="${escapeAttr(n)}"${n === _rosterQual ? " selected" : ""}>🎓 ${escapeHtml(n)}</option>`).join("")}
+      </select>
+      ${_rosterQual ? `<span style="font-size:11px;color:var(--muted)">${scoped.length} holder${scoped.length === 1 ? "" : "s"}${isFilterActive() ? ` in ${filterLabel()}` : ""}</span>
+      <button class="btn btn-icon" style="font-size:11px;padding:3px 9px" onclick="setRosterQual('')">✕ Clear</button>` : ""}
+    </div>` : ""}
+    ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th>${_rosterQual ? "<th>Expiry</th>" : ""}<th>Status</th><th>Camp</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
     ${scoped.map(r => {
       const bmi = calcBMI(r);
       const isCmd = r.role === "Commander";
       const nameCell = isCmd ? `${r.rank ? r.rank + " " : ""}${r.name}` : r.name;
       const idCell = isCmd ? "" : r.id;
-      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`;
+      const extraRoles = getSecondaryRoles(r);
+      const roleCell = (isCmd ? `<span class="badge badge-purple">Commander</span>` : r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`)
+        + (extraRoles.length ? `<div style="font-size:10px;color:var(--muted);font-style:italic">${escapeHtml(extraRoles.join(", "))}</div>` : "");
+      const q = qualOf(r);
+      const qState = q ? qualState(q, rosterToday) : "";
+      const expiryCell = !q ? "" : `<td style="white-space:nowrap;font-size:11px;color:${qState === "expired" ? "var(--dim)" : qState === "expiring" ? "var(--yellow)" : "var(--muted)"}">${q.expires ? isoToDisplayDate(q.expires) : "—"}${qState === "expired" ? " (expired)" : ""}</td>`;
       // Book Out / Book In toggle reflecting the shared booked-out flag.
       const effStatuses = effByD4[r.id];
       const statusCell = (effStatuses && effStatuses.length)
@@ -1354,9 +1376,9 @@ function renderRoster(el) {
           ? `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); clearPresentOverride('${r.id}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
           : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); openBookOutForm({ d4: '${r.id}' })" title="Book out of camp for today or a date range">🚪 Book out</button>`;
       const campCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${campBadge}${campToggle}</div>`;
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
+      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer${qState === "expired" ? ";opacity:.55" : ""}"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td>${expiryCell}<td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
     }).join("")}
-    </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No personnel in ${filterLabel()}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
+    </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? (_rosterQual ? `Nobody${isFilterActive() ? ` in ${filterLabel()}` : ""} holds ${escapeHtml(_rosterQual)}.` : `No personnel in ${filterLabel()}.`) : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
 }
 
 function renderAttendance(el) {

@@ -31,7 +31,9 @@ document.getElementById("search-input").addEventListener("input", e => {
   if (!q) { res.innerHTML = ""; return; }
   // Search respects the global scope filter so results don't show recruits the
   // user has explicitly scoped out of view.
-  const matches = filteredRoster().filter(r => r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)).slice(0, 5);
+  // Roles and qualifications count too, so "medic" finds the medics.
+  const tagged = r => [r.billet, r.secondaryRoles, ...getQuals(r).map(x => x.name)].join(",").toLowerCase().includes(q);
+  const matches = filteredRoster().filter(r => r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || tagged(r)).slice(0, 5);
   res.innerHTML = matches.map(r => `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openPerson('${r.id}')">${r.id}</button>`).join("");
 });
 

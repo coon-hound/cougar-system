@@ -94,6 +94,15 @@ const PROGRAMS = ["PTP", "BMT", "Combined"];
 const GROUPS = ["Guard", "Range Party", "Duty Driver"];
 
 const pick = (a, i) => a[i % a.length];
+// Roles and qualifications, with an expired and an expiring qual among them so
+// every chip state shows up in a demo.
+const BILLETS = ["1 LMG", "2 LMG", "GL", "LAW SS", "LAW 2IC", "Steel Net", ""];
+const isoIn = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+const qualsFor = (i) => [
+  i % 4 === 0 ? `CPR@${isoIn(i % 8 === 0 ? 200 : 20)}` : "",
+  i % 6 === 0 ? "Class 3 Licence" : "",
+  i % 10 === 0 ? `Water Safety@${isoIn(-5)}` : "",
+].filter(Boolean).join(", ");
 
 // 3 platoons x 15 = 45 recruits, plus 6 commanders. The live sheet's ratio is
 // 256 recruits : 26 commanders; this keeps the shape at a size you can read.
@@ -125,6 +134,9 @@ for (let plt = 1; plt <= 3; plt++) {
       outOfCamp: "FALSE",
       campIn: "FALSE",
       groups: i % 9 === 0 ? pick(GROUPS, i / 9) : "",
+      billet: pick(BILLETS, i),
+      secondaryRoles: i % 7 === 3 ? "Medic" : i % 11 === 5 ? "Runner" : "",
+      quals: qualsFor(i),
       location: "Camp",
       ration: i % 5 === 0 ? "Halal" : "Normal",
     });
@@ -136,6 +148,7 @@ for (let c = 1; c <= 6; c++) {
     // The rank is its own column and the UI prefixes it, so the name must not
     // repeat it — otherwise every commander reads "CPT CPT TAN".
     name: `${pick(GIVEN, c + 2)} ${pick(SURNAMES, c + 5)}`, role: "Commander", rank: "CPT",
+    quals: c <= 2 ? "Range Safety Officer, CPR" : "",
     status: "Active", outOfCamp: "FALSE", campIn: "FALSE", program: "Combined",
     phone: `9${String(5000000 + c * 131).slice(0, 7)}`,
     // Duty-schedule fields (0009). appt alternates so both OIL rule classes
