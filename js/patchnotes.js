@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 162;
+const APP_VERSION = 163;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 162,
+    v: 163,
     date: "20 Oct 2026",
     title: "Fewer taps for the things you do most",
     intro: "We counted where everyone taps, then moved the most-used things closer and the rarely-used ones out of the way.",
@@ -34,6 +34,16 @@ const PATCH_NOTES = [
       { t: "⌨ Type to find someone", d: "Every person dropdown in a form has a box beside it. Type a 4D or part of a name, and if only one person matches they are picked for you." },
       { t: "● Small things", d: "Tap the sync dot for Sync & I/O. The Re-push buttons moved there too, since every edit already saves itself. Pop-up title bars no longer cover the first line under them." },
     ],
+  },
+  {
+    v: 162,
+    date: "20 Oct 2026",
+    title: "Mounted and dismounted",
+    intro: "Every man is now tagged Mounted or Dismounted, worked out from his role.",
+    items: [
+      { t: "🚙 Crew are Mounted", d: "Hunter Drivers and Gunners are Mounted, everyone else is Dismounted. A man with both kinds of role, like 2 LMG / Gunner, is tagged Mounted + Dismounted and shows under both." },
+      { t: "🔎 Filter the roster", d: "The Roster tab has a Mounted / Dismounted picker. Change a man's role and his tag follows." }
+    ]
   },
   {
     v: 161,

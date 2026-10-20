@@ -1333,7 +1333,10 @@ function renderRoster(el) {
   // Default order: highest rank first, lowest at the bottom, with the 4D (the
   // order the roster arrives in) as the tie-break so two 3SGs stay stable.
   // sortByRank copies, so STATE.roster itself is never reordered.
-  const scoped = sortByRank(filteredRoster());
+  // The mounted filter is troopers only; "both" counts under either side.
+  const mf = STATE.rosterMount;
+  const scoped = sortByRank(filteredRoster())
+    .filter(r => !mf || mountOf(r) === mf || mountOf(r) === "both");
   const rosterToday = todayISO();
   // Camp column reads the SHARED out-of-camp definition (outOfCampMap) so it can
   // never disagree with the dashboard / parade strength — medical and leave count
@@ -1354,7 +1357,10 @@ function renderRoster(el) {
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="roster-mount" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver, from each man's role">
+          ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
+        </select>
         <button class="btn" onclick="openCommanderForm()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
         <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
         <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
@@ -1366,7 +1372,7 @@ function renderRoster(el) {
       const isCmd = r.role === "Commander";
       const nameCell = isCmd ? `${r.rank ? r.rank + " " : ""}${r.name}` : r.name;
       const idCell = isCmd ? "" : r.id;
-      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`;
+      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `${r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`}<div style="margin-top:2px">${mountBadge(r)}</div>`;
       // Book Out / Book In toggle reflecting the shared booked-out flag.
       const effStatuses = effByD4[r.id];
       const statusCell = (effStatuses && effStatuses.length)
