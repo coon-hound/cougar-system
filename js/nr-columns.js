@@ -1,4 +1,4 @@
-// Master NR — the column registry behind the Roster view.
+// Master NR - the column registry behind the Roster view.
 //
 // The Roster tab is a configurable nominal roll: pick columns, filter rows, sort
 // by any column. Every column here READS an existing helper (outOfCampMap,
@@ -158,7 +158,7 @@ const NR = (() => {
     return medDates(r, ctx).filter(iso => iso >= from && iso <= ctx.today).length;
   };
 
-  // Camp — the existing Roster column, verbatim. Reads outOfCampMap so it can
+  // Camp - the existing Roster column, verbatim. Reads outOfCampMap so it can
   // never disagree with the dashboard / parade strength.
   const CAMP_COLOR = { medical: "--red", leave: "--purple", bookedout: "--orange" };
   const CAMP_WHY = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
@@ -542,7 +542,7 @@ const NR = (() => {
   const activeFilterCount = s => Object.keys(s.filters).filter(id => filterActive(s.filters[id])).length;
 
   // ── Export / copy ─────────────────────────────────────────────────────────
-  // One object per row keyed by column label, in column order — what exportCSV
+  // One object per row keyed by column label, in column order: what exportCSV
   // (Papa.unparse) turns into a header line plus rows.
   function csvRows(rows, cols, ctx) {
     return rows.map(r => {
