@@ -232,6 +232,12 @@ th{padding:9px 12px;background:var(--surface2);color:var(--muted);font-weight:60
 td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:center;font-size:12px;line-height:1.4}
 tbody tr:nth-child(2n){background:rgba(255,255,255,.022)}
 tbody tr:last-child td{border-bottom:none}
+/* Master NR: on a phone the Name column stays put while the rest of a wide
+   view scrolls sideways under it. Opaque, or the scrolled cells show through. */
+@media(max-width:768px){
+  td.nr-sticky,th.nr-sticky{position:sticky;left:0;z-index:0;background:var(--surface);box-shadow:1px 0 0 var(--border)}
+  th.nr-sticky{z-index:2;background:var(--surface2)}
+}
 .table-wrap{overflow-x:auto;border-radius:var(--r3);border:1px solid var(--border);max-height:60vh;overflow-y:auto;background:var(--surface);box-shadow:var(--sh1);-webkit-overflow-scrolling:touch}
 
 /* ── Cards ─────────────────────────────────────────────────*/
