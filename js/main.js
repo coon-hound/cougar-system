@@ -11,9 +11,8 @@
 const TABBAR_NAVS = ["dashboard", "medical", "attendance", "roster"];
 
 function syncNavActive() {
-  document.querySelectorAll("#sidebar .nav-btn, #tabbar .nav-btn[data-nav]").forEach(b => {
-    b.classList.toggle("active", b.dataset.nav === STATE.nav);
-  });
+  document.querySelectorAll("#sidebar .nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === STATE.nav));
+  document.querySelectorAll("#tabbar [data-tab]").forEach(b => b.classList.toggle("active", b.dataset.tab === STATE.nav));
   document.getElementById("tabbar-more")?.classList.toggle("active", !TABBAR_NAVS.includes(STATE.nav));
 }
 
@@ -27,8 +26,13 @@ function goNav(nav) {
   closeMobileSidebar();
 }
 
-document.querySelectorAll("#sidebar .nav-btn, #tabbar .nav-btn[data-nav]").forEach(btn => {
+// The bar's buttons carry data-tab, not data-nav, so `.nav-btn[data-nav=x]`
+// still names exactly one control - the sidebar's.
+document.querySelectorAll("#sidebar .nav-btn").forEach(btn => {
   btn.addEventListener("click", () => goNav(btn.dataset.nav));
+});
+document.querySelectorAll("#tabbar [data-tab]").forEach(btn => {
+  btn.addEventListener("click", () => goNav(btn.dataset.tab));
 });
 
 // iOS Safari can leave the WINDOW scrolled after the keyboard closes, even
