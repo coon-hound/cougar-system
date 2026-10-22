@@ -1286,84 +1286,291 @@ function dashSecAppointments(visible, todayIso) {
 }
 
 
-function renderRoster(el) {
-  const rsiCount = {};
-  STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
-  // Default order: highest rank first, lowest at the bottom, with the 4D (the
-  // order the roster arrives in) as the tie-break so two 3SGs stay stable.
-  // sortByRank copies, so STATE.roster itself is never reordered.
-  // The mounted filter is troopers only; "both" counts under either side.
+// ── Master NR (the Roster view) ───────────────────────────
+// A configurable nominal roll over js/nr-columns.js: preset, columns, quick
+// chips, per-column filters and a header-tap sort. The view state lives per
+// device in localStorage (NR.load/NR.save); the search box is session-only,
+// like the mount picker. The Default preset is the Roster as it always was.
+let _nrSearch = "";
+const nrState = () => NR.load();
+function nrSet(s) { NR.save(s); render(); }
+
+// Scope first (topbar platoon/section/role/group, then the mount picker), in
+// the senior-first order every roster list uses. sortByRank copies, so
+// STATE.roster itself is never reordered. "both" counts under either side.
+function nrScoped() {
   const mf = STATE.rosterMount;
-  const scoped = sortByRank(filteredRoster())
+  return sortByRank(filteredRoster())
     .filter(r => !mf || mountOf(r) === mf || mountOf(r) === "both");
-  const rosterToday = todayISO();
-  // Camp column reads the SHARED out-of-camp definition (outOfCampMap) so it can
-  // never disagree with the dashboard / parade strength — medical and leave count
-  // as out here, not just manual book-outs. Colours/labels mirror the dashboard
-  // "Currently Out of Camp" panel.
-  const campOutMap = outOfCampMap(rosterToday);
-  // Token names (see dashSecOutOfCamp) so the badge wash tracks the palette.
-  const CAMP_COLOR = { medical: "--red", leave: "--purple", bookedout: "--orange" };
-  const CAMP_WHY = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
-  // Status column = the recruit's CURRENTLY-active medical status(es), derived
-  // from the medical layer (same source as the dashboard) rather than the stale
-  // roster `status` field. No active status → ACTIVE.
-  const effByD4 = {};
-  currentMedicalEffectiveAll(rosterToday).forEach(e => { effByD4[e.d4] = e.statuses; });
+}
+
+function renderRoster(el) {
+  const s = nrState();
+  const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${filteredRoster().length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
+  const opt = (v, l, sel) => `<option value="${escapeAttr(v)}"${sel ? " selected" : ""}>${escapeHtml(l)}</option>`;
+  const modified = NR.isModified(s);
+  const presetOpts = NR.PRESETS.map(p => opt(p.id, p.label, !modified && s.preset === p.id)).join("")
+    + s.custom.map(p => opt(p.id, p.label, !modified && s.preset === p.id)).join("")
+    + (modified ? opt("", "Custom columns", true) : "");
   // Push/Export operate on the FULL roster — scoping is a view concern; we
   // don't want the user to silently overwrite the sheet with only their slice.
-  const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <h2 style="font-size:18px;font-weight:700">Master NR${titleSuffix}</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="nr-preset" class="topbar-select${s.preset !== "default" || modified ? " active" : ""}" onchange="setNRPreset(this.value)" title="Saved column layouts">${presetOpts}</select>
+        <button class="btn" onclick="openNRColumns()" title="Choose columns and filter rows">Columns${NR.activeFilterCount(s) ? ` · ${NR.activeFilterCount(s)}` : ""}</button>
         <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver, from each man's role">
           ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
         </select>
-        <button class="btn" onclick="openCommanderForm()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
-        <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
-        <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
-        <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
+        <div class="dropdown-wrapper">
+          <button id="nr-more-btn" class="btn" onclick="toggleNRMenu(event)" aria-label="More roster actions" title="More">⋯</button>
+          <div id="nr-menu" class="dropdown-menu hidden">
+            <button type="button" onclick="exportNRView(); closeNRMenu()">Export view (CSV)</button>
+            <button type="button" onclick="copyNRView(); closeNRMenu()">Copy view</button>
+            <button type="button" onclick="exportCSV(STATE.roster,'roster.csv'); closeNRMenu()" title="Every field of every man, ignoring the view">Export full roster (CSV)</button>
+            <button type="button" onclick="pushTab('Roster',STATE.roster); closeNRMenu()" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
+            <button type="button" onclick="openCommanderForm(); closeNRMenu()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
+            <button type="button" onclick="openGroupsForm(); closeNRMenu()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
+          </div>
+        </div>
       </div>
     </div>
-    ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th><th>Status</th><th>Camp</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
-    ${scoped.map(r => {
-      const bmi = calcBMI(r);
-      const isCmd = r.role === "Commander";
-      const nameCell = isCmd ? `${r.rank ? r.rank + " " : ""}${r.name}` : r.name;
-      const idCell = isCmd ? "" : r.id;
-      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `${r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`}<div style="margin-top:2px">${mountBadge(r)}</div>`;
-      // Book Out / Book In toggle reflecting the shared booked-out flag.
-      const effStatuses = effByD4[r.id];
-      const statusCell = (effStatuses && effStatuses.length)
-        ? effStatuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("")
-        : statusBadge("Active");
-      // CAMP cell = effective status (why they're out, or "In camp") + a state-
-      // specific lever: in camp → Book out (unified modal, today or a range);
-      // booked out → Book in (plain undo); out via MC/leave record → Book in
-      // anyway (campIn override, self-confirms); manual book-in active → Undo
-      // book-in. The badge reads outOfCampMap, so it can never disagree with
-      // the dashboard.
-      const outInfo = campOutMap.get(r.id);
-      const forcedIn = !outInfo && isForcedIn(r, rosterToday) && derivedCampOut(r.id, rosterToday);
-      // The "back" date rides along with the badge — it spans chained records,
-      // so an extended MC can't be read as ending at the first record.
-      const campBadge = outInfo
-        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:color-mix(in srgb, var(${CAMP_COLOR[outInfo.kind] || "--muted"}) 13%, transparent);color:var(${CAMP_COLOR[outInfo.kind] || "--muted"})" title="Out of camp — ${escapeAttr(outInfo.reason || "")}${outInfo.back ? ` (back ${isoToDisplayDate(outInfo.back)})` : ""}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>${backLine(outInfo)}`
-        : forcedIn
-          ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(var(--tealRGB),.13);color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
-          : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(var(--greenRGB),.09);color:var(--green)">In camp</span>`;
-      const campToggle = outInfo
-        ? (outInfo.kind === "bookedout"
-          ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
-          : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${outInfo.kind} record (resets tomorrow)">✓ Book in anyway</button>`)
-        : forcedIn
-          ? `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); clearPresentOverride('${r.id}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
-          : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); openBookOutForm({ d4: '${r.id}' })" title="Book out of camp for today or a date range">🚪 Book out</button>`;
-      const campCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${campBadge}${campToggle}</div>`;
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No ${mf ? MOUNT_LABEL[mf].toLowerCase() + " " : ""}personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <input id="nr-search" class="topbar-select" style="cursor:text;min-width:0;flex:1 1 160px;max-width:260px" placeholder="Search this view..." value="${escapeAttr(_nrSearch)}" oninput="setNRSearch(this.value)">
+      ${NR.CHIPS.map(c => `<button type="button" class="lc-wiz-filter-chip${s.chips.includes(c.id) ? " active" : ""}" data-nr-chip="${c.id}" onclick="toggleNRChip('${c.id}')">${c.label}</button>`).join("")}
+    </div>
+    <div id="nr-body">${nrBodyHtml(s)}</div>`;
+}
+
+// Summary line + table. Re-rendered on its own while typing in the search box
+// so the input keeps focus.
+function nrBodyHtml(s) {
+  s = s || nrState();
+  const mf = STATE.rosterMount;
+  const scoped = nrScoped();
+  if (!scoped.length) {
+    return `<div class="empty-state">${STATE.roster.length ? `No ${mf ? MOUNT_LABEL[mf].toLowerCase() + " " : ""}personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`;
+  }
+  const ctx = NR.makeCtx(todayISO());
+  const cols = NR.visibleCols(s);
+  const rows = NR.apply(scoped, s, ctx, _nrSearch);
+  const out = rows.filter(r => ctx.outMap.has(r.id)).length;
+  const narrowed = s.chips.length || NR.activeFilterCount(s) || _nrSearch.trim();
+  const summary = `<div id="nr-summary" style="font-size:11px;color:var(--muted);margin-bottom:8px">
+    <strong style="color:var(--text)">${rows.length}</strong> shown of ${scoped.length} · in camp <strong style="color:var(--teal)">${rows.length - out}</strong> · out <strong style="color:${out ? "var(--orange)" : "var(--dim)"}">${out}</strong>
+    ${narrowed ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px;margin-left:6px" onclick="clearNRFilters()">✕ Clear filters</button>` : ""}
+  </div>`;
+  if (!rows.length) return summary + `<div class="empty-state">No personnel match these filters.</div>`;
+  const arrow = c => s.sort && s.sort.id === c.id ? (s.sort.dir === "asc" ? " ▲" : " ▼") : "";
+  const thAttr = c => {
+    const style = c.th || "";
+    return `${c.sticky ? ' class="nr-sticky"' : ""}${style ? ` style="${style};cursor:pointer"` : ' style="cursor:pointer"'}`;
+  };
+  const head = cols.map(c => `<th${thAttr(c)} onclick="sortNR('${c.id}')" title="Sort by ${escapeAttr(c.label)}">${escapeHtml(c.label)}${arrow(c)}</th>`).join("");
+  const body = rows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">${cols.map(c => {
+    const cls = [c.tdClass, c.sticky ? "nr-sticky" : ""].filter(Boolean).join(" ");
+    const st = NR.tdStyleOf(c, r, ctx);
+    return `<td${cls ? ` class="${cls}"` : ""}${st ? ` style="${st}"` : ""}>${NR.cellOf(c, r, ctx)}</td>`;
+  }).join("")}</tr>`).join("");
+  return summary + `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// The rows and columns the screen is showing right now, for export / copy.
+function nrCurrentView() {
+  const s = nrState();
+  const ctx = NR.makeCtx(todayISO());
+  const cols = NR.visibleCols(s);
+  return { s, ctx, cols, rows: NR.apply(nrScoped(), s, ctx, _nrSearch) };
+}
+function nrPresetLabel(s) {
+  if (NR.isModified(s)) return "Custom columns";
+  const p = NR.presetById(s.preset, s.custom);
+  return p ? p.label : "Default";
+}
+
+function setNRPreset(id) {
+  const s = nrState();
+  if (!id || !NR.presetById(id, s.custom)) return;
+  // Preset id only (built-in ids are fixed words; custom ones are recorded as
+  // "custom" so a name a person typed never reaches the usage table).
+  try {
+    if (typeof TELEMETRY !== "undefined" && TELEMETRY._record) {
+      TELEMETRY._record({ k: "click", n: "nr_preset:" + (/^u/.test(id) ? "custom" : id) });
+    }
+  } catch (e) { /* telemetry must never break the view */ }
+  nrSet(NR.applyPreset(s, id));
+}
+function toggleNRChip(id) { nrSet(NR.toggleChip(nrState(), id)); }
+function sortNR(id) { nrSet(NR.cycleSort(nrState(), id)); }
+function setNRSearch(v) {
+  _nrSearch = String(v || "");
+  const body = document.getElementById("nr-body");
+  if (body) body.innerHTML = nrBodyHtml();
+}
+function clearNRFilters() {
+  _nrSearch = "";
+  nrSet(Object.assign(nrState(), { chips: [], filters: {} }));
+}
+function toggleNRMenu(e) {
+  e?.stopPropagation();
+  document.getElementById("nr-menu")?.classList.toggle("hidden");
+}
+function closeNRMenu() {
+  document.getElementById("nr-menu")?.classList.add("hidden");
+}
+// Outside-tap close lives with the report menu's, in js/main.js.
+
+function exportNRView() {
+  const v = nrCurrentView();
+  const slug = nrPresetLabel(v.s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "view";
+  exportCSV(NR.csvRows(v.rows, v.cols, v.ctx), `master-nr-${slug}-${todayISO()}.csv`);
+}
+// Plain text for WhatsApp, on copyReportToClipboard's clipboard pattern.
+async function copyNRView() {
+  const v = nrCurrentView();
+  const text = NR.copyText(v.rows, v.cols, v.ctx, `MASTER NR - ${nrPresetLabel(v.s).toUpperCase()} (${isoToDisplayDate(todayISO())}${isFilterActive() ? ", " + filterLabel() : ""})`);
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("nr-more-btn");
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      setTimeout(() => { btn.textContent = original; }, 1800);
+    }
+  } catch {
+    openModal("Copy view", `<textarea id="nr-copy-text" class="cmp-paste" rows="14" readonly>${escapeHtml(text)}</textarea>`);
+    const ta = document.getElementById("nr-copy-text");
+    if (ta) { ta.focus(); ta.select(); }
+    alert("Copy blocked — text is selected, press Cmd+C / Ctrl+C to copy.");
+  }
+}
+
+// ── Columns modal ─────────────────────────────────────────
+// Grouped checkboxes (the group-members list's markup), each with a filter by
+// type. Apply rewrites the view; ticking a column keeps the current order and
+// appends new ones in catalogue order.
+function nrFilterControl(c, f, scoped, ctx) {
+  f = f || {};
+  const inp = "padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:11px;box-sizing:border-box";
+  const id = `nr-f-${c.id}`;
+  if (c.type === "enum") {
+    const vals = new Set();
+    scoped.forEach(r => NR.enumVals(c, r, ctx).forEach(v => vals.add(v)));
+    (f.in || []).forEach(v => vals.add(v));
+    const list = [...vals].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!list.length) return `<div style="font-size:11px;color:var(--dim)">No values in this scope.</div>`;
+    return `<div style="display:flex;flex-wrap:wrap;gap:4px 10px">${list.map(v => `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer"><input type="checkbox" data-nr-enum="${c.id}" value="${escapeAttr(v)}"${(f.in || []).includes(v) ? " checked" : ""} style="width:14px;height:14px;cursor:pointer">${v === "" ? '<span style="color:var(--dim)">(blank)</span>' : escapeHtml(v)}</label>`).join("")}</div>`;
+  }
+  if (c.type === "bool") {
+    return `<select id="${id}-is" style="${inp}">${[["", "Any"], ["yes", "Yes"], ["no", "No"]].map(([v, l]) => `<option value="${v}"${(f.is || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select>`;
+  }
+  if (c.type === "number") {
+    return `<div style="display:flex;gap:6px;align-items:center"><input id="${id}-min" type="number" inputmode="decimal" placeholder="Min" value="${escapeAttr(f.min ?? "")}" style="${inp};width:90px"><span style="color:var(--dim)">to</span><input id="${id}-max" type="number" inputmode="decimal" placeholder="Max" value="${escapeAttr(f.max ?? "")}" style="${inp};width:90px"></div>`;
+  }
+  if (c.type === "date") {
+    return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select id="${id}-op" style="${inp}">${[["", "Any"], ["today", "Today"], ["before", "Before"], ["on", "On"], ["after", "After"]].map(([v, l]) => `<option value="${v}"${(f.op || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select><input id="${id}-v" type="date" value="${escapeAttr(f.v || "")}" style="${inp}"></div>`;
+  }
+  return `<input id="${id}-contains" placeholder="Contains..." value="${escapeAttr(f.contains || "")}" style="${inp};width:100%">`;
+}
+
+function openNRColumns() {
+  const s = nrState();
+  const ctx = NR.makeCtx(todayISO());
+  const scoped = nrScoped();
+  const shown = new Set(NR.visibleCols(s).map(c => c.id));
+  const groups = NR.GROUPS.map(g => {
+    const cols = NR.COLUMNS.filter(c => c.group === g);
+    const rows = cols.map(c => {
+      const f = s.filters[c.id];
+      const on = NR.filterActive(f);
+      return `<div style="padding:5px 8px;border-radius:4px;background:var(--surface2)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">
+            <input type="checkbox" data-nr-col="${c.id}"${shown.has(c.id) ? " checked" : ""} style="width:14px;height:14px;cursor:pointer">
+            <span style="font-size:12px">${escapeHtml(c.label)}</span>
+          </label>
+          <button type="button" class="btn btn-icon" style="font-size:10px;padding:2px 7px${on ? ";color:var(--accent)" : ""}" onclick="nrToggleFilterPanel('${c.id}')" title="Only show rows matching a ${c.type} filter">${on ? "Filter ●" : "Filter"}</button>
+        </div>
+        <div id="nr-fp-${c.id}" style="display:${on ? "block" : "none"};margin-top:6px">${nrFilterControl(c, f, scoped, ctx)}</div>
+      </div>`;
+    }).join("");
+    const note = g === "Personal (sensitive)" ? ` <span style="font-weight:400;text-transform:none;letter-spacing:0">- personal details, off by default</span>` : "";
+    return `<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${g}${note}</div>
+      <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+    </div>`;
+  }).join("");
+  const isCustom = /^u/.test(s.preset) && !NR.isModified(s);
+  openModal("Columns", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted)">Tick the columns to show. A filter hides rows that do not match it, whether or not its column is shown. Saved on this device only.</div>
+      <div id="nr-cols" style="max-height:52vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">${groups}</div>
+      <div class="form-group"><label>Save as a preset (optional)</label><input id="nr-preset-name" maxlength="40" placeholder="e.g. Guard list"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" style="flex:1" onclick="submitNRColumns()">Apply</button>
+        ${isCustom ? `<button class="btn btn-danger" onclick="deleteNRPreset()" title="Delete the preset '${escapeAttr(NR.presetById(s.preset, s.custom).label)}' from this device">Delete preset</button>` : ""}
+      </div>
+    </div>`);
+  document.querySelector(".modal")?.classList.add("wide");
+}
+function nrToggleFilterPanel(id) {
+  const el = document.getElementById("nr-fp-" + id);
+  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+function submitNRColumns() {
+  const s = nrState();
+  const ticked = new Set([...document.querySelectorAll("#nr-cols input[data-nr-col]:checked")].map(el => el.dataset.nrCol));
+  if (!ticked.size) { alert("Pick at least one column."); return; }
+  const current = NR.visibleCols(s).map(c => c.id).filter(id => ticked.has(id));
+  const cols = current.concat(NR.COLUMNS.map(c => c.id).filter(id => ticked.has(id) && !current.includes(id)));
+
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const filters = {};
+  NR.COLUMNS.forEach(c => {
+    const k = `nr-f-${c.id}`;
+    let f = null;
+    if (c.type === "enum") {
+      const vals = [...document.querySelectorAll(`#nr-cols input[data-nr-enum="${c.id}"]:checked`)].map(el => el.value);
+      if (vals.length) f = { in: vals };
+    } else if (c.type === "bool") {
+      if (val(k + "-is")) f = { is: val(k + "-is") };
+    } else if (c.type === "number") {
+      const min = val(k + "-min"), max = val(k + "-max");
+      if (min !== "" || max !== "") f = { min, max };
+    } else if (c.type === "date") {
+      if (val(k + "-op")) f = { op: val(k + "-op"), v: val(k + "-v") };
+    } else if (val(k + "-contains").trim()) {
+      f = { contains: val(k + "-contains").trim() };
+    }
+    if (f && NR.filterActive(f)) filters[c.id] = f;
+  });
+
+  const next = Object.assign({}, s, { cols, filters });
+  const name = val("nr-preset-name").trim().slice(0, 40);
+  if (name) {
+    const id = "u" + Date.now().toString(36);
+    next.custom = s.custom.concat({ id, label: name, cols });
+    next.preset = id;
+    next.cols = null;
+  } else {
+    const p = NR.presetById(s.preset, s.custom) || NR.PRESETS[0];
+    if (cols.join(",") === p.cols.join(",")) next.cols = null;
+  }
+  NR.save(next);
+  closeModal();
+  render();
+}
+function deleteNRPreset() {
+  const s = nrState();
+  const p = NR.presetById(s.preset, s.custom);
+  if (!p || !/^u/.test(p.id)) return;
+  if (!confirm(`Delete the preset "${p.label}" from this device?`)) return;
+  const next = NR.applyPreset(Object.assign({}, s, { custom: s.custom.filter(x => x.id !== p.id) }), "default");
+  NR.save(next);
+  closeModal();
+  render();
 }
 
 function renderAttendance(el) {
