@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 166;
+const APP_VERSION = 167;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,20 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 167,
+    date: "22 Oct 2026",
+    title: "Fewer taps",
+    intro: "The things you do most now take fewer taps.",
+    items: [
+      { t: "▤ Bottom bar on phones", d: "Dashboard, Medical, Attendance and Roster are one tap away at the bottom of the screen. More opens the full menu. The ☰ button at the top still works too." },
+      { t: "✚ Act from a man's card", d: "Open a man and tap Report sick, Appointment or Leave. He is already picked in the form." },
+      { t: "⌕ Search shows names", d: "Search results show the name, not just the 4D. Press Go on the keyboard to open the top result." },
+      { t: "◱ One tap to the parade state", d: "On the Dashboard the left button opens First Parade before noon and Last Parade after. If you mostly use another report, it opens that one. ▾ still lists them all." },
+      { t: "🚪 Book Out remembers", d: "Book Out opens on the choice you used last time: today or date range, and who it applies to." },
+      { t: "⋯ Roster tidied", d: "+ Commander and Groups have moved into the ⋯ button on the Roster page." }
+    ]
+  },
   {
     v: 166,
     date: "20 Oct 2026",

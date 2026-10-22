@@ -49,6 +49,17 @@ function openPerson(d4) {
     ${campBtn}
   </div>`;
 
+  // The forms people open right after looking a man up, with him already
+  // picked. Medical entry used to start from a ~100-name dropdown every time
+  // (select#f-d4: 439 taps, Sep - Oct 2026 usage). Same small buttons as Book
+  // out above; Leave opens Book Out on its date-range half.
+  const actBtn = (onclick, label, title) => `<button class="btn" style="font-size:11px;padding:4px 10px" onclick="${onclick}" title="${title}">${label}</button>`;
+  html += `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    ${actBtn(`openMedicalForm('', { d4: '${d4}' })`, "✚ Report sick", "Log a report sick with this person picked")}
+    ${actBtn(`openAppointmentForm('', { d4: '${d4}' })`, "◷ Appointment", "Book an appointment with this person picked")}
+    ${actBtn(`openBookOutForm({ d4: '${d4}', mode: 'range', after: () => openPerson('${d4}') })`, "↗ Leave", "Log leave or a dated out-of-camp record")}
+  </div>`;
+
   // ── Profile section ──────────────────────────────────
   const bmi = calcBMI(p);
   // 8-digit local numbers display nicer with a space in the middle.
@@ -484,7 +495,9 @@ function medExtraStatusChanged(sel) {
   if (wrap) wrap.style.display = sel.value === "__new__" ? "flex" : "none";
 }
 
-function openMedicalForm(id) {
+function openMedicalForm(id, prefill) {
+  // `prefill` ({ d4 }) is only honoured for a new entry: the person card opens
+  // this with the man already chosen, so he is not picked twice.
   const e = id ? STATE.medical.find(x => x.id === id) : null;
   const dateVal = e ? displayDateToISO(e.date) || todayISO() : todayISO();
   const startVal = e ? displayDateToISO(e.startDate) || dateVal : todayISO();
@@ -496,7 +509,7 @@ function openMedicalForm(id) {
       <input type="hidden" id="f-entry-id" value="${e ? e.id : ""}">
       <div style="display:flex;flex-direction:column;gap:10px">
         ${e ? editHint : ""}
-        <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || "")}</div>
+        <div class="form-group"><label>Recruit</label>${rosterSelect("f-d4", true, e?.d4 || prefill?.d4 || "")}</div>
         ${formField("f-date", "Date Reported Sick", "date", "", `required value="${dateVal}" min="2020-01-01" max="2099-12-31"`)}
         ${formField("f-reason", "Reason", "text", "Fever, sore throat...", `required maxlength="200" value="${escapeAttr(e?.reason)}"`)}
         ${formField("f-location", "Location (only if reported sick outside)", "text", "e.g. Lim Clinic and Surgery", `maxlength="200" value="${escapeAttr(e?.location)}"`)}
@@ -1154,8 +1167,30 @@ function outsideApptToday(d4) {
   return STATE.appointments.find(a => !a.resolved && a.d4 === d4 && a.outOfCamp && displayDateToISO(a.date) === today) || null;
 }
 
+// The mode (today / date range) and scope this device last booked out with.
+// The two toggles were re-picked on most opens (setBookOutMode 119 taps,
+// f-bo-scope 134, Sep - Oct 2026 usage), so the form now opens on them. A bulk
+// scope still has to get past the confirm() in submitBookOut.
+const BOOKOUT_LAST_KEY = "cougar-bookout-last";
+function readBookOutLast() {
+  try {
+    const d = JSON.parse(localStorage.getItem(BOOKOUT_LAST_KEY) || "{}");
+    return {
+      mode: d && (d.mode === "today" || d.mode === "range") ? d.mode : "",
+      scope: d && typeof d.scope === "string" ? d.scope : ""
+    };
+  } catch { return { mode: "", scope: "" }; }
+}
+function rememberBookOut(mode, scope) {
+  const last = readBookOutLast();
+  try {
+    localStorage.setItem(BOOKOUT_LAST_KEY, JSON.stringify({ mode, scope: scope || last.scope }));
+  } catch { /* private mode: no memory, still works */ }
+}
+
 function openBookOutForm(opts) {
   _bookOutOpts = opts || {};
+  const last = readBookOutLast();
   const preset = _bookOutOpts.d4 ? STATE.roster.find(r => r.id === _bookOutOpts.d4) : null;
   const todayIso = todayISO();
   const whoRows = preset
@@ -1187,8 +1222,12 @@ function openBookOutForm(opts) {
         <button type="submit" id="f-bo-submit" class="btn btn-danger">🚪 Book out for today</button>
       </div>
     </form>`);
+  // Restore the last scope only if it is still on the list (a group can be
+  // deleted, a platoon can empty out).
+  const scopeSel = document.getElementById("f-bo-scope");
+  if (scopeSel && last.scope && [...scopeSel.options].some(o => o.value === last.scope)) scopeSel.value = last.scope;
   onBookOutScopeChange();
-  setBookOutMode("today");
+  setBookOutMode(_bookOutOpts.mode === "range" || _bookOutOpts.mode === "today" ? _bookOutOpts.mode : (last.mode || "today"));
   onBookOutPersonChange();
 }
 
@@ -1256,6 +1295,10 @@ function recalcBookOutDays() {
 function submitBookOut() {
   const scope = _bookOutOpts.d4 ? "person" : (gv("f-bo-scope") || "person");
   const mode = gv("f-bo-mode") || "today";
+  // A form locked to one man (opened from his card) says nothing about which
+  // scope this device uses, so only the mode is remembered from it; one opened
+  // on a fixed mode (the card's Leave button) says nothing about either.
+  if (!_bookOutOpts.mode) rememberBookOut(mode, _bookOutOpts.d4 ? "" : scope);
   const reason = gv("f-bo-reason");
   const d4 = _bookOutOpts.d4 || gv("f-bo-d4");
   if (mode === "today") {
@@ -2433,6 +2476,7 @@ function generateMSKReportText(dateIso, time) {
 }
 
 function openReportModal(type) {
+  if (typeof rememberReportType === "function") rememberReportType(type);
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
   const defaultDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;

@@ -151,6 +151,11 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 #topbar .topbar-search-icon{font-size:15px;color:var(--dim);line-height:1}
 #topbar input{flex:1;max-width:350px;min-height:34px;padding:8px 13px;border-radius:var(--r2);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12.5px;outline:none;transition:border-color var(--d2) var(--ez)}
 #topbar input::placeholder{color:var(--dim)}
+#topbar input[type=search]{-webkit-appearance:none;appearance:none}
+#search-results{display:flex;gap:4px;flex-wrap:wrap}
+/* Empty, it must take no room: on a phone it is a full-width flex item and
+   used to crush the search field even with nothing in it. */
+#search-results:empty{display:none}
 #topbar input:focus{border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 #topbar-filters{margin-left:auto;display:flex;gap:6px;align-items:center}
 #topbar-filters .filter-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:600}
@@ -321,6 +326,9 @@ tbody tr:last-child td{border-bottom:none}
 .sync-log div{padding:3px 0;border-bottom:1px solid var(--border)}
 .sync-log div:last-child{border-bottom:none}
 
+/* Phone-only bottom bar (see the mobile block). Absent on desktop, where the
+   sidebar is always on screen. */
+#tabbar{display:none}
 /* Hamburger button — only shown on mobile via the media query below. */
 #mobile-nav-toggle{display:none;background:none;border:none;color:var(--text);font-size:20px;cursor:pointer;padding:4px 10px;line-height:1;border-radius:var(--r1)}
 #sidebar-backdrop{position:fixed;inset:0;background:rgba(3,6,13,.5);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);z-index:150;animation:veil-in var(--d2) var(--ez) both}
@@ -678,6 +686,21 @@ button.dty-slot{cursor:pointer}
 
   /* Hamburger visible, backdrop ready to be revealed */
   #mobile-nav-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:40px;min-height:40px}
+
+  /* Bottom bar: Dashboard, Medical, Attendance, Roster, More. Its buttons are
+     the sidebar's own .nav-btn rows turned on their side - same colours, same
+     active fill, same gradient rail (on the top edge instead of the left) -
+     so there is one nav look, not two. It is a flex child of #main under
+     #content, not position:fixed: #content's scroll area simply ends where
+     the bar begins, and a bottom-sheet modal (on the overlay) covers it.
+     No blur: nothing ever scrolls behind it. touch-action:manipulation drops
+     the double-tap-zoom wait so a tap fires at once. */
+  #tabbar{display:flex;flex-shrink:0;border-top:1px solid var(--border);background:rgba(28,25,23,.86);padding-bottom:env(safe-area-inset-bottom,0)}
+  #tabbar .nav-btn{flex:1 1 0;min-width:0;flex-direction:column;justify-content:center;gap:4px;min-height:54px;padding:8px 2px;font-size:11px;text-align:center;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  #tabbar .nav-btn::before{left:24%;right:24%;top:0;bottom:auto;width:auto;height:3px;border-radius:0 0 var(--rp) var(--rp);transform:scaleX(0)}
+  #tabbar .nav-btn.active::before{transform:scaleX(1)}
+  #tabbar .nav-btn>.nav-ico{width:auto;font-size:16px}
+  #tabbar .nav-btn>span:last-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   /* Topbar is now a single short row: hamburger | search | filter toggle.
      The scope-filter selects live in a popover panel below the topbar
