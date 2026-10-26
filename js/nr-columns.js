@@ -8,7 +8,7 @@
 //
 // Everything lives under one top-level `const NR` because every js/* file shares
 // one global scope (test/static.test.js compiles them together). The handlers
-// the markup calls (openNRColumns, sortNR ...) are plain functions in
+// the markup calls (openNRColumns, openNRColMenu ...) are plain functions in
 // js/render.js, beside renderRoster, so telemetry can wrap them by name.
 //
 // Column shape:
@@ -472,6 +472,10 @@ const NR = (() => {
     if (ex && chips.includes(id)) chips = chips.filter(c => c !== ex);
     return Object.assign({}, s, { chips });
   }
+  function setSort(s, id, dir) {
+    const same = s.sort && s.sort.id === id && s.sort.dir === dir;
+    return Object.assign({}, s, { sort: same ? null : { id, dir } });
+  }
   function cycleSort(s, id) {
     if (!COL[id]) return s;
     const cur = s.sort && s.sort.id === id ? s.sort.dir : "";
@@ -480,17 +484,22 @@ const NR = (() => {
   }
 
   // ── Row filtering + sorting ───────────────────────────────────────────────
+  // A header filter is the spreadsheet kind: the list of values left ticked.
+  // An empty list is a real filter (everything unticked shows nobody); "no
+  // filter" is the key being absent.
   function filterActive(f) {
     if (!f) return false;
-    if (Array.isArray(f.in)) return f.in.length > 0;
+    if (Array.isArray(f.in)) return true;
     return ["contains", "is", "min", "max", "op"].some(k => f[k] !== undefined && f[k] !== "" && f[k] !== null);
   }
+  // The values a row offers to a header filter: each part of an enum (a man
+  // who is "2 LMG / Gunner" is under both), otherwise the cell text as shown.
+  const filterVals = (c, r, ctx) => c.type === "enum" ? enumVals(c, r, ctx) : [textOf(c, r, ctx)];
   function passes(c, f, r, ctx) {
     if (!filterActive(f)) return true;
-    if (c.type === "enum") {
-      const vals = enumVals(c, r, ctx);
-      if (Array.isArray(f.in) && f.in.length && !f.in.some(v => vals.includes(v))) return false;
-      return true;
+    if (Array.isArray(f.in)) {
+      const vals = filterVals(c, r, ctx);
+      return f.in.some(v => vals.includes(v));
     }
     if (c.type === "bool") {
       if (f.is === "yes") return !!getVal(c, r, ctx);
@@ -573,7 +582,7 @@ const NR = (() => {
     LS_KEY, COLUMNS, COL, GROUPS, PRESETS, CHIPS, CHIP, SENSITIVE,
     makeCtx, getVal, textOf, cellOf, tdStyleOf, sortVal, enumVals,
     blank, load, save, sanitize, presetById, visibleCols, isModified,
-    applyPreset, toggleChip, cycleSort, filterActive, passes, apply, activeFilterCount,
+    applyPreset, toggleChip, cycleSort, setSort, filterActive, filterVals, passes, apply, activeFilterCount,
     csvRows, copyText,
   };
 })();

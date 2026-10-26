@@ -185,6 +185,15 @@ document.addEventListener("click", (e) => {
   });
 });
 
+// Master NR column menu (js/render.js): an outside tap or Escape closes it.
+// A tap on a heading is left to the heading, which toggles its own menu.
+document.addEventListener("click", (e) => {
+  const menu = nrMenuEl();
+  if (!menu || menu.contains(e.target) || e.target.closest?.("[data-nr-th]")) return;
+  closeNRColMenu();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && nrMenuEl()) closeNRColMenu(); });
+
 // Redeems ?token=… from the URL if present. Returns true if an attempt was
 // made (regardless of success); the URL param is scrubbed either way so a
 // failed redemption can't sit in the address bar.

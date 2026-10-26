@@ -1319,7 +1319,7 @@ function renderRoster(el) {
       <h2 style="font-size:18px;font-weight:700">Master NR${titleSuffix}</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select id="nr-preset" class="topbar-select${s.preset !== "default" || modified ? " active" : ""}" onchange="setNRPreset(this.value)" title="Saved column layouts">${presetOpts}</select>
-        <button class="btn" onclick="openNRColumns()" title="Choose columns and filter rows">Columns${NR.activeFilterCount(s) ? ` · ${NR.activeFilterCount(s)}` : ""}</button>
+        <button class="btn" onclick="openNRColumns()" title="Choose which columns to show">+ Columns</button>
         <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver / Bronco Operator, from each man's role">
           ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
         </select>
@@ -1340,7 +1340,6 @@ function renderRoster(el) {
       <input id="nr-search" class="topbar-select" style="cursor:text;min-width:0;flex:1 1 160px;max-width:260px" placeholder="Search this view..." value="${escapeAttr(_nrSearch)}" oninput="setNRSearch(this.value)">
       ${NR.CHIPS.map(c => `<button type="button" class="lc-wiz-filter-chip${s.chips.includes(c.id) ? " active" : ""}" data-nr-chip="${c.id}" onclick="toggleNRChip('${c.id}')">${c.label}</button>`).join("")}
     </div>
-    ${nrFilterBarHtml(s)}
     <div id="nr-body">${nrBodyHtml(s)}</div>`;
 }
 
@@ -1360,15 +1359,26 @@ function nrBodyHtml(s) {
   const narrowed = s.chips.length || NR.activeFilterCount(s) || _nrSearch.trim();
   const summary = `<div id="nr-summary" style="font-size:11px;color:var(--muted);margin-bottom:8px">
     <strong style="color:var(--text)">${rows.length}</strong> shown of ${scoped.length} · in camp <strong style="color:var(--teal)">${rows.length - out}</strong> · out <strong style="color:${out ? "var(--orange)" : "var(--dim)"}">${out}</strong>
-    ${narrowed ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px;margin-left:6px" onclick="clearNRFilters()">✕ Clear filters</button>` : ""}
+    ${narrowed ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px;margin-left:6px" onclick="clearNRFilters()">✕ Clear filters</button>` : ` <span style="color:var(--dim)">· tap a column heading to sort or filter</span>`}
   </div>`;
   if (!rows.length) return summary + `<div class="empty-state">No personnel match these filters.</div>`;
-  const arrow = c => s.sort && s.sort.id === c.id ? (s.sort.dir === "asc" ? " ▲" : " ▼") : "";
+  // Every heading is a spreadsheet-style menu (sort, filter by value, hide).
+  // The ▾ is always there so it reads as tappable; it turns accent-coloured
+  // while that column is sorted, and gains a funnel while it is filtered, like
+  // a sheet's filter button.
+  const marker = c => {
+    const sorted = s.sort && s.sort.id === c.id;
+    const filtered = NR.filterActive(s.filters[c.id]);
+    const sym = sorted ? (s.sort.dir === "asc" ? "▲" : "▼") : "▾";
+    // An inline funnel rather than a glyph: phone fonts do not all carry one.
+    const funnel = filtered ? `<svg class="nr-th-funnel" viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 1h9L6 5.2V9L4 8V5.2z" fill="currentColor"/></svg>` : "";
+    return ` <span class="nr-th-ico${sorted || filtered ? " on" : ""}"${filtered ? ' data-filtered="1"' : ""} aria-hidden="true">${funnel}${sym}</span>`;
+  };
   const thAttr = c => {
     const style = c.th || "";
     return `${c.sticky ? ' class="nr-sticky"' : ""}${style ? ` style="${style};cursor:pointer"` : ' style="cursor:pointer"'}`;
   };
-  const head = cols.map(c => `<th${thAttr(c)} onclick="sortNR('${c.id}')" title="Sort by ${escapeAttr(c.label)}">${escapeHtml(c.label)}${arrow(c)}</th>`).join("");
+  const head = cols.map(c => `<th${thAttr(c)} data-nr-th="${c.id}" onclick="openNRColMenu('${c.id}', this)" title="Sort, filter or hide ${escapeAttr(c.label)}">${escapeHtml(c.label)}${marker(c)}</th>`).join("");
   const body = rows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">${cols.map(c => {
     const cls = [c.tdClass, c.sticky ? "nr-sticky" : ""].filter(Boolean).join(" ");
     const st = NR.tdStyleOf(c, r, ctx);
@@ -1403,98 +1413,139 @@ function setNRPreset(id) {
   nrSet(NR.applyPreset(s, id));
 }
 function toggleNRChip(id) { nrSet(NR.toggleChip(nrState(), id)); }
-function sortNR(id) { nrSet(NR.cycleSort(nrState(), id)); }
-// ── Dropdown filters ─────────────────────────────────────
-// Two pickers: which column, then which value (with how many men hold it in
-// the current scope). Values on one column are OR ("Gunner" or "2 MAT"),
-// different columns are AND. The Columns modal still holds the number / date
-// / text filters; anything set there shows up here as a pill too.
-let _nrFilterCol = "";
-const nrFilterable = c => c.type === "enum" || c.type === "bool";
+// ── Column menu (the spreadsheet filter) ────────────────
+// Tap a heading: sort A-Z / Z-A, tick the values to keep (with a search box
+// and (Select all), exactly like a Sheets / Excel filter), or hide the column.
+// Ticks apply as you go - there is no OK to forget. The menu lives on <body>,
+// outside #content, so redrawing the table under it does not close it.
+let _nrMenuCol = "";
 
-function nrFilterBarHtml(s) {
-  const opt = (v, l, sel) => `<option value="${escapeAttr(v)}"${sel ? " selected" : ""}>${escapeHtml(l)}</option>`;
-  const colOpts = NR.GROUPS.map(g => {
-    const cols = NR.COLUMNS.filter(c => c.group === g && nrFilterable(c));
-    return cols.length ? `<optgroup label="${escapeAttr(g)}">${cols.map(c => opt(c.id, c.label, c.id === _nrFilterCol)).join("")}</optgroup>` : "";
-  }).join("");
-  const c = NR.COL[_nrFilterCol];
-  let valPicker = "";
-  if (c) {
-    const f = s.filters[c.id] || {};
-    let vals;
-    if (c.type === "bool") {
-      vals = [["yes", "Yes"], ["no", "No"]].filter(([v]) => f.is !== v);
-    } else {
-      const ctx = NR.makeCtx(todayISO());
-      const counts = new Map();
-      nrScoped().forEach(r => NR.enumVals(c, r, ctx).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
-      vals = [...counts.keys()].filter(v => !(f.in || []).includes(v))
-        .sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }))
-        .map(v => [v, `${v === "" ? "(blank)" : v} (${counts.get(v)})`]);
-    }
-    valPicker = `<select id="nr-filter-val" class="topbar-select active" onchange="nrAddFilterValue(this.value)" title="Show only men with this ${escapeAttr(c.label.toLowerCase())}">
-      ${opt("", vals.length ? `${c.label}: choose...` : `${c.label}: nothing left to add`, true)}${vals.map(([v, l]) => opt("v:" + v, l, false)).join("")}
-    </select>`;
-  }
-  const pills = [];
-  Object.keys(s.filters).forEach(id => {
-    const col = NR.COL[id], f = s.filters[id];
-    if (!col || !NR.filterActive(f)) return;
-    if (col.type === "enum") {
-      (f.in || []).forEach(v => pills.push({ id, v, label: `${col.label}: ${v === "" ? "(blank)" : v}` }));
-    } else {
-      pills.push({ id, v: null, label: `${col.label}: ${nrFilterDesc(col, f)}` });
-    }
+function nrMenuEl() { return document.getElementById("nr-colmenu"); }
+function closeNRColMenu() {
+  nrMenuEl()?.remove();
+  _nrMenuCol = "";
+}
+// The values a column offers, counted over the rows every OTHER filter (and
+// the search box) leaves - a sheet lists what is visible, not what exists.
+function nrMenuValues(id) {
+  const s = nrState();
+  const c = NR.COL[id];
+  const ctx = NR.makeCtx(todayISO());
+  const others = Object.assign({}, s, { filters: Object.assign({}, s.filters) });
+  delete others.filters[id];
+  const counts = new Map();
+  NR.apply(nrScoped(), others, ctx, _nrSearch).forEach(r =>
+    NR.filterVals(c, r, ctx).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
+  const f = s.filters[id];
+  if (f && Array.isArray(f.in)) f.in.forEach(v => { if (!counts.has(v)) counts.set(v, 0); });
+  return [...counts.keys()]
+    .sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }))
+    .map(v => ({ v, n: counts.get(v) }));
+}
+function openNRColMenu(id, th) {
+  const c = NR.COL[id];
+  if (!c) return;
+  if (_nrMenuCol === id && nrMenuEl()) { closeNRColMenu(); return; }
+  closeNRColMenu();
+  _nrMenuCol = id;
+  const s = nrState();
+  const f = s.filters[id];
+  const keep = f && Array.isArray(f.in) ? new Set(f.in) : null;
+  const vals = nrMenuValues(id);
+  const words = c.type === "number" ? ["Smallest to largest", "Largest to smallest"]
+    : c.type === "date" ? ["Oldest to newest", "Newest to oldest"] : ["Sort A → Z", "Sort Z → A"];
+  const sortBtn = (dir, label) => {
+    const on = s.sort && s.sort.id === id && s.sort.dir === dir;
+    return `<button type="button" data-nr-sort="${dir}" onclick="nrMenuSort('${dir}')"${on ? ' style="color:var(--accentLift);font-weight:700"' : ""}>${dir === "asc" ? "↑" : "↓"} ${label}${on ? " ✓" : ""}</button>`;
+  };
+  const shown = NR.visibleCols(s);
+  const menu = document.createElement("div");
+  menu.id = "nr-colmenu";
+  menu.className = "dropdown-menu nr-colmenu";
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", c.label + " column");
+  menu.innerHTML = `
+    <div class="nr-colmenu-title">${escapeHtml(c.label)}</div>
+    ${sortBtn("asc", words[0])}${sortBtn("desc", words[1])}
+    <div class="nr-colmenu-sep"></div>
+    <div class="nr-colmenu-sub">Filter by value</div>
+    <input id="nr-colmenu-q" type="search" class="nr-colmenu-q" placeholder="Search values" autocomplete="off" oninput="nrMenuSearch(this.value)">
+    <div id="nr-colmenu-list" class="nr-colmenu-list">
+      <label class="nr-colmenu-row nr-colmenu-all"><input type="checkbox" id="nr-colmenu-all" onchange="nrMenuSelectAll(this.checked)"> (Select all)</label>
+      ${vals.map(({ v, n }) => `<label class="nr-colmenu-row" data-v="${escapeAttr(v.toLowerCase())}"><input type="checkbox" data-nr-val="${escapeAttr(v)}"${!keep || keep.has(v) ? " checked" : ""} onchange="nrMenuTick()"> <span class="nr-colmenu-v">${v === "" ? '<span style="color:var(--dim)">(blank)</span>' : escapeHtml(v)}</span><span class="nr-colmenu-n">${n}</span></label>`).join("")}
+    </div>
+    <div class="nr-colmenu-sep"></div>
+    <div class="nr-colmenu-foot">
+      ${shown.length > 1 ? `<button type="button" onclick="nrMenuHide()">Hide column</button>` : "<span></span>"}
+      <button type="button" class="nr-colmenu-done" onclick="closeNRColMenu()">Done</button>
+    </div>`;
+  document.body.appendChild(menu);
+  nrSyncSelectAll();
+  // Anchor under the heading, kept on screen. Fixed, so a sideways-scrolled
+  // table or a short phone screen cannot clip it.
+  const r = th.getBoundingClientRect();
+  const w = Math.min(280, window.innerWidth - 16);
+  menu.style.width = w + "px";
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+  const top = Math.min(r.bottom + 4, window.innerHeight - 220);
+  menu.style.top = Math.max(8, top) + "px";
+  menu.style.maxHeight = (window.innerHeight - Math.max(8, top) - 8) + "px";
+}
+function nrMenuBoxes() { return [...document.querySelectorAll("#nr-colmenu-list input[data-nr-val]")]; }
+function nrSyncSelectAll() {
+  const all = document.getElementById("nr-colmenu-all");
+  if (!all) return;
+  const vis = nrMenuBoxes().filter(b => b.closest("label").style.display !== "none");
+  const on = vis.filter(b => b.checked).length;
+  all.checked = vis.length > 0 && on === vis.length;
+  all.indeterminate = on > 0 && on < vis.length;
+}
+function nrMenuSearch(q) {
+  const needle = String(q || "").trim().toLowerCase();
+  document.querySelectorAll("#nr-colmenu-list label[data-v]").forEach(l => {
+    l.style.display = !needle || l.dataset.v.includes(needle) ? "" : "none";
   });
-  return `<div id="nr-filterbar" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
-    <select id="nr-filter-col" class="topbar-select${_nrFilterCol ? " active" : ""}" onchange="nrPickFilterCol(this.value)" title="Filter the rows by any column">
-      ${opt("", "+ Filter by...", !_nrFilterCol)}${colOpts}
-    </select>
-    ${valPicker}
-    ${pills.map(p => `<button type="button" class="lc-wiz-filter-chip active" data-nr-pill="${escapeAttr(p.id)}"${p.v === null ? "" : ` data-nr-val="${escapeAttr(p.v)}"`} onclick="nrRemoveFilter(this)" title="Remove this filter">${escapeHtml(p.label)} ✕</button>`).join("")}
-  </div>`;
+  nrSyncSelectAll();
 }
-
-// Plain-words summary of a non-enum filter, for its pill.
-function nrFilterDesc(c, f) {
-  if (c.type === "bool") return f.is === "yes" ? "Yes" : "No";
-  if (c.type === "number") {
-    const has = x => x !== undefined && x !== null && x !== "";
-    if (has(f.min) && has(f.max)) return `${f.min} to ${f.max}`;
-    return has(f.min) ? `${f.min} or more` : `${f.max} or less`;
-  }
-  if (c.type === "date") return f.op === "today" ? "today" : `${f.op} ${f.v ? isoToDisplayDate(f.v) : ""}`.trim();
-  return `contains "${f.contains}"`;
+// (Select all) acts on the values the search leaves, like a sheet: search
+// "gun", untick all, and only the matches change.
+function nrMenuSelectAll(on) {
+  nrMenuBoxes().filter(b => b.closest("label").style.display !== "none").forEach(b => { b.checked = on; });
+  nrMenuTick();
 }
-
-function nrPickFilterCol(id) {
-  _nrFilterCol = NR.COL[id] ? id : "";
+function nrMenuTick() {
+  const id = _nrMenuCol;
+  if (!NR.COL[id]) return;
+  const boxes = nrMenuBoxes();
+  const s = nrState();
+  const filters = Object.assign({}, s.filters);
+  // Everything ticked is no filter at all, so new values (a man enlisted
+  // tomorrow) are not silently hidden by a filter that meant "all".
+  if (boxes.every(b => b.checked)) delete filters[id];
+  else filters[id] = { in: boxes.filter(b => b.checked).map(b => b.dataset.nrVal) };
+  NR.save(Object.assign({}, s, { filters }));
+  nrSyncSelectAll();
+  nrRefreshBody();
+}
+function nrMenuSort(dir) {
+  const id = _nrMenuCol;
+  NR.save(NR.setSort(nrState(), id, dir));
+  closeNRColMenu();
   render();
 }
-function nrAddFilterValue(raw) {
-  const c = NR.COL[_nrFilterCol];
-  if (!c || !String(raw).startsWith("v:")) return;
-  const v = String(raw).slice(2);
+function nrMenuHide() {
+  const id = _nrMenuCol;
   const s = nrState();
-  const filters = Object.assign({}, s.filters);
-  if (c.type === "bool") filters[c.id] = { is: v };
-  else filters[c.id] = { in: [...new Set([...((filters[c.id] || {}).in || []), v])] };
-  _nrFilterCol = "";
-  nrSet(Object.assign({}, s, { filters }));
+  const cols = NR.visibleCols(s).map(c => c.id).filter(x => x !== id);
+  closeNRColMenu();
+  if (!cols.length) return;
+  nrSet(Object.assign({}, s, { cols }));
 }
-function nrRemoveFilter(btn) {
-  const id = btn.dataset.nrPill;
-  const s = nrState();
-  const filters = Object.assign({}, s.filters);
-  const f = filters[id];
-  if (f && Array.isArray(f.in) && btn.dataset.nrVal !== undefined) {
-    const rest = f.in.filter(v => v !== btn.dataset.nrVal);
-    if (rest.length) filters[id] = { in: rest }; else delete filters[id];
-  } else {
-    delete filters[id];
-  }
-  nrSet(Object.assign({}, s, { filters }));
+// Redraw only the summary + table, so the open menu and the search box keep
+// their place.
+function nrRefreshBody() {
+  const body = document.getElementById("nr-body");
+  if (body) body.innerHTML = nrBodyHtml();
 }
 
 function setNRSearch(v) {
@@ -1504,7 +1555,6 @@ function setNRSearch(v) {
 }
 function clearNRFilters() {
   _nrSearch = "";
-  _nrFilterCol = "";
   nrSet(Object.assign(nrState(), { chips: [], filters: {} }));
 }
 function toggleNRMenu(e) {
@@ -1545,51 +1595,15 @@ async function copyNRView() {
 // Grouped checkboxes (the group-members list's markup), each with a filter by
 // type. Apply rewrites the view; ticking a column keeps the current order and
 // appends new ones in catalogue order.
-function nrFilterControl(c, f, scoped, ctx) {
-  f = f || {};
-  const inp = "padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:11px;box-sizing:border-box";
-  const id = `nr-f-${c.id}`;
-  if (c.type === "enum") {
-    const vals = new Set();
-    scoped.forEach(r => NR.enumVals(c, r, ctx).forEach(v => vals.add(v)));
-    (f.in || []).forEach(v => vals.add(v));
-    const list = [...vals].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    if (!list.length) return `<div style="font-size:11px;color:var(--dim)">No values in this scope.</div>`;
-    return `<div style="display:flex;flex-wrap:wrap;gap:4px 10px">${list.map(v => `<label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer"><input type="checkbox" data-nr-enum="${c.id}" value="${escapeAttr(v)}"${(f.in || []).includes(v) ? " checked" : ""} style="width:14px;height:14px;cursor:pointer">${v === "" ? '<span style="color:var(--dim)">(blank)</span>' : escapeHtml(v)}</label>`).join("")}</div>`;
-  }
-  if (c.type === "bool") {
-    return `<select id="${id}-is" style="${inp}">${[["", "Any"], ["yes", "Yes"], ["no", "No"]].map(([v, l]) => `<option value="${v}"${(f.is || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select>`;
-  }
-  if (c.type === "number") {
-    return `<div style="display:flex;gap:6px;align-items:center"><input id="${id}-min" type="number" inputmode="decimal" placeholder="Min" value="${escapeAttr(f.min ?? "")}" style="${inp};width:90px"><span style="color:var(--dim)">to</span><input id="${id}-max" type="number" inputmode="decimal" placeholder="Max" value="${escapeAttr(f.max ?? "")}" style="${inp};width:90px"></div>`;
-  }
-  if (c.type === "date") {
-    return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select id="${id}-op" style="${inp}">${[["", "Any"], ["today", "Today"], ["before", "Before"], ["on", "On"], ["after", "After"]].map(([v, l]) => `<option value="${v}"${(f.op || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select><input id="${id}-v" type="date" value="${escapeAttr(f.v || "")}" style="${inp}"></div>`;
-  }
-  return `<input id="${id}-contains" placeholder="Contains..." value="${escapeAttr(f.contains || "")}" style="${inp};width:100%">`;
-}
-
 function openNRColumns() {
   const s = nrState();
-  const ctx = NR.makeCtx(todayISO());
-  const scoped = nrScoped();
   const shown = new Set(NR.visibleCols(s).map(c => c.id));
   const groups = NR.GROUPS.map(g => {
     const cols = NR.COLUMNS.filter(c => c.group === g);
-    const rows = cols.map(c => {
-      const f = s.filters[c.id];
-      const on = NR.filterActive(f);
-      return `<div style="padding:5px 8px;border-radius:4px;background:var(--surface2)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">
-            <input type="checkbox" data-nr-col="${c.id}"${shown.has(c.id) ? " checked" : ""} style="width:14px;height:14px;cursor:pointer">
-            <span style="font-size:12px">${escapeHtml(c.label)}</span>
-          </label>
-          <button type="button" class="btn btn-icon" style="font-size:10px;padding:2px 7px${on ? ";color:var(--accent)" : ""}" onclick="nrToggleFilterPanel('${c.id}')" title="Only show rows matching a ${c.type} filter">${on ? "Filter ●" : "Filter"}</button>
-        </div>
-        <div id="nr-fp-${c.id}" style="display:${on ? "block" : "none"};margin-top:6px">${nrFilterControl(c, f, scoped, ctx)}</div>
-      </div>`;
-    }).join("");
+    const rows = cols.map(c => `<label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:4px;background:var(--surface2);cursor:pointer">
+        <input type="checkbox" data-nr-col="${c.id}"${shown.has(c.id) ? " checked" : ""} style="width:16px;height:16px;cursor:pointer">
+        <span style="font-size:12px">${escapeHtml(c.label)}</span>
+      </label>`).join("");
     const note = g === "Personal (sensitive)" ? ` <span style="font-weight:400;text-transform:none;letter-spacing:0">- personal details, off by default</span>` : "";
     return `<div style="margin-bottom:10px">
       <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${g}${note}</div>
@@ -1599,7 +1613,7 @@ function openNRColumns() {
   const isCustom = /^u/.test(s.preset) && !NR.isModified(s);
   openModal("Columns", `
     <div style="display:flex;flex-direction:column;gap:10px">
-      <div style="font-size:11px;color:var(--muted)">Tick the columns to show. A filter hides rows that do not match it, whether or not its column is shown. Saved on this device only.</div>
+      <div style="font-size:11px;color:var(--muted)">Tick the columns to show. To sort or filter, tap a column heading in the table. Saved on this device only.</div>
       <div id="nr-cols" style="max-height:52vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">${groups}</div>
       <div class="form-group"><label>Save as a preset (optional)</label><input id="nr-preset-name" maxlength="40" placeholder="e.g. Guard list"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1608,10 +1622,6 @@ function openNRColumns() {
       </div>
     </div>`);
   document.querySelector(".modal")?.classList.add("wide");
-}
-function nrToggleFilterPanel(id) {
-  const el = document.getElementById("nr-fp-" + id);
-  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
 }
 
 function submitNRColumns() {
@@ -1622,27 +1632,7 @@ function submitNRColumns() {
   const cols = current.concat(NR.COLUMNS.map(c => c.id).filter(id => ticked.has(id) && !current.includes(id)));
 
   const val = id => { const el = document.getElementById(id); return el ? el.value : ""; };
-  const filters = {};
-  NR.COLUMNS.forEach(c => {
-    const k = `nr-f-${c.id}`;
-    let f = null;
-    if (c.type === "enum") {
-      const vals = [...document.querySelectorAll(`#nr-cols input[data-nr-enum="${c.id}"]:checked`)].map(el => el.value);
-      if (vals.length) f = { in: vals };
-    } else if (c.type === "bool") {
-      if (val(k + "-is")) f = { is: val(k + "-is") };
-    } else if (c.type === "number") {
-      const min = val(k + "-min"), max = val(k + "-max");
-      if (min !== "" || max !== "") f = { min, max };
-    } else if (c.type === "date") {
-      if (val(k + "-op")) f = { op: val(k + "-op"), v: val(k + "-v") };
-    } else if (val(k + "-contains").trim()) {
-      f = { contains: val(k + "-contains").trim() };
-    }
-    if (f && NR.filterActive(f)) filters[c.id] = f;
-  });
-
-  const next = Object.assign({}, s, { cols, filters });
+  const next = Object.assign({}, s, { cols });
   const name = val("nr-preset-name").trim().slice(0, 40);
   if (name) {
     const id = "u" + Date.now().toString(36);

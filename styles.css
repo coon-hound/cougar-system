@@ -320,6 +320,23 @@ tbody tr:last-child td{border-bottom:none}
 .dropdown-menu{position:absolute;top:100%;right:0;margin-top:6px;background:rgba(29,36,51,.94);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border:1px solid var(--borderHi);border-radius:var(--r2);box-shadow:var(--sh3);z-index:50;min-width:210px;padding:5px;display:flex;flex-direction:column;gap:2px;animation:pop-in var(--d2) var(--spring) both;transform-origin:top right}
 .dropdown-menu button{min-height:36px;padding:9px 12px;font-size:12px;font-weight:500;background:transparent;color:var(--text);border:none;border-radius:var(--r1);cursor:pointer;text-align:left;font-family:inherit;outline:none;transition:background-color var(--d1) var(--ez),color var(--d1) var(--ez)}
 .dropdown-menu button:focus-visible{box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+/* Master NR column menu: a .dropdown-menu pinned under a table heading */
+.nr-colmenu{position:fixed;top:0;right:auto;margin-top:0;z-index:150;overflow-y:auto;transform-origin:top left}
+.nr-colmenu-title{padding:6px 12px 4px;font-size:12px;font-weight:700;color:var(--text)}
+.nr-colmenu-sub{padding:2px 12px;font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
+.nr-colmenu-sep{height:1px;background:var(--border);margin:4px 2px}
+.nr-colmenu-q{margin:4px 6px;padding:8px 10px;border-radius:var(--r1);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12px;min-width:0}
+.nr-colmenu-list{display:flex;flex-direction:column;max-height:240px;overflow-y:auto;padding:0 2px}
+.nr-colmenu-row{display:flex;align-items:center;gap:8px;min-height:36px;padding:4px 10px;border-radius:var(--r1);font-size:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.nr-colmenu-row input{width:16px;height:16px;flex-shrink:0;cursor:pointer}
+.nr-colmenu-v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nr-colmenu-n{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+.nr-colmenu-all{font-weight:600}
+.nr-colmenu-foot{display:flex;justify-content:space-between;gap:6px}
+.nr-colmenu-foot .nr-colmenu-done{color:var(--accentLift);font-weight:700}
+.nr-th-ico{color:var(--dim);font-size:10px}
+.nr-th-ico.on{color:var(--accentLift)}
+.nr-th-funnel{width:9px;height:9px;margin-right:2px;vertical-align:-1px}
 
 /* ── Sync ──────────────────────────────────────────────────*/
 .sync-panel{background:var(--surface);border:1px solid rgba(var(--accentRGB),.32);border-radius:var(--r3);padding:20px;margin-bottom:20px;box-shadow:var(--sh1),var(--lift)}
@@ -423,6 +440,7 @@ tbody tr:last-child td{border-bottom:none}
   .role-btn:hover{color:var(--text)}
   .filter-role-group .role-btn:hover:not(.active){background:var(--surface2)}
   .dropdown-menu button:hover{background:var(--surface3);color:var(--accentLift)}
+  .nr-colmenu-row:hover{background:var(--surface3)}
   .modal-close:hover{color:var(--text);background:var(--surface2)}
   .lc-wiz-status-row:hover{border-color:var(--borderHi)}
   .lc-wiz-filter-chip:hover:not(.active){background:var(--surface3);border-color:var(--borderHi);color:var(--text)}

@@ -3,7 +3,10 @@
 const { test, expect } = require("@playwright/test");
 const { seedAndGoto } = require("./support");
 
-const headers = (page) => page.$$eval("#content table thead th", ths => ths.map(t => t.textContent.trim()));
+// Heading text without the menu marker (▾ / ▲ / ▼ / ⧩).
+const headers = (page) => page.$$eval("#content table thead th", ths => ths.map(t => {
+  const c = t.cloneNode(true); c.querySelector(".nr-th-ico")?.remove(); return c.textContent.trim();
+}));
 const rowCount = (page) => page.locator("#content table tbody tr").count();
 
 async function gotoRoster(page) {
@@ -99,30 +102,41 @@ test.describe("Master NR", () => {
     expect(JSON.stringify(csv.data)).not.toMatch(/<\w/);
   });
 
-  test("header tap sorts, search narrows, a filter from Columns applies", async ({ page }) => {
+  test("a heading opens the sheet-style menu: sort, search, untick a value", async ({ page }) => {
     await seedAndGoto(page);
     await gotoRoster(page);
-    await page.click('#content th:has-text("Name")');
-    expect((await headers(page))[1]).toBe("Name ▲");
+    await expect(page.locator("#nr-summary")).toContainText("tap a column heading to sort or filter");
+
+    // Sort A to Z from the Name heading's menu.
+    await page.click('#content th[data-nr-th="name"]');
+    await expect(page.locator("#nr-colmenu")).toBeVisible();
+    await page.click('#nr-colmenu [data-nr-sort="asc"]');
+    await expect(page.locator("#nr-colmenu")).toHaveCount(0);
+    expect((await headers(page))[1]).toBe("Name");
+    await expect(page.locator('#content th[data-nr-th="name"] .nr-th-ico.on')).toHaveText("▲");
     const names = await page.$$eval("#content tbody tr td:nth-child(2)", tds => tds.map(t => t.textContent.trim()));
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
 
+    // The page search still narrows and keeps focus.
     await page.fill("#nr-search", "bravo");
     await expect(page.locator("#content tbody tr")).toHaveCount(3);
     await expect(page.locator("#nr-search")).toBeFocused();
     await page.fill("#nr-search", "");
 
-    await page.click("text=Columns");
-    await page.click('#nr-cols [onclick="nrToggleFilterPanel(\'kind\')"]');
-    await page.check('#nr-cols input[data-nr-enum="kind"][value="Commander"]');
-    await page.click("text=Apply");
-    const n = await page.evaluate(() => STATE.roster.filter(r => r.role === "Commander").length);
-    await expect(page.locator("#content tbody tr")).toHaveCount(n);
+    // Untick Commander in the Role menu: ticks apply at once, menu stays open.
+    const all = await page.evaluate(() => STATE.roster.length);
+    const cmds = await page.evaluate(() => STATE.roster.filter(r => r.role === "Commander").length);
+    await page.click('#content th[data-nr-th="role"]');
+    await page.uncheck('#nr-colmenu input[data-nr-val="Commander"]');
+    await expect(page.locator("#content tbody tr")).toHaveCount(all - cmds);
+    await expect(page.locator("#nr-colmenu")).toBeVisible();
+    await expect(page.locator('#content th[data-nr-th="role"] .nr-th-ico.on')).toHaveCount(1);
+    await page.click("#nr-colmenu .nr-colmenu-done");
     await page.click("text=Clear filters");
-    await expect(page.locator("#content tbody tr")).toHaveCount(await page.evaluate(() => STATE.roster.length));
+    await expect(page.locator("#content tbody tr")).toHaveCount(all);
   });
 
-  test("dropdown filters: pick a column, pick a value, remove the pill", async ({ page }) => {
+  test("filter by value: only the Gunners, then add 2 MAT, then (Select all)", async ({ page }) => {
     await seedAndGoto(page);
     await page.evaluate(() => {
       STATE.roster.push(...normalizeRoster([
@@ -132,22 +146,31 @@ test.describe("Master NR", () => {
       ]));
     });
     await gotoRoster(page);
-    await page.selectOption("#nr-filter-col", "billet");
-    await expect(page.locator("#nr-filter-val option", { hasText: "Gunner (2)" })).toHaveCount(1);
-    await page.selectOption("#nr-filter-val", "v:Gunner");
+    const all = await page.evaluate(() => STATE.roster.length);
+    await page.click('#content th[data-nr-th="role"]');
+    // The sheet way: untick (Select all), then tick the one you want.
+    await page.uncheck("#nr-colmenu-all");
+    await expect(page.locator("#content tbody tr")).toHaveCount(0);
+    await page.check('#nr-colmenu input[data-nr-val="Gunner"]');
     await expect(page.locator("#content tbody tr")).toHaveCount(2);
     await expect(page.locator("#content tbody")).toContainText("TEST MIXED");
-
-    // A second value on the same column widens it.
-    await page.selectOption("#nr-filter-col", "billet");
-    await page.selectOption("#nr-filter-val", "v:2 MAT");
+    await page.check('#nr-colmenu input[data-nr-val="2 MAT"]');
     await expect(page.locator("#content tbody tr")).toHaveCount(3);
-    await expect(page.locator("[data-nr-pill]")).toHaveCount(2);
 
-    await page.click('[data-nr-pill="billet"][data-nr-val="Gunner"]');
-    await expect(page.locator("#content tbody tr")).toHaveCount(1);
-    await page.click('[data-nr-pill="billet"]');
-    await expect(page.locator("#content tbody tr")).toHaveCount(await page.evaluate(() => STATE.roster.length));
+    // The value search narrows the list.
+    await page.fill("#nr-colmenu-q", "lmg");
+    await expect(page.locator("#nr-colmenu label[data-v]:visible")).toHaveCount(1);
+    await page.fill("#nr-colmenu-q", "");
+    await page.check("#nr-colmenu-all");
+    await expect(page.locator("#content tbody tr")).toHaveCount(all);
+    await expect(page.locator('#content th[data-nr-th="role"] .nr-th-ico.on')).toHaveCount(0);
+
+    // Tapping outside closes it; Hide column removes the column.
+    await page.click("#content h2");
+    await expect(page.locator("#nr-colmenu")).toHaveCount(0);
+    await page.click('#content th[data-nr-th="bmi"]');
+    await page.click("#nr-colmenu >> text=Hide column");
+    expect(await headers(page)).not.toContain("BMI");
   });
 
   test("phone: the view scrolls sideways with Name pinned", async ({ page }) => {

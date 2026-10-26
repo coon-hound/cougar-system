@@ -27,10 +27,10 @@ const PATCH_NOTES = [
     intro: "The Roster tab is now the Master NR. It looks the same until you pick a different view.",
     items: [
       { t: "🗂 Views", d: "Pick a view at the top: Daily strength, Out of camp, Medical, IPPT, Leave or Contacts / NOK. Default is the roster you know." },
-      { t: "🔎 Filter by anything", d: "Use + Filter by... to pick a column, then a value: only the Gunners, only 2 MAT, only PL 2. Add more values or more columns, and tap a filter to remove it. A man who is 2 LMG / Gunner shows under both." },
-      { t: "☑ Columns", d: "Tap Columns to choose what shows and save your own view. Your views stay on your phone." },
+      { t: "▾ Filter like a spreadsheet", d: "Tap any column heading, the same as Google Sheets or Excel. Sort A to Z, search the values, and tick only the ones you want: untick (Select all), then tick Gunner to see only the Gunners. A man who is 2 LMG / Gunner counts as a Gunner too." },
+      { t: "☑ Columns", d: "Tap + Columns to choose what shows and save your own view. Your views stay on your phone." },
       { t: "🚙 Bronco Operators are Mounted", d: "They now count as vehicle crew, alongside Gunners and Hunter Drivers." },
-      { t: "⚡ Quick filters", d: "One tap for In camp, Out of camp, On status, On MC/LD, On leave or Appointment today. Tap a column heading to sort by it." },
+      { t: "⚡ Quick filters", d: "One tap for In camp, Out of camp, On status, On MC/LD, On leave or Appointment today." },
       { t: "⋯ More", d: "Export or copy exactly what you see. + Commander, Groups, the full export and Re-push all have moved under ⋯." }
     ]
   },
