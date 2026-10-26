@@ -166,4 +166,25 @@ module.exports = async function run() {
     const csv = s.NR.csvRows(rows, cols, ctx);
     eq(JSON.stringify(Object.keys(csv[0])), JSON.stringify(cols.map(c => c.label)));
   });
+
+  await test("section role filters on each part of a combined role, case-folded", () => {
+    const ctx = s.NR.makeCtx(vm.runInContext("todayISO()", s));
+    const men = vm.runInContext(`normalizeRoster([
+      { id: "9901", name: "TEST GUNNER", role: "Recruit", billet: "Gunner" },
+      { id: "9902", name: "TEST MIXED", role: "Recruit", billet: "2 LMG / Gunner" },
+      { id: "9903", name: "TEST MAT", role: "Recruit", billet: "2 MAT" },
+      { id: "9904", name: "TEST BRONCO", role: "Recruit", billet: "BRONCO OPERATOR" },
+      { id: "9905", name: "TEST NONE", role: "Recruit", billet: "" },
+      { id: "9906", name: "TEST RUNNER", role: "Recruit", billet: "(2GL) / PC Runner" },
+    ])`, s);
+    const pick = f => s.NR.apply(men, Object.assign(s.NR.blank(), { filters: f }), ctx, "").map(r => r.id);
+    eq(JSON.stringify(pick({ billet: { in: ["Gunner"] } })), JSON.stringify(["9901", "9902"]));
+    eq(JSON.stringify(pick({ billet: { in: ["Gunner", "2 MAT"] } })), JSON.stringify(["9901", "9902", "9903"]), "values on one column are OR");
+    eq(JSON.stringify(pick({ billet: { in: ["Bronco Operator"] } })), JSON.stringify(["9904"]), "case folds onto the suggestion");
+    eq(JSON.stringify(pick({ billet: { in: ["2GL"] } })), JSON.stringify(["9906"]), "brackets are stripped");
+    eq(JSON.stringify(pick({ billet: { in: [""] } })), JSON.stringify(["9905"]), "blank stays filterable");
+    eq(JSON.stringify(pick({ billet: { in: ["Gunner"] }, mount: { in: ["Mounted"] } })), JSON.stringify(["9901"]), "different columns are AND");
+    eq(s.NR.textOf(s.NR.COL.billet, men[1], ctx), "2 LMG / Gunner", "the cell and CSV keep the role as written");
+    eq(vm.runInContext("mountOf", s)(men[3]), "mounted", "Bronco Operator is crew");
+  });
 };

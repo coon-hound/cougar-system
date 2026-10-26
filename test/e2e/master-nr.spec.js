@@ -122,6 +122,34 @@ test.describe("Master NR", () => {
     await expect(page.locator("#content tbody tr")).toHaveCount(await page.evaluate(() => STATE.roster.length));
   });
 
+  test("dropdown filters: pick a column, pick a value, remove the pill", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => {
+      STATE.roster.push(...normalizeRoster([
+        { id: "9901", name: "TEST GUNNER", role: "Recruit", billet: "Gunner" },
+        { id: "9902", name: "TEST MIXED", role: "Recruit", billet: "2 LMG / Gunner" },
+        { id: "9903", name: "TEST MAT", role: "Recruit", billet: "2 MAT" },
+      ]));
+    });
+    await gotoRoster(page);
+    await page.selectOption("#nr-filter-col", "billet");
+    await expect(page.locator("#nr-filter-val option", { hasText: "Gunner (2)" })).toHaveCount(1);
+    await page.selectOption("#nr-filter-val", "v:Gunner");
+    await expect(page.locator("#content tbody tr")).toHaveCount(2);
+    await expect(page.locator("#content tbody")).toContainText("TEST MIXED");
+
+    // A second value on the same column widens it.
+    await page.selectOption("#nr-filter-col", "billet");
+    await page.selectOption("#nr-filter-val", "v:2 MAT");
+    await expect(page.locator("#content tbody tr")).toHaveCount(3);
+    await expect(page.locator("[data-nr-pill]")).toHaveCount(2);
+
+    await page.click('[data-nr-pill="billet"][data-nr-val="Gunner"]');
+    await expect(page.locator("#content tbody tr")).toHaveCount(1);
+    await page.click('[data-nr-pill="billet"]');
+    await expect(page.locator("#content tbody tr")).toHaveCount(await page.evaluate(() => STATE.roster.length));
+  });
+
   test("phone: the view scrolls sideways with Name pinned", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedAndGoto(page);

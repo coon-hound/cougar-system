@@ -199,11 +199,11 @@ const conductScopeColor = v =>
 const isFilterActive = () => !!(STATE.filterPlt || STATE.filterSect || STATE.filterRole || STATE.filterGroup);
 
 // Mounted (vehicle crew) or dismounted, DERIVED from the section role so the
-// two can never disagree. A role is "/"-separated parts and Gunner / Hunter
-// Driver are the crew parts. A man holding a crew part AND a dismount part
-// ("2 LMG / Gunner") is "both" and counts under either filter. A blank role is
-// dismounted; commanders are neither.
-const MOUNTED_PARTS = new Set(["gunner", "hunter driver"]);
+// two can never disagree. A role is "/"-separated parts and Gunner, Hunter
+// Driver and Bronco Operator are the crew parts. A man holding a crew part AND
+// a dismount part ("2 LMG / Gunner") is "both" and counts under either filter.
+// A blank role is dismounted; commanders are neither.
+const MOUNTED_PARTS = new Set(["gunner", "hunter driver", "bronco operator"]);
 const MOUNT_LABEL = { mounted: "Mounted", dismounted: "Dismounted", both: "Mounted + Dismounted" };
 function mountOf(r) {
   if (!r || r.role === "Commander") return "";

@@ -138,6 +138,17 @@ const NR = (() => {
 
   // ── Small builders ────────────────────────────────────────────────────────
   const isCmd = r => r && r.role === "Commander";
+  // A section role is "/"-separated parts ("2 LMG / Gunner", "(2GL) / PC
+  // Runner"), split the way mountOf splits it, so filtering on Gunner also
+  // finds the men who are Gunner and something else. Case is folded onto the
+  // suggestion list, so "BRONCO OPERATOR" and "Bronco Operator" are one value.
+  // A blank role stays one "" value so "(blank)" can still be filtered on.
+  const roleParts = r => {
+    const parts = String((r && r.billet) || "").split("/")
+      .map(p => p.replace(/[()]/g, "").trim()).filter(Boolean)
+      .map(p => (typeof BILLET_SUGGESTIONS !== "undefined" && BILLET_SUGGESTIONS.find(b => b.toLowerCase() === p.toLowerCase())) || p);
+    return parts.length ? [...new Set(parts)] : [""];
+  };
   const field = (key, label, group, type, extra) => Object.assign({
     id: key, label, group, type: type || "text",
     get: r => {
@@ -200,14 +211,16 @@ const NR = (() => {
       get: r => isCmd(r) ? `${r.rank ? r.rank + " " : ""}${r.name || ""}` : (r.name || "") },
     // The Default "Role" column: Commander badge, or section role + mount tag.
     { id: "role", label: "Role", group: G.id, type: "enum",
-      get: r => isCmd(r) ? "Commander" : (r.billet || ""),
+      get: r => isCmd(r) ? ["Commander"] : roleParts(r),
+      text: r => isCmd(r) ? "Commander" : (r.billet || ""), sort: r => isCmd(r) ? "Commander" : (r.billet || ""),
       cell: r => isCmd(r) ? `<span class="badge badge-purple">Commander</span>` : `${r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`}<div style="margin-top:2px">${mountBadge(r)}</div>` },
     { id: "rank", label: "Rank", group: G.id, type: "enum", get: r => rosterRank(r) },
     { id: "kind", label: "Cmdr / Rec", group: G.id, type: "enum", get: r => r.role || "" },
     { id: "plt", label: "Platoon", group: G.id, type: "enum", get: r => getPlt(r), text: r => getPlt(r) ? "PL " + getPlt(r) : "COY HQ" },
     { id: "sect", label: "Section", group: G.id, type: "enum", get: r => getSect(r) },
     field("appt", "Appt", G.id, "enum"),
-    field("billet", "Section role", G.id, "enum"),
+    { id: "billet", label: "Section role", group: G.id, type: "enum",
+      get: r => roleParts(r), text: r => r.billet || "", sort: r => r.billet || "" },
     { id: "mount", label: "Mounted", group: G.id, type: "enum",
       get: r => mountOf(r) ? MOUNT_LABEL[mountOf(r)] : "", cell: r => mountBadge(r) || DASH },
     { id: "groups", label: "Groups", group: G.id, type: "enum", get: r => getGroups(r), text: r => getGroups(r).join(", ") },

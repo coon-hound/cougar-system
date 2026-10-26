@@ -1320,7 +1320,7 @@ function renderRoster(el) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select id="nr-preset" class="topbar-select${s.preset !== "default" || modified ? " active" : ""}" onchange="setNRPreset(this.value)" title="Saved column layouts">${presetOpts}</select>
         <button class="btn" onclick="openNRColumns()" title="Choose columns and filter rows">Columns${NR.activeFilterCount(s) ? ` · ${NR.activeFilterCount(s)}` : ""}</button>
-        <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver, from each man's role">
+        <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver / Bronco Operator, from each man's role">
           ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
         </select>
         <div class="dropdown-wrapper">
@@ -1340,6 +1340,7 @@ function renderRoster(el) {
       <input id="nr-search" class="topbar-select" style="cursor:text;min-width:0;flex:1 1 160px;max-width:260px" placeholder="Search this view..." value="${escapeAttr(_nrSearch)}" oninput="setNRSearch(this.value)">
       ${NR.CHIPS.map(c => `<button type="button" class="lc-wiz-filter-chip${s.chips.includes(c.id) ? " active" : ""}" data-nr-chip="${c.id}" onclick="toggleNRChip('${c.id}')">${c.label}</button>`).join("")}
     </div>
+    ${nrFilterBarHtml(s)}
     <div id="nr-body">${nrBodyHtml(s)}</div>`;
 }
 
@@ -1403,6 +1404,99 @@ function setNRPreset(id) {
 }
 function toggleNRChip(id) { nrSet(NR.toggleChip(nrState(), id)); }
 function sortNR(id) { nrSet(NR.cycleSort(nrState(), id)); }
+// ── Dropdown filters ─────────────────────────────────────
+// Two pickers: which column, then which value (with how many men hold it in
+// the current scope). Values on one column are OR ("Gunner" or "2 MAT"),
+// different columns are AND. The Columns modal still holds the number / date
+// / text filters; anything set there shows up here as a pill too.
+let _nrFilterCol = "";
+const nrFilterable = c => c.type === "enum" || c.type === "bool";
+
+function nrFilterBarHtml(s) {
+  const opt = (v, l, sel) => `<option value="${escapeAttr(v)}"${sel ? " selected" : ""}>${escapeHtml(l)}</option>`;
+  const colOpts = NR.GROUPS.map(g => {
+    const cols = NR.COLUMNS.filter(c => c.group === g && nrFilterable(c));
+    return cols.length ? `<optgroup label="${escapeAttr(g)}">${cols.map(c => opt(c.id, c.label, c.id === _nrFilterCol)).join("")}</optgroup>` : "";
+  }).join("");
+  const c = NR.COL[_nrFilterCol];
+  let valPicker = "";
+  if (c) {
+    const f = s.filters[c.id] || {};
+    let vals;
+    if (c.type === "bool") {
+      vals = [["yes", "Yes"], ["no", "No"]].filter(([v]) => f.is !== v);
+    } else {
+      const ctx = NR.makeCtx(todayISO());
+      const counts = new Map();
+      nrScoped().forEach(r => NR.enumVals(c, r, ctx).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
+      vals = [...counts.keys()].filter(v => !(f.in || []).includes(v))
+        .sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }))
+        .map(v => [v, `${v === "" ? "(blank)" : v} (${counts.get(v)})`]);
+    }
+    valPicker = `<select id="nr-filter-val" class="topbar-select active" onchange="nrAddFilterValue(this.value)" title="Show only men with this ${escapeAttr(c.label.toLowerCase())}">
+      ${opt("", vals.length ? `${c.label}: choose...` : `${c.label}: nothing left to add`, true)}${vals.map(([v, l]) => opt("v:" + v, l, false)).join("")}
+    </select>`;
+  }
+  const pills = [];
+  Object.keys(s.filters).forEach(id => {
+    const col = NR.COL[id], f = s.filters[id];
+    if (!col || !NR.filterActive(f)) return;
+    if (col.type === "enum") {
+      (f.in || []).forEach(v => pills.push({ id, v, label: `${col.label}: ${v === "" ? "(blank)" : v}` }));
+    } else {
+      pills.push({ id, v: null, label: `${col.label}: ${nrFilterDesc(col, f)}` });
+    }
+  });
+  return `<div id="nr-filterbar" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+    <select id="nr-filter-col" class="topbar-select${_nrFilterCol ? " active" : ""}" onchange="nrPickFilterCol(this.value)" title="Filter the rows by any column">
+      ${opt("", "+ Filter by...", !_nrFilterCol)}${colOpts}
+    </select>
+    ${valPicker}
+    ${pills.map(p => `<button type="button" class="lc-wiz-filter-chip active" data-nr-pill="${escapeAttr(p.id)}"${p.v === null ? "" : ` data-nr-val="${escapeAttr(p.v)}"`} onclick="nrRemoveFilter(this)" title="Remove this filter">${escapeHtml(p.label)} ✕</button>`).join("")}
+  </div>`;
+}
+
+// Plain-words summary of a non-enum filter, for its pill.
+function nrFilterDesc(c, f) {
+  if (c.type === "bool") return f.is === "yes" ? "Yes" : "No";
+  if (c.type === "number") {
+    const has = x => x !== undefined && x !== null && x !== "";
+    if (has(f.min) && has(f.max)) return `${f.min} to ${f.max}`;
+    return has(f.min) ? `${f.min} or more` : `${f.max} or less`;
+  }
+  if (c.type === "date") return f.op === "today" ? "today" : `${f.op} ${f.v ? isoToDisplayDate(f.v) : ""}`.trim();
+  return `contains "${f.contains}"`;
+}
+
+function nrPickFilterCol(id) {
+  _nrFilterCol = NR.COL[id] ? id : "";
+  render();
+}
+function nrAddFilterValue(raw) {
+  const c = NR.COL[_nrFilterCol];
+  if (!c || !String(raw).startsWith("v:")) return;
+  const v = String(raw).slice(2);
+  const s = nrState();
+  const filters = Object.assign({}, s.filters);
+  if (c.type === "bool") filters[c.id] = { is: v };
+  else filters[c.id] = { in: [...new Set([...((filters[c.id] || {}).in || []), v])] };
+  _nrFilterCol = "";
+  nrSet(Object.assign({}, s, { filters }));
+}
+function nrRemoveFilter(btn) {
+  const id = btn.dataset.nrPill;
+  const s = nrState();
+  const filters = Object.assign({}, s.filters);
+  const f = filters[id];
+  if (f && Array.isArray(f.in) && btn.dataset.nrVal !== undefined) {
+    const rest = f.in.filter(v => v !== btn.dataset.nrVal);
+    if (rest.length) filters[id] = { in: rest }; else delete filters[id];
+  } else {
+    delete filters[id];
+  }
+  nrSet(Object.assign({}, s, { filters }));
+}
+
 function setNRSearch(v) {
   _nrSearch = String(v || "");
   const body = document.getElementById("nr-body");
@@ -1410,6 +1504,7 @@ function setNRSearch(v) {
 }
 function clearNRFilters() {
   _nrSearch = "";
+  _nrFilterCol = "";
   nrSet(Object.assign(nrState(), { chips: [], filters: {} }));
 }
 function toggleNRMenu(e) {
