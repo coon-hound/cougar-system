@@ -27,6 +27,8 @@ function render() {
   // rebuild a few <option>s and means we don't have to remember to call this
   // from every site that mutates STATE.roster (pull, import, edit).
   if (typeof refreshFilterUI === "function") refreshFilterUI();
+  // Both nav bars follow STATE.nav, whoever changed it.
+  if (typeof syncNavActive === "function") syncNavActive();
 
   const el = document.getElementById("content");
   const scoped = filteredRoster();
@@ -136,6 +138,29 @@ function dashAction(label, onclick, title) {
   return `<button class="btn btn-primary" type="button" title="${title}" onclick="${onclick}" style="flex:0 0 auto;font-size:11px">${label}</button>`;
 }
 
+// Generate Report is two buttons: the left one opens a report straight away,
+// the ▾ one the full menu. The menu was opened 488 times for 172 reports (Sep -
+// Oct 2026 usage). Which report the left one opens: the parade state that is
+// due by the clock (First Parade before noon, Last Parade after) for anyone
+// who files parade states, since "the last one used" would be this morning's
+// FP every evening; otherwise the last report this device generated.
+const REPORT_LAST_KEY = "cougar-last-report";
+const REPORT_LABELS = {
+  FP: ["First Parade", "First Parade State"], LP: ["Last Parade", "Last Parade State"],
+  MED: ["Medical List", "Medical Status List"], MSK: ["MSK Report", "MSK Report"],
+  CONDUCT: ["Conduct Chat", "Per-Conduct Chat Format"]
+};
+function dashQuickReport(now = new Date()) {
+  let last = "";
+  try { last = localStorage.getItem(REPORT_LAST_KEY) || ""; } catch { last = ""; }
+  if (REPORT_LABELS[last] && last !== "FP" && last !== "LP") return last;
+  return now.getHours() < 12 ? "FP" : "LP";
+}
+function rememberReportType(type) {
+  if (!REPORT_LABELS[type]) return;
+  try { localStorage.setItem(REPORT_LAST_KEY, type); } catch { /* private mode: no memory, still works */ }
+}
+
 function renderDashboard(el) {
   // Empty-state guard. The dashboard has nothing meaningful to show until
   // the roster loads, but the message depends on WHY it's empty: an
@@ -230,6 +255,7 @@ function renderDashboard(el) {
     dashSecMSK(visible),
   ].filter(Boolean).map(dashSection).join("");
 
+  const quickReport = dashQuickReport();
   el.innerHTML = `
     <div style="margin-bottom:14px">
       <!-- Deliberately NOT flex-wrap: the report menu is anchored right:0 to
@@ -241,8 +267,9 @@ function renderDashboard(el) {
           <h2 style="font-size:18px;font-weight:700">Company Strength Board</h2>
           <div style="font-size:11px;color:var(--dim);margin-top:2px">${dateLabel}${isFilterActive() ? ` · <span style="color:var(--accent);font-weight:600">${filterLabel()}</span>` : ""}</div>
         </div>
-        <div class="dropdown-wrapper" style="flex:0 0 auto">
-          <button class="btn btn-primary" onclick="toggleReportMenu(event)">Generate Report ▾</button>
+        <div class="dropdown-wrapper" style="flex:0 0 auto;display:flex;gap:6px">
+          <button class="btn btn-primary" type="button" data-tel="report:${quickReport}:quick" onclick="openReportModal('${quickReport}')" title="Generate ${REPORT_LABELS[quickReport][1]}">${REPORT_LABELS[quickReport][0]}</button>
+          <button class="btn btn-primary" type="button" onclick="toggleReportMenu(event)" aria-label="All reports" title="All reports">▾</button>
           <div id="report-menu" class="dropdown-menu hidden">
             <button type="button" data-tel="report:FP" onclick="openReportModal('FP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◱</span>First Parade State</button>
             <button type="button" data-tel="report:LP" onclick="openReportModal('LP'); closeReportMenu()"><span style="color:var(--dim);margin-right:8px" aria-hidden="true">◳</span>Last Parade State</button>

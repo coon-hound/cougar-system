@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cougar Company Data System</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=167">
+<link rel="stylesheet" href="styles.css?v=168">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 </head>
@@ -44,8 +44,8 @@
   <div id="topbar">
     <button id="mobile-nav-toggle" aria-label="Open menu">☰</button>
     <span class="topbar-search-icon" aria-hidden="true">⌕</span>
-    <input id="search-input" placeholder="Search 4D or Name...">
-    <div id="search-results" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+    <input id="search-input" type="search" enterkeyhint="go" autocomplete="off" placeholder="Search 4D or Name...">
+    <div id="search-results"></div>
     <button id="mobile-filter-toggle" aria-label="Open scope filter">All</button>
     <div id="topbar-filters">
       <span class="filter-label">Scope</span>
@@ -64,6 +64,17 @@
     <button id="sync-status" class="s-syncing" type="button" title="Sync status">⟳ …</button>
   </div>
   <div id="content"></div>
+  <!-- Phone-only bottom bar: the four most-used views, one tap each. More
+       opens the same drawer as the menu button. The buttons ARE .nav-btn, so
+       they look and behave like the sidebar rows; data-tel tells their taps
+       apart from the drawer's in the usage record. -->
+  <nav id="tabbar" aria-label="Main">
+    <button type="button" class="nav-btn active" data-tab="dashboard" data-tel="tab:dashboard"><span class="nav-ico" aria-hidden="true">▤</span><span>Dashboard</span></button>
+    <button type="button" class="nav-btn" data-tab="medical" data-tel="tab:medical"><span class="nav-ico" aria-hidden="true">✚</span><span>Medical</span></button>
+    <button type="button" class="nav-btn" data-tab="attendance" data-tel="tab:attendance"><span class="nav-ico" aria-hidden="true">✓</span><span>Attendance</span></button>
+    <button type="button" class="nav-btn" data-tab="roster" data-tel="tab:roster"><span class="nav-ico" aria-hidden="true">☰</span><span>Roster</span></button>
+    <button type="button" class="nav-btn" id="tabbar-more" data-tel="tab:more" aria-label="More views"><span class="nav-ico" aria-hidden="true">⋯</span><span>More</span></button>
+  </nav>
 </div>
 
 <!-- MODAL -->
@@ -81,21 +92,21 @@
   Plain scripts (not modules) so this works under file:// too.
   Load order matters: state → api → ippt-scoring → helpers → nr-columns → parade-compare → render → forms → sync → main.
 -->
-<script src="js/state.js?v=167"></script>
-<script src="js/api.js?v=167"></script>
-<script src="js/ippt-scoring.js?v=167"></script>
-<script src="js/helpers.js?v=167"></script>
-<script src="js/nr-columns.js?v=167"></script>
-<script src="js/parade-compare.js?v=167"></script>
-<script src="js/render.js?v=167"></script>
-<script src="js/render-usage.js?v=167"></script>
-<script src="js/render-changelog.js?v=167"></script>
-<script src="js/forms.js?v=167"></script>
-<script src="js/patchnotes.js?v=167"></script>
-<script src="js/sync.js?v=167"></script>
-<script src="js/main.js?v=167"></script>
+<script src="js/state.js?v=168"></script>
+<script src="js/api.js?v=168"></script>
+<script src="js/ippt-scoring.js?v=168"></script>
+<script src="js/helpers.js?v=168"></script>
+<script src="js/nr-columns.js?v=168"></script>
+<script src="js/parade-compare.js?v=168"></script>
+<script src="js/render.js?v=168"></script>
+<script src="js/render-usage.js?v=168"></script>
+<script src="js/render-changelog.js?v=168"></script>
+<script src="js/forms.js?v=168"></script>
+<script src="js/patchnotes.js?v=168"></script>
+<script src="js/sync.js?v=168"></script>
+<script src="js/main.js?v=168"></script>
 <!-- Telemetry loads LAST, after every global it wraps already exists. It is a
      passive observer: if it fails, the app must behave as though it were absent. -->
-<script src="js/telemetry.js?v=167"></script>
+<script src="js/telemetry.js?v=168"></script>
 </body>
 </html>

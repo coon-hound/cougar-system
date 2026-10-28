@@ -1,16 +1,47 @@
 // Bootstrap: handle invite redemption from ?token=…, wire up nav + search,
 // load local cache, render, then auto-sync.
 
-document.querySelectorAll(".nav-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    STATE.nav = btn.dataset.nav;
-    render();
-    // On mobile, navigating to a new tab should auto-close the slide-out menu
-    // so the user isn't left staring at the sidebar overlay.
-    closeMobileSidebar();
-  });
+// ── Navigation ───────────────────────────────────────────
+// Two controls set STATE.nav: the sidebar (a drawer on a phone) and the
+// phone's bottom bar (#tabbar). Neither owns the highlight - render() calls
+// syncNavActive() on every paint, so anything that sets STATE.nav (sync.js
+// jumping to Sync & I/O, #usage, a deep link) leaves both bars telling the truth.
+
+// The bottom bar's destinations. Any other view lights up More instead.
+const TABBAR_NAVS = ["dashboard", "medical", "attendance", "roster"];
+
+function syncNavActive() {
+  document.querySelectorAll("#sidebar .nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === STATE.nav));
+  document.querySelectorAll("#tabbar [data-tab]").forEach(b => b.classList.toggle("active", b.dataset.tab === STATE.nav));
+  document.getElementById("tabbar-more")?.classList.toggle("active", !TABBAR_NAVS.includes(STATE.nav));
+}
+
+function goNav(nav) {
+  // Tapping the view you are already on takes you back to its top.
+  if (STATE.nav === nav) document.getElementById("content")?.scrollTo(0, 0);
+  STATE.nav = nav;
+  render();
+  // On mobile, navigating should close the slide-out menu so the user isn't
+  // left staring at the sidebar overlay.
+  closeMobileSidebar();
+}
+
+// The bar's buttons carry data-tab, not data-nav, so `.nav-btn[data-nav=x]`
+// still names exactly one control - the sidebar's.
+document.querySelectorAll("#sidebar .nav-btn").forEach(btn => {
+  btn.addEventListener("click", () => goNav(btn.dataset.nav));
+});
+document.querySelectorAll("#tabbar [data-tab]").forEach(btn => {
+  btn.addEventListener("click", () => goNav(btn.dataset.tab));
+});
+
+// iOS Safari can leave the WINDOW scrolled after the keyboard closes, even
+// with body position:fixed, and then a tap lands a few pixels off what is
+// painted - worst at the bottom edge, where the tab bar is. The window never
+// legitimately scrolls in this app (#content is the scroller), so put it
+// back whenever a field loses focus. A no-op everywhere else.
+document.addEventListener("focusout", () => {
+  setTimeout(() => { if (window.scrollY || window.scrollX) window.scrollTo(0, 0); }, 50);
 });
 
 // ── Mobile sidebar toggle ────────────────────────────────
@@ -23,16 +54,42 @@ function closeMobileSidebar() {
   document.getElementById("sidebar-backdrop")?.classList.add("hidden");
 }
 document.getElementById("mobile-nav-toggle")?.addEventListener("click", openMobileSidebar);
+document.getElementById("tabbar-more")?.addEventListener("click", openMobileSidebar);
 document.getElementById("sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
 
-document.getElementById("search-input").addEventListener("input", e => {
-  const q = e.target.value.toLowerCase();
-  const res = document.getElementById("search-results");
-  if (!q) { res.innerHTML = ""; return; }
+// Search matches 4D or name and shows both on each hit: a search by name has
+// to say WHO matched, and a commander's 00xx id means nothing to anyone.
+function searchMatches(q) {
+  q = String(q || "").trim().toLowerCase();
+  if (!q) return [];
   // Search respects the global scope filter so results don't show recruits the
   // user has explicitly scoped out of view.
-  const matches = filteredRoster().filter(r => r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)).slice(0, 5);
-  res.innerHTML = matches.map(r => `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openPerson('${r.id}')">${r.id}</button>`).join("");
+  return filteredRoster().filter(r => r.id.toLowerCase().includes(q) || String(r.name || "").toLowerCase().includes(q)).slice(0, 5);
+}
+// Opening a hit clears the search, so the results are not still sitting under
+// the bar when the card closes.
+function clearSearch() {
+  document.getElementById("search-input").value = "";
+  document.getElementById("search-results").innerHTML = "";
+}
+document.getElementById("search-input").addEventListener("input", e => {
+  const res = document.getElementById("search-results");
+  const matches = searchMatches(e.target.value);
+  res.innerHTML = matches.map(r => {
+    const id = displayId(r.id);
+    return `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openPerson('${r.id}'); clearSearch()">${id ? `<span class="mono">${id}</span> ` : ""}${escapeAttr(displayPersonLabel(r.id))}</button>`;
+  }).join("");
+});
+// Enter (Go on a phone keyboard) opens the top hit, so a typed 4D is one
+// step from the man's card.
+document.getElementById("search-input").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const top = searchMatches(e.target.value)[0];
+  if (!top) return;
+  e.preventDefault();
+  e.target.blur();
+  clearSearch();
+  openPerson(top.id);
 });
 
 // ── Global platoon/section filter ────────────────────────
@@ -162,22 +219,21 @@ function initFilterControls() {
   });
 }
 
-// ── Dashboard "Generate Report" dropdown ─────────────────
-// The menu is re-rendered every dashboard repaint, so we attach the global
-// outside-click listener once at module load. toggle/close fns just flip
-// the `.hidden` class on the menu div.
-function toggleReportMenu(e) {
+// ── Dropdown menus (Generate Report, the Master NR ⋯ menu) ─────
+// Each menu is re-rendered with its view, so the one outside-tap listener is
+// attached at module load. toggle/close just flip `.hidden` on the menu div.
+function toggleDropdown(id, e) {
   e?.stopPropagation();
-  document.getElementById("report-menu")?.classList.toggle("hidden");
+  document.querySelectorAll(".dropdown-menu").forEach(m => { if (m.id !== id) m.classList.add("hidden"); });
+  document.getElementById(id)?.classList.toggle("hidden");
 }
-function closeReportMenu() {
-  document.getElementById("report-menu")?.classList.add("hidden");
+function closeDropdowns() {
+  document.querySelectorAll(".dropdown-menu").forEach(m => m.classList.add("hidden"));
 }
+function toggleReportMenu(e) { toggleDropdown("report-menu", e); }
+function closeReportMenu() { closeDropdowns(); }
 document.addEventListener("click", (e) => {
-  // The dashboard's report menu and the Master NR "⋯" menu.
-  ["report-menu", "nr-menu"].forEach(id => {
-    const menu = document.getElementById(id);
-    if (!menu || menu.classList.contains("hidden")) return;
+  document.querySelectorAll(".dropdown-menu:not(.hidden)").forEach(menu => {
     // Close on outside tap; the wrapper contains both the toggle button and
     // the menu, so checking the wrapper covers both.
     const wrapper = menu.closest(".dropdown-wrapper");
@@ -338,7 +394,6 @@ async function refreshIdentity() {
 // Reach it with #usage in the URL, or call showUsage() from the console.
 function showUsage() {
   STATE.nav = "usage";
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
   render();
   closeMobileSidebar();
 }
