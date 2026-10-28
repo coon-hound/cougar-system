@@ -26,8 +26,8 @@ const PATCH_NOTES = [
     title: "Who came to a conduct",
     intro: "The Detail tab now shows one conduct at a time: who attended and who didn't.",
     items: [
-      { t: "⌕ Find a conduct", d: "Search by conduct name or date. The newest conduct opens first." },
-      { t: "✓ Attended and ✕ Didn't attend", d: "Both lists on one screen, with the reason for each man who missed it. Search a 4D or name to check one man." },
+      { t: "⌕ Find a conduct", d: "The newest conduct opens first. Tap its name to search by conduct or date, or use ‹ › to step to the one before or after." },
+      { t: "✓ Attended and ✕ Didn't attend", d: "Side by side, with the reason for each man who missed it. Search a 4D or name to check one man." },
       { t: "✓ From Attendance", d: "Tap a row on the Attendance tab to see who came to that conduct." }
     ]
   },

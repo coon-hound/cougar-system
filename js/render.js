@@ -1766,12 +1766,16 @@ function openConductAttendance(attendanceId) {
   _cdPersonSearch = "";
   goNav("detail");
 }
-function selectCDSession(key) {
-  _cdSel = key;
-  _cdPersonSearch = "";
-  render();
-  // On a phone the list stacks above the conduct, so bring the conduct up.
-  if (window.matchMedia("(max-width:768px)").matches) document.getElementById("cd-title")?.scrollIntoView({ block: "start" });
+function selectCDSession(key) { _cdSel = key; _cdPersonSearch = ""; render(); }
+// ‹ › step through conducts in list order (newest first): +1 is older.
+function stepCDSession(dir) {
+  const sessions = cdSessions();
+  const next = sessions[sessions.findIndex(s => s.key === _cdSel) + dir];
+  if (next) selectCDSession(next.key);
+}
+function toggleCDPicker(e) {
+  toggleDropdown("cd-picker", e);
+  if (!document.getElementById("cd-picker")?.classList.contains("hidden")) document.getElementById("cd-session-search")?.focus();
 }
 function setCDSessionSearch(v) {
   _cdSessionSearch = String(v || "");
@@ -1787,15 +1791,15 @@ function setCDPersonSearch(v) {
 
 function cdSessionListHtml(sessions) {
   const shown = sessions.filter(s => cdMatches(cdSessionHay(s), _cdSessionSearch));
-  if (!shown.length) return `<div style="color:var(--muted);font-size:12px">${sessions.length ? "No conducts match." : "No conducts logged yet."}</div>`;
+  if (!shown.length) return `<div style="color:var(--muted);font-size:12px;padding:8px 12px">No conducts match.</div>`;
   return shown.map(s => {
     const { absentSet, attended } = cdSessionPeople(s);
     const total = attended.length + absentSet.size;
     const sel = s.key === _cdSel;
-    return `<div class="cd-session" data-key="${escapeAttr(s.key)}" onclick="selectCDSession(this.dataset.key)" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);border:1px solid ${sel ? "var(--accent)" : "transparent"};display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <span style="min-width:0"><span style="font-weight:${sel ? 700 : 600}">${conductName(s.conductId) || "(unknown)"}</span> ${conductScopeBadge(s.scope)}<br><span style="color:var(--muted)">${s.date}${s.time ? ` <span class="mono">${fmtHrs(s.time)}</span>` : ""}</span></span>
+    return `<button type="button" class="cd-session" data-key="${escapeAttr(s.key)}" onclick="selectCDSession(this.dataset.key)" style="display:flex;justify-content:space-between;align-items:center;gap:8px;${sel ? "color:var(--accentLift)" : ""}">
+      <span style="min-width:0"><span style="font-weight:${sel ? 700 : 600}">${conductName(s.conductId) || "(unknown)"}</span> ${conductScopeBadge(s.scope)}<br><span style="color:var(--muted);font-size:11px">${s.date}${s.time ? ` <span class="mono">${fmtHrs(s.time)}</span>` : ""}</span></span>
       <span class="mono" style="font-weight:700;white-space:nowrap;color:${absentSet.size ? "var(--orange)" : "var(--green)"}" title="Attended / total">${attended.length}/${total}</span>
-    </div>`;
+    </button>`;
   }).join("");
 }
 
@@ -1806,21 +1810,28 @@ function cdPeopleHtml(s) {
   const attendedRows = attended.filter(r => cdMatches(`${r.id} ${r.name || ""}`.toLowerCase(), q));
   const absentTable = absentRows.length ? `<div class="table-wrap" id="cd-absent"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
     ${absentRows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(d.d4)}</td><td style="text-align:left">${displayPersonLabel(d.d4)}</td><td>${badge(CD_TYPE_LABEL[d.type] || d.type, cdTypeColor(d.type))}</td><td style="text-align:left;max-width:280px;white-space:normal;font-size:11px">${d.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
-    </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px;margin-bottom:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
+    </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
   const attendedTable = attendedRows.length ? `<div class="table-wrap" id="cd-attended"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th></tr></thead><tbody>
     ${attendedRows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td><td style="text-align:left">${displayPersonLabel(r.id)}</td></tr>`).join("")}
     </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px">${attended.length ? "No one matches." : "No one in scope attended."}</div>`;
   return `
-    <h3 style="margin-top:4px">✕ Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})</span></h3>
-    ${absentTable}
-    <h3 style="margin-top:12px">✓ Attended <span style="color:var(--dim);font-weight:400;font-size:11px">(${attendedRows.length}${q ? ` of ${attended.length}` : ""})</span></h3>
-    ${attendedTable}`;
+    <div class="grid-2" style="align-items:start">
+      <div>
+        <h3>✕ Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})</span></h3>
+        ${absentTable}
+      </div>
+      <div>
+        <h3>✓ Attended <span style="color:var(--dim);font-weight:400;font-size:11px">(${attendedRows.length}${q ? ` of ${attended.length}` : ""})</span></h3>
+        ${attendedTable}
+      </div>
+    </div>`;
 }
 
 function renderConductDetail(el) {
   const sessions = cdSessions();
   if (!sessions.some(s => s.key === _cdSel)) { _cdSel = sessions[0]?.key || ""; _cdPersonSearch = ""; }
-  const s = sessions.find(x => x.key === _cdSel);
+  const idx = sessions.findIndex(x => x.key === _cdSel);
+  const s = sessions[idx];
 
   // "Most conducts missed" spans every session so the ranking stays a stable
   // view of overall absence within the platoon scope.
@@ -1841,14 +1852,29 @@ function renderConductDetail(el) {
     const total = attended.length + absentSet.size;
     const r = pct(attended.length, total);
     const rateColor = r >= 95 ? "var(--green)" : r >= 70 ? "var(--orange)" : "var(--red)";
+    // The conduct's title is the picker: tap it to search every conduct,
+    // or step with ‹ › to the next older / newer one.
     sessionCard = `
       <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <div>
-            <h3 id="cd-title" style="margin:0">${conductName(s.conductId) || "(unknown)"} ${conductScopeBadge(s.scope)}</h3>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.date}${s.time ? ` · <span class="mono">${fmtHrs(s.time)}</span>` : ""}${isFilterActive() ? ` · <span style="color:var(--accent)">${filterLabel()}</span>` : ""}</div>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:6px;flex:1 1 300px;min-width:0">
+          <button class="btn btn-icon" type="button" onclick="stepCDSession(1)" title="Older conduct" aria-label="Older conduct" ${idx < sessions.length - 1 ? "" : "disabled"}>‹</button>
+          <div class="dropdown-wrapper" style="flex:1;min-width:0">
+            <button id="cd-pick" class="topbar-select" type="button" onclick="toggleCDPicker(event)" title="Pick another conduct" style="width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;cursor:pointer;height:auto;padding-top:6px;padding-bottom:6px">
+              <span style="min-width:0">
+                <span id="cd-title" style="font-size:14px;font-weight:700;color:var(--text)">${conductName(s.conductId) || "(unknown)"}</span> ${conductScopeBadge(s.scope)}
+                <span style="display:block;font-size:11px;color:var(--muted)">${s.date}${s.time ? ` · <span class="mono">${fmtHrs(s.time)}</span>` : ""}${isFilterActive() ? ` · <span style="color:var(--accent)">${filterLabel()}</span>` : ""}</span>
+              </span>
+              <span style="color:var(--muted)" aria-hidden="true">▾</span>
+            </button>
+            <div id="cd-picker" class="dropdown-menu hidden" style="left:0;right:0;transform-origin:top left">
+              <input id="cd-session-search" type="search" class="nr-colmenu-q" placeholder="Search conduct or date" autocomplete="off" value="${escapeAttr(_cdSessionSearch)}" oninput="setCDSessionSearch(this.value)">
+              <div id="cd-sessions" class="nr-colmenu-list" style="max-height:320px">${cdSessionListHtml(sessions)}</div>
+            </div>
           </div>
-          ${s.attendanceId ? `<div style="white-space:nowrap"><button class="btn btn-icon" onclick="copyConductChatFormat('${s.attendanceId}')" title="Copy WhatsApp-format parade state message">📋</button> <button class="btn btn-icon" onclick="openLogConductWizard('${s.attendanceId}')" title="Edit conduct (wizard)">✎</button></div>` : ""}
+          <button class="btn btn-icon" type="button" onclick="stepCDSession(-1)" title="Newer conduct" aria-label="Newer conduct" ${idx > 0 ? "" : "disabled"}>›</button>
+          </div>
+          ${s.attendanceId ? `<div style="display:flex;gap:6px;margin-left:auto"><button class="btn btn-icon" type="button" onclick="copyConductChatFormat('${s.attendanceId}')" title="Copy WhatsApp-format parade state message">📋</button><button class="btn btn-icon" type="button" onclick="openLogConductWizard('${s.attendanceId}')" title="Edit conduct (wizard)">✎</button></div>` : ""}
         </div>
         <div class="stats-row">
           <div class="stat"><label>Attended</label><div class="val" style="color:${rateColor}">${attended.length}<span style="font-size:13px;color:var(--muted)">/${total}</span></div><div class="sub">${r}%</div></div>
@@ -1870,24 +1896,15 @@ function renderConductDetail(el) {
         <button class="btn btn-primary" onclick="openConductDetailForm()">+ Log</button>
       </div>
     </div>
-    <div class="grid-2" style="grid-template-columns:1fr 2fr;align-items:start">
-      <div class="card">
-        <h3>Conducts <span style="color:var(--dim);font-weight:400;font-size:11px">(${sessions.length})</span></h3>
-        <input id="cd-session-search" class="topbar-select" style="cursor:text;width:100%;margin-bottom:8px" placeholder="Search conduct or date..." value="${escapeAttr(_cdSessionSearch)}" oninput="setCDSessionSearch(this.value)">
-        <div id="cd-sessions" style="display:flex;flex-direction:column;gap:4px;max-height:420px;overflow-y:auto">${cdSessionListHtml(sessions)}</div>
-      </div>
-      <div>
-        ${sessionCard}
-        <div class="card" style="margin-top:16px">
-          <h3>Most Conducts Missed${isFilterActive() ? ` <span style="color:var(--accent);font-weight:400;font-size:10px">in ${filterLabel()}</span>` : ""}</h3>
-          ${topMissed.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
-            ${topMissed.map(m => `<div onclick="openPerson('${m.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px">
-              <span><span class="mono" style="color:var(--accent);font-weight:700">${m.d4}</span> ${getName(m.d4)}</span>
-              <span class="mono" style="font-weight:700;color:${m.count >= 5 ? "var(--red)" : m.count >= 3 ? "var(--orange)" : "var(--muted)"}">${m.count}</span>
-            </div>`).join("")}
-          </div>` : `<div style="color:var(--muted);font-size:12px">No data yet</div>`}
-        </div>
-      </div>
+    ${sessionCard}
+    <div class="card" style="margin-top:16px">
+      <h3>Most Conducts Missed${isFilterActive() ? ` <span style="color:var(--accent);font-weight:400;font-size:10px">in ${filterLabel()}</span>` : ""}</h3>
+      ${topMissed.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
+        ${topMissed.map(m => `<div onclick="openPerson('${m.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px">
+          <span><span class="mono" style="color:var(--accent);font-weight:700">${m.d4}</span> ${getName(m.d4)}</span>
+          <span class="mono" style="font-weight:700;color:${m.count >= 5 ? "var(--red)" : m.count >= 3 ? "var(--orange)" : "var(--muted)"}">${m.count}</span>
+        </div>`).join("")}
+      </div>` : `<div style="color:var(--muted);font-size:12px">No data yet</div>`}
     </div>`;
 }
 

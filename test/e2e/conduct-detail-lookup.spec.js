@@ -50,12 +50,29 @@ test.describe("Conduct Detail: who attended a conduct", () => {
     await seedSession(page);
     await page.locator('.nav-btn[data-nav="detail"]').click();
 
+    // The conduct's title is the picker; it opens with the search focused.
+    await page.locator("#cd-pick").click();
+    await expect(page.locator("#cd-session-search")).toBeFocused();
     await page.locator("#cd-session-search").fill("orientation");
     const items = page.locator("#cd-sessions .cd-session");
     await expect(items.first()).toContainText("Orientation Run");
     await expect(page.locator("#cd-sessions")).not.toContainText("Route March");
     await items.first().click();
     await expect(page.locator("#cd-title")).toContainText("Orientation Run");
+    await expect(page.locator("#cd-picker")).toBeHidden();
+  });
+
+  test("‹ › step to the older and newer conduct", async ({ page }) => {
+    await seedAndGoto(page);
+    await seedSession(page);
+    await page.locator('.nav-btn[data-nav="detail"]').click();
+
+    await expect(page.locator("#cd-title")).toContainText("Route March");
+    await expect(page.getByRole("button", { name: "Newer conduct" })).toBeDisabled();
+    await page.getByRole("button", { name: "Older conduct" }).click();
+    await expect(page.locator("#content")).toContainText("02 Jul");
+    await page.getByRole("button", { name: "Newer conduct" }).click();
+    await expect(page.locator("#content")).toContainText("28 Oct 2026");
   });
 
   test("tapping an Attendance row opens that conduct", async ({ page }) => {
