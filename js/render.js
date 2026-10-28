@@ -1705,149 +1705,188 @@ function renderAttendance(el) {
       const r = pct(a.participating, a.total);
       const rateColor = r >= 95 ? 'var(--green)' : r >= 70 ? 'var(--orange)' : 'var(--red)';
       const time = fmtHrs(a.time) || '—';
-      return `<tr><td>${a.date}</td><td class="mono" style="color:${a.time ? 'var(--text)' : 'var(--dim)'}">${time}</td><td style="text-align:left">${conductName(a.conductId)}</td><td>${conductScopeBadge(scopeKey(a))}</td><td>${a.total}</td><td>${a.participating}</td><td style="color:${a.px > 0 ? 'var(--orange)' : 'var(--muted)'}">${a.px}</td><td style="color:${a.fallout > 0 ? 'var(--red)' : 'var(--muted)'}">${a.fallout}</td><td style="font-weight:700;color:${rateColor}">${r}%</td><td style="text-align:left;color:${a.remarks ? 'var(--yellow)' : 'var(--muted)'};max-width:200px;white-space:normal;font-size:11px">${a.remarks || ''}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="copyConductChatFormat('${a.id}')" title="Copy WhatsApp-format parade state message">📋</button> <button class="btn btn-icon" onclick="openLogConductWizard('${a.id}')" title="Edit conduct (wizard)">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('attendance', '${a.id}', 'attendance entry')" title="Delete">✕</button></td></tr>`;
+      return `<tr onclick="openConductAttendance('${a.id}')" style="cursor:pointer" title="See who attended"><td>${a.date}</td><td class="mono" style="color:${a.time ? 'var(--text)' : 'var(--dim)'}">${time}</td><td style="text-align:left">${conductName(a.conductId)}</td><td>${conductScopeBadge(scopeKey(a))}</td><td>${a.total}</td><td>${a.participating}</td><td style="color:${a.px > 0 ? 'var(--orange)' : 'var(--muted)'}">${a.px}</td><td style="color:${a.fallout > 0 ? 'var(--red)' : 'var(--muted)'}">${a.fallout}</td><td style="font-weight:700;color:${rateColor}">${r}%</td><td style="text-align:left;color:${a.remarks ? 'var(--yellow)' : 'var(--muted)'};max-width:200px;white-space:normal;font-size:11px">${a.remarks || ''}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); copyConductChatFormat('${a.id}')" title="Copy WhatsApp-format parade state message">📋</button> <button class="btn btn-icon" onclick="event.stopPropagation(); openLogConductWizard('${a.id}')" title="Edit conduct (wizard)">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('attendance', '${a.id}', 'attendance entry')" title="Delete">✕</button></td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="empty-state">No attendance records yet.</div>`}`;
 }
 
 // ── Conduct Detail tab ────────────────────────────────────
-// Filters are module-scope rather than persisted — they reset on reload so a
-// returning user sees the whole picture instead of yesterday's filter state.
-let _detailFilterConduct = "";
-let _detailFilterType = "";
-let _showParticipants = false;
-function setDetailFilterConduct(v) { _detailFilterConduct = v; _showParticipants = false; render(); }
-function setDetailFilterType(v) { _detailFilterType = v; render(); }
-function clearDetailFilters() { _detailFilterConduct = ""; _detailFilterType = ""; _showParticipants = false; render(); }
-function toggleParticipants() { _showParticipants = !_showParticipants; render(); }
+// One conduct at a time: pick a session, see who attended and who didn't.
+// A session is (date, time, conductId, scope) — the same tuple the Log Conduct
+// wizard saves and the chat-format copy reads. Detail rows enumerate the
+// absentees, so the attenders are the session's scoped roster minus those.
+// State is module-scope rather than persisted — it resets on reload.
+let _cdSel = "";
+let _cdSessionSearch = "";
+let _cdPersonSearch = "";
 
-// When a single conduct is selected, derive who participated from
-// `roster - absent` (the user's insight: detail rows enumerate absentees, so
-// the inverse gives us the participants for free, no extra data needed).
-function renderDetailParticipantsSummary(scopedAll) {
-  if (!_detailFilterConduct) return "";
-  const conductRecords = scopedAll.filter(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${scopeKey(d)}` === _detailFilterConduct);
-  const absentSet = new Set(conductRecords.map(d => d.d4));
-  // Participants = the session's scoped roster minus absentees (the detail rows
-  // enumerate absentees, so the inverse gives participants for free). Scope to
-  // the session's own scope so a Platoon 7 conduct doesn't count Platoon 8.
-  const sessionScope = _detailFilterConduct.split("|")[3] || SCOPE_COMPANY;
-  const visible = visibleD4Set();
-  const inScope = conductScopeRoster(sessionScope).filter(r => passesFilter(r.id, visible));
-  const participants = inScope.filter(r => !absentSet.has(r.id));
-  const ct = t => conductRecords.filter(d => d.type === t).length;
-  return `
-    <div class="card" style="padding:10px 14px;margin-bottom:12px;background:var(--surface2)">
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;flex-wrap:wrap;gap:8px">
-        <div>
-          <span style="color:var(--muted)">This conduct →</span>
-          <strong style="color:var(--green)">Participated: ${participants.length}</strong>
-          <span style="color:var(--muted)"> · </span>
-          <strong style="color:var(--red)">Absent: ${conductRecords.length}</strong>
-          <span style="color:var(--muted)"> (Status ${ct("PX")} · RSI ${ct("RSI")} · Fallout ${ct("Fallout")} · ReportSick ${ct("ReportSick")})</span>
-        </div>
-        <button class="btn" onclick="toggleParticipants()">${_showParticipants ? "▾ Hide" : "▸ Show"} participants (${participants.length})</button>
-      </div>
-      ${_showParticipants ? `<div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap">
-        ${participants.length ? participants.map(r => `<button onclick="openPerson('${r.id}')" style="cursor:pointer;font-size:10px;padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--accent);font-family:'JetBrains Mono',monospace;font-weight:700" title="${escapeAttr(r.name)}">${r.id}</button>`).join("") : `<span style="color:var(--muted);font-size:11px">No participants in current scope</span>`}
-      </div>` : ""}
-    </div>`;
-}
+const cdKey = x => `${x.date}|${x.time || ""}|${x.conductId || ""}|${scopeKey(x)}`;
+const CD_TYPE_LABEL = { PX: "Status", RSI: "RSI", Fallout: "Fallout", ReportSick: "Report Sick" };
+const cdTypeColor = t => t === "PX" ? "orange" : t === "RSI" ? "red" : t === "Fallout" ? "purple" : "yellow";
 
-function renderConductDetail(el) {
-  const visible = visibleD4Set();
-  const scopedAll = STATE.conductDetail.filter(d => passesFilter(d.d4, visible));
-  let scoped = scopedAll;
-  if (_detailFilterConduct) scoped = scoped.filter(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${scopeKey(d)}` === _detailFilterConduct);
-  if (_detailFilterType) scoped = scoped.filter(d => d.type === _detailFilterType);
+// Every space-separated word must appear somewhere in the haystack.
+const cdMatches = (hay, q) => String(q || "").toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
 
-  // Unique conduct keys for the dropdown — newest first by parsed date. Scope
-  // is part of the key so a Plt 7 and a Plt 8 run of the same conduct list separately.
-  const conductKeys = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${scopeKey(d)}`))]
-    .filter(Boolean)
-    .sort((a, b) => {
-      const [ad, at] = a.split("|"), [bd, bt] = b.split("|");
-      const ai = displayDateToISO(ad) || ad;
-      const bi = displayDateToISO(bd) || bd;
-      if (ai !== bi) return ai < bi ? 1 : -1;
-      return (at || "") < (bt || "") ? 1 : -1;
-    });
-
-  // Sort the visible records the same way — newest-first feels right when
-  // scanning for "what happened today / yesterday."
-  const rows = [...scoped].sort((a, b) => {
+// Every session the app knows about, newest first: each attendance row, plus
+// any session that only has detail rows (no summary logged).
+function cdSessions() {
+  const byKey = new Map();
+  STATE.attendance.forEach(a => byKey.set(cdKey(a), { key: cdKey(a), date: a.date, time: a.time || "", conductId: a.conductId || "", scope: scopeKey(a), attendanceId: a.id }));
+  STATE.conductDetail.forEach(d => {
+    const k = cdKey(d);
+    if (!byKey.has(k)) byKey.set(k, { key: k, date: d.date, time: d.time || "", conductId: d.conductId || "", scope: scopeKey(d), attendanceId: "" });
+  });
+  return [...byKey.values()].sort((a, b) => {
     const ai = displayDateToISO(a.date) || a.date || "";
     const bi = displayDateToISO(b.date) || b.date || "";
     if (ai !== bi) return ai < bi ? 1 : -1;
-    return (a.time || "") < (b.time || "") ? 1 : -1;
+    return a.time < b.time ? 1 : -1;
   });
+}
 
-  // ReportSick dedupes per (d4, date) — a single recruit who fell out of
-  // multiple conducts on the same day only went to MO once. The other
-  // types remain as row counts (each row = a distinct conduct event).
-  const cnt = t => {
-    const rows = scoped.filter(d => d.type === t);
-    if (t === "ReportSick") return new Set(rows.map(d => `${d.d4}|${d.date}`)).size;
-    return rows.length;
-  };
+// Who attended / didn't for one session, within the global scope filter.
+function cdSessionPeople(s) {
+  const visible = visibleD4Set();
+  const absent = STATE.conductDetail.filter(d => cdKey(d) === s.key && passesFilter(d.d4, visible))
+    .sort((a, b) => a.type < b.type ? -1 : a.type > b.type ? 1 : a.d4 < b.d4 ? -1 : 1);
+  const absentSet = new Set(absent.map(d => d.d4));
+  const attended = conductScopeRoster(s.scope).filter(r => passesFilter(r.id, visible) && !absentSet.has(r.id));
+  return { absent, absentSet, attended };
+}
 
-  // "Most conducts missed" ignores the conduct/type sub-filter so the ranking
-  // remains a stable view of overall absence within the platoon scope.
+function cdSessionHay(s) {
+  return `${s.date} ${s.time} ${fmtHrs(s.time) || ""} ${conductName(s.conductId) || ""} ${conductScopeLabel(s.scope)}`.toLowerCase();
+}
+
+// Jump here from an Attendance row.
+function openConductAttendance(attendanceId) {
+  const a = STATE.attendance.find(x => x.id === attendanceId);
+  if (!a) return;
+  _cdSel = cdKey(a);
+  _cdPersonSearch = "";
+  goNav("detail");
+}
+function selectCDSession(key) {
+  _cdSel = key;
+  _cdPersonSearch = "";
+  render();
+  // On a phone the list stacks above the conduct, so bring the conduct up.
+  if (window.matchMedia("(max-width:768px)").matches) document.getElementById("cd-title")?.scrollIntoView({ block: "start" });
+}
+function setCDSessionSearch(v) {
+  _cdSessionSearch = String(v || "");
+  const list = document.getElementById("cd-sessions");
+  if (list) list.innerHTML = cdSessionListHtml(cdSessions());
+}
+function setCDPersonSearch(v) {
+  _cdPersonSearch = String(v || "");
+  const s = cdSessions().find(x => x.key === _cdSel);
+  const body = document.getElementById("cd-people");
+  if (s && body) body.innerHTML = cdPeopleHtml(s);
+}
+
+function cdSessionListHtml(sessions) {
+  const shown = sessions.filter(s => cdMatches(cdSessionHay(s), _cdSessionSearch));
+  if (!shown.length) return `<div style="color:var(--muted);font-size:12px">${sessions.length ? "No conducts match." : "No conducts logged yet."}</div>`;
+  return shown.map(s => {
+    const { absentSet, attended } = cdSessionPeople(s);
+    const total = attended.length + absentSet.size;
+    const sel = s.key === _cdSel;
+    return `<div class="cd-session" data-key="${escapeAttr(s.key)}" onclick="selectCDSession(this.dataset.key)" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);border:1px solid ${sel ? "var(--accent)" : "transparent"};display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span style="min-width:0"><span style="font-weight:${sel ? 700 : 600}">${conductName(s.conductId) || "(unknown)"}</span> ${conductScopeBadge(s.scope)}<br><span style="color:var(--muted)">${s.date}${s.time ? ` <span class="mono">${fmtHrs(s.time)}</span>` : ""}</span></span>
+      <span class="mono" style="font-weight:700;white-space:nowrap;color:${absentSet.size ? "var(--orange)" : "var(--green)"}" title="Attended / total">${attended.length}/${total}</span>
+    </div>`;
+  }).join("");
+}
+
+function cdPeopleHtml(s) {
+  const { absent, attended } = cdSessionPeople(s);
+  const q = _cdPersonSearch;
+  const absentRows = absent.filter(d => cdMatches(`${d.d4} ${getName(d.d4)} ${CD_TYPE_LABEL[d.type] || d.type} ${d.reason || ""}`.toLowerCase(), q));
+  const attendedRows = attended.filter(r => cdMatches(`${r.id} ${r.name || ""}`.toLowerCase(), q));
+  const absentTable = absentRows.length ? `<div class="table-wrap" id="cd-absent"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
+    ${absentRows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(d.d4)}</td><td style="text-align:left">${displayPersonLabel(d.d4)}</td><td>${badge(CD_TYPE_LABEL[d.type] || d.type, cdTypeColor(d.type))}</td><td style="text-align:left;max-width:280px;white-space:normal;font-size:11px">${d.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
+    </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px;margin-bottom:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
+  const attendedTable = attendedRows.length ? `<div class="table-wrap" id="cd-attended"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th></tr></thead><tbody>
+    ${attendedRows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td><td style="text-align:left">${displayPersonLabel(r.id)}</td></tr>`).join("")}
+    </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px">${attended.length ? "No one matches." : "No one in scope attended."}</div>`;
+  return `
+    <h3 style="margin-top:4px">✕ Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})</span></h3>
+    ${absentTable}
+    <h3 style="margin-top:12px">✓ Attended <span style="color:var(--dim);font-weight:400;font-size:11px">(${attendedRows.length}${q ? ` of ${attended.length}` : ""})</span></h3>
+    ${attendedTable}`;
+}
+
+function renderConductDetail(el) {
+  const sessions = cdSessions();
+  if (!sessions.some(s => s.key === _cdSel)) { _cdSel = sessions[0]?.key || ""; _cdPersonSearch = ""; }
+  const s = sessions.find(x => x.key === _cdSel);
+
+  // "Most conducts missed" spans every session so the ranking stays a stable
+  // view of overall absence within the platoon scope.
+  const visible = visibleD4Set();
   const missed = {};
-  scopedAll.forEach(d => {
-    const k = `${d.date}|${d.time || ""}|${d.conductId || ""}|${scopeKey(d)}`;
-    (missed[d.d4] = missed[d.d4] || new Set()).add(k);
+  STATE.conductDetail.filter(d => passesFilter(d.d4, visible)).forEach(d => {
+    (missed[d.d4] = missed[d.d4] || new Set()).add(cdKey(d));
   });
   const topMissed = Object.entries(missed)
     .map(([d4, set]) => ({ d4, count: set.size }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
-  const typeBadgeColor = t => t === "PX" ? "orange" : t === "RSI" ? "red" : t === "Fallout" ? "purple" : "yellow";
-  const totalConducts = [...new Set(scopedAll.map(d => `${d.date}|${d.time || ""}|${d.conductId || ""}|${scopeKey(d)}`))].length;
-  const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scopedAll.length}/${STATE.conductDetail.length}]</span>` : ` (${STATE.conductDetail.length})`;
+  let sessionCard = `<div class="card empty-state">No conducts logged yet. Log one from the Attendance tab.</div>`;
+  if (s) {
+    const { absent, absentSet, attended } = cdSessionPeople(s);
+    const ct = t => absent.filter(d => d.type === t).length;
+    const total = attended.length + absentSet.size;
+    const r = pct(attended.length, total);
+    const rateColor = r >= 95 ? "var(--green)" : r >= 70 ? "var(--orange)" : "var(--red)";
+    sessionCard = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <div>
+            <h3 id="cd-title" style="margin:0">${conductName(s.conductId) || "(unknown)"} ${conductScopeBadge(s.scope)}</h3>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.date}${s.time ? ` · <span class="mono">${fmtHrs(s.time)}</span>` : ""}${isFilterActive() ? ` · <span style="color:var(--accent)">${filterLabel()}</span>` : ""}</div>
+          </div>
+          ${s.attendanceId ? `<div style="white-space:nowrap"><button class="btn btn-icon" onclick="copyConductChatFormat('${s.attendanceId}')" title="Copy WhatsApp-format parade state message">📋</button> <button class="btn btn-icon" onclick="openLogConductWizard('${s.attendanceId}')" title="Edit conduct (wizard)">✎</button></div>` : ""}
+        </div>
+        <div class="stats-row">
+          <div class="stat"><label>Attended</label><div class="val" style="color:${rateColor}">${attended.length}<span style="font-size:13px;color:var(--muted)">/${total}</span></div><div class="sub">${r}%</div></div>
+          <div class="stat"><label>Status</label><div class="val" style="color:var(--orange)">${ct("PX")}</div></div>
+          <div class="stat"><label>Fallout</label><div class="val" style="color:var(--purple)">${ct("Fallout")}</div></div>
+          <div class="stat"><label>Report Sick</label><div class="val" style="color:var(--yellow)">${ct("ReportSick")}</div></div>
+          ${ct("RSI") ? `<div class="stat"><label>RSI</label><div class="val" style="color:var(--red)">${ct("RSI")}</div></div>` : ""}
+        </div>
+        <input id="cd-person-search" class="topbar-select" style="cursor:text;width:100%;max-width:320px;margin-bottom:12px" placeholder="Search 4D or name in this conduct..." value="${escapeAttr(_cdPersonSearch)}" oninput="setCDPersonSearch(this.value)">
+        <div id="cd-people">${cdPeopleHtml(s)}</div>
+      </div>`;
+  }
 
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 style="font-size:18px;font-weight:700">Conduct Detail${titleSuffix}</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <h2 style="font-size:18px;font-weight:700">Conduct Detail</h2>
       <div style="display:flex;gap:8px">
         <button class="btn btn-success" onclick="pushTab('ConductDetail',STATE.conductDetail)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
         <button class="btn btn-primary" onclick="openConductDetailForm()">+ Log</button>
       </div>
     </div>
-    <div class="stats-row">
-      <div class="stat"><label>Status (pre-existing)</label><div class="val" style="color:var(--orange)">${cnt("PX")}</div></div>
-      <div class="stat"><label>RSI (1st parade)</label><div class="val" style="color:var(--red)">${cnt("RSI")}</div></div>
-      <div class="stat"><label>Fallout (mid-conduct)</label><div class="val" style="color:var(--purple)">${cnt("Fallout")}</div></div>
-      <div class="stat"><label>Reported Sick (mid-day)</label><div class="val" style="color:var(--yellow)">${cnt("ReportSick")}</div></div>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-      <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Filter:</span>
-      <select onchange="setDetailFilterConduct(this.value)" class="topbar-select" style="min-width:260px">
-        <option value="">All conducts (${totalConducts})</option>
-        ${conductKeys.map(k => { const [dt, tm, cid, prog] = k.split("|"); return `<option value="${escapeAttr(k)}" ${k === _detailFilterConduct ? "selected" : ""}>${dt}${tm ? " " + fmtHrs(tm) : ""} — ${conductName(cid) || "(unknown)"} (${conductScopeLabel(prog)})</option>`; }).join("")}
-      </select>
-      <select onchange="setDetailFilterType(this.value)" class="topbar-select">
-        <option value="">All types</option>
-        ${[["PX","Status"],["RSI","RSI"],["Fallout","Fallout"],["ReportSick","Report Sick"]].map(([val,lab]) => `<option value="${val}" ${val === _detailFilterType ? "selected" : ""}>${lab}</option>`).join("")}
-      </select>
-      ${(_detailFilterConduct || _detailFilterType) ? `<button class="btn" onclick="clearDetailFilters()">Reset</button>` : ""}
-    </div>
-    ${renderDetailParticipantsSummary(scopedAll)}
-    <div class="grid-2" style="grid-template-columns:2fr 1fr;align-items:start">
-      <div>
-        ${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Time</th><th style="text-align:left">Conduct</th><th>Program</th><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
-        ${rows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td>${d.date || ""}</td><td class="mono">${fmtHrs(d.time) || "—"}</td><td style="text-align:left">${conductName(d.conductId)}</td><td>${conductScopeBadge(scopeKey(d))}</td><td class="mono" style="font-weight:700;color:var(--accent)">${d.d4}</td><td style="text-align:left">${getName(d.d4)}</td><td>${badge(d.type, typeBadgeColor(d.type))}</td><td style="text-align:left;max-width:280px;white-space:normal;font-size:11px">${d.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
-        </tbody></table></div>` : `<div class="empty-state">${STATE.conductDetail.length ? "No records match current filter." : "No conduct detail records yet. Tap + Log to add one."}</div>`}
-      </div>
+    <div class="grid-2" style="grid-template-columns:1fr 2fr;align-items:start">
       <div class="card">
-        <h3>Most Conducts Missed${isFilterActive() ? ` <span style="color:var(--accent);font-weight:400;font-size:10px">in ${filterLabel()}</span>` : ""}</h3>
-        ${topMissed.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
-          ${topMissed.map(m => `<div onclick="openPerson('${m.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px">
-            <span><span class="mono" style="color:var(--accent);font-weight:700">${m.d4}</span> ${getName(m.d4)}</span>
-            <span class="mono" style="font-weight:700;color:${m.count >= 5 ? "var(--red)" : m.count >= 3 ? "var(--orange)" : "var(--muted)"}">${m.count}</span>
-          </div>`).join("")}
-        </div>` : `<div style="color:var(--muted);font-size:12px">No data yet</div>`}
+        <h3>Conducts <span style="color:var(--dim);font-weight:400;font-size:11px">(${sessions.length})</span></h3>
+        <input id="cd-session-search" class="topbar-select" style="cursor:text;width:100%;margin-bottom:8px" placeholder="Search conduct or date..." value="${escapeAttr(_cdSessionSearch)}" oninput="setCDSessionSearch(this.value)">
+        <div id="cd-sessions" style="display:flex;flex-direction:column;gap:4px;max-height:420px;overflow-y:auto">${cdSessionListHtml(sessions)}</div>
+      </div>
+      <div>
+        ${sessionCard}
+        <div class="card" style="margin-top:16px">
+          <h3>Most Conducts Missed${isFilterActive() ? ` <span style="color:var(--accent);font-weight:400;font-size:10px">in ${filterLabel()}</span>` : ""}</h3>
+          ${topMissed.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
+            ${topMissed.map(m => `<div onclick="openPerson('${m.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px">
+              <span><span class="mono" style="color:var(--accent);font-weight:700">${m.d4}</span> ${getName(m.d4)}</span>
+              <span class="mono" style="font-weight:700;color:${m.count >= 5 ? "var(--red)" : m.count >= 3 ? "var(--orange)" : "var(--muted)"}">${m.count}</span>
+            </div>`).join("")}
+          </div>` : `<div style="color:var(--muted);font-size:12px">No data yet</div>`}
+        </div>
       </div>
     </div>`;
 }

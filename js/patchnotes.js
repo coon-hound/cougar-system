@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 168;
+const APP_VERSION = 169;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,17 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 169,
+    date: "28 Oct 2026",
+    title: "Who came to a conduct",
+    intro: "The Detail tab now shows one conduct at a time: who attended and who didn't.",
+    items: [
+      { t: "⌕ Find a conduct", d: "Search by conduct name or date. The newest conduct opens first." },
+      { t: "✓ Attended and ✕ Didn't attend", d: "Both lists on one screen, with the reason for each man who missed it. Search a 4D or name to check one man." },
+      { t: "✓ From Attendance", d: "Tap a row on the Attendance tab to see who came to that conduct." }
+    ]
+  },
   {
     v: 168,
     date: "28 Oct 2026",
