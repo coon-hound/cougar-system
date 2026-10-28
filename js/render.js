@@ -1846,15 +1846,18 @@ function cdPeopleHtml(s) {
     </div>`).join("")}
   </div>` : `<div style="color:var(--muted);font-size:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
   // Attenders as name chips by platoon (the Polar-gaps chip), with each
-  // platoon's turnout, so 100+ names stay one screen of reading.
+  // platoon's turnout, so 100+ names stay one screen of reading. Each platoon
+  // folds (the Compare collapsible): open on desktop, shut on a phone where
+  // 44px chips would run to thousands of pixels, and open while searching.
   const pltTotal = new Map(cdByPlatoon(inScope).map(([p, rows]) => [p, rows.length]));
-  const attendedList = attendedRows.length ? `<div id="cd-attended" style="display:flex;flex-direction:column;gap:10px">
-    ${cdByPlatoon(attendedRows).map(([p, rows]) => `<div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${cdPltLabel(p)} · ${rows.length}${q ? "" : ` of ${pltTotal.get(p) || rows.length}`}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">
+  const pltOpen = q || !window.matchMedia("(max-width:768px)").matches;
+  const attendedList = attendedRows.length ? `<div id="cd-attended">
+    ${cdByPlatoon(attendedRows).map(([p, rows], i) => `<details class="cmp-details"${pltOpen ? " open" : ""}${i ? "" : ' style="margin-top:0"'}>
+      <summary>${cdPltLabel(p)} · ${rows.length}${q ? "" : ` of ${pltTotal.get(p) || rows.length}`}<span style="margin-left:auto" aria-hidden="true">▾</span></summary>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;padding:10px">
         ${rows.map(r => `<button class="btn" style="font-size:11px;padding:3px 7px" onclick="openPerson('${r.id}')"><span class="mono" style="color:var(--accent);font-weight:700">${displayId(r.id)}</span> ${displayPersonLabel(r.id)}</button>`).join("")}
       </div>
-    </div>`).join("")}
+    </details>`).join("")}
   </div>` : `<div style="color:var(--muted);font-size:12px">${attended.length ? "No one matches." : "No one in scope attended."}</div>`;
   return `
     <div class="grid-2" style="align-items:start">
@@ -1993,7 +1996,7 @@ function renderConductDetail(el) {
     sessionCard = `
       <div class="card">
         <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-          <div style="display:flex;align-items:center;gap:6px;flex:1 1 300px;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex:1 1 300px;max-width:640px;min-width:0">
           <button class="btn btn-icon" type="button" onclick="stepCDSession(1)" title="Older conduct" aria-label="Older conduct" ${idx < sessions.length - 1 ? "" : "disabled"}>‹</button>
           <div class="dropdown-wrapper" style="flex:1;min-width:0">
             <button id="cd-pick" class="topbar-select" type="button" onclick="toggleCDPicker(event)" title="Pick another conduct" style="width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;cursor:pointer;height:auto;padding-top:6px;padding-bottom:6px">
@@ -2040,7 +2043,7 @@ function renderConductDetail(el) {
     ${sessionCard}
     <div class="card" style="margin-top:16px">
       <h3>Most Conducts Missed${isFilterActive() ? ` <span style="color:var(--accent);font-weight:400;font-size:10px">in ${filterLabel()}</span>` : ""}</h3>
-      ${topMissed.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
+      ${topMissed.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 12px">
         ${topMissed.map(m => `<div onclick="openPerson('${m.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px">
           <span><span class="mono" style="color:var(--accent);font-weight:700">${m.d4}</span> ${getName(m.d4)}</span>
           <span class="mono" style="font-weight:700;color:${m.count >= 5 ? "var(--red)" : m.count >= 3 ? "var(--orange)" : "var(--muted)"}">${m.count}</span>

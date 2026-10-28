@@ -106,6 +106,18 @@ test.describe("Conduct Detail: who attended a conduct", () => {
     await expect(page.locator("#cd-attended")).toContainText("Platoon 2 · 3 of 3");
   });
 
+  test("on a phone the platoon groups start folded and a search opens them", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedAndGoto(page);
+    await seedSession(page);
+    await page.evaluate(() => { STATE.nav = "detail"; render(); });
+    const groups = page.locator("#cd-attended details");
+    await expect(groups.first()).not.toHaveAttribute("open", "");
+    await expect(page.locator("#cd-attended")).toContainText("Platoon 2 · 3 of 3");
+    await page.locator("#cd-person-search").fill("bravo");
+    await expect(page.locator("#cd-attended details").first()).toHaveAttribute("open", "");
+  });
+
   test("the copied name list carries both lists, absentees with reasons", async ({ page }) => {
     await seedAndGoto(page);
     await seedSession(page);
