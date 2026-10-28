@@ -1862,7 +1862,7 @@ function cdPeopleHtml(s) {
   return `
     <div class="grid-2" style="align-items:start">
       <div>
-        <h3>Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})${breakdown ? ` · ${breakdown}` : ""}</span></h3>
+        <h3>Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q && absent.length ? ` of ${absent.length}` : ""})${breakdown ? ` · ${breakdown}` : ""}</span></h3>
         ${absentList}
       </div>
       <div>
@@ -1985,7 +1985,7 @@ function renderConductDetail(el) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
-  let sessionCard = `<div class="card empty-state">No conducts logged yet. Log one from the Attendance tab.</div>`;
+  let sessionCard = `<div class="card empty-state"><p style="margin-bottom:10px">No conducts logged yet.</p><button class="btn btn-primary" onclick="openLogConductWizard()">+ Log Conduct</button></div>`;
   if (s) {
     const { absentSet, attended } = cdSessionPeople(s);
     const total = attended.length + absentSet.size;

@@ -106,6 +106,14 @@ test.describe("Conduct Detail: who attended a conduct", () => {
     await expect(page.locator("#cd-attended")).toContainText("Platoon 2 · 3 of 3");
   });
 
+  test("with no conducts logged, the first action is right there", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => { STATE.attendance = []; STATE.conductDetail = []; STATE.nav = "detail"; render(); });
+    await expect(page.locator("#content")).toContainText("No conducts logged yet.");
+    await page.locator("#content").getByRole("button", { name: "+ Log Conduct" }).click();
+    await expect(page.locator("#modal-overlay")).toBeVisible();
+  });
+
   test("on a phone the platoon groups start folded and a search opens them", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedAndGoto(page);
