@@ -174,13 +174,25 @@ function closeReportMenu() {
   document.getElementById("report-menu")?.classList.add("hidden");
 }
 document.addEventListener("click", (e) => {
-  const menu = document.getElementById("report-menu");
-  if (!menu || menu.classList.contains("hidden")) return;
-  // Close on outside tap; the wrapper contains both the toggle button and
-  // the menu, so checking the wrapper covers both.
-  const wrapper = menu.closest(".dropdown-wrapper");
-  if (wrapper && !wrapper.contains(e.target)) menu.classList.add("hidden");
+  // The dashboard's report menu and the Master NR "⋯" menu.
+  ["report-menu", "nr-menu"].forEach(id => {
+    const menu = document.getElementById(id);
+    if (!menu || menu.classList.contains("hidden")) return;
+    // Close on outside tap; the wrapper contains both the toggle button and
+    // the menu, so checking the wrapper covers both.
+    const wrapper = menu.closest(".dropdown-wrapper");
+    if (wrapper && !wrapper.contains(e.target)) menu.classList.add("hidden");
+  });
 });
+
+// Master NR column menu (js/render.js): an outside tap or Escape closes it.
+// A tap on a heading is left to the heading, which toggles its own menu.
+document.addEventListener("click", (e) => {
+  const menu = nrMenuEl();
+  if (!menu || menu.contains(e.target) || e.target.closest?.("[data-nr-th]")) return;
+  closeNRColMenu();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && nrMenuEl()) closeNRColMenu(); });
 
 // Redeems ?token=… from the URL if present. Returns true if an attempt was
 // made (regardless of success); the URL param is scrubbed either way so a

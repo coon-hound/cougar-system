@@ -1286,84 +1286,376 @@ function dashSecAppointments(visible, todayIso) {
 }
 
 
-function renderRoster(el) {
-  const rsiCount = {};
-  STATE.medical.forEach(m => { rsiCount[m.d4] = (rsiCount[m.d4] || 0) + 1; });
-  // Default order: highest rank first, lowest at the bottom, with the 4D (the
-  // order the roster arrives in) as the tie-break so two 3SGs stay stable.
-  // sortByRank copies, so STATE.roster itself is never reordered.
-  // The mounted filter is troopers only; "both" counts under either side.
+// ── Master NR (the Roster view) ───────────────────────────
+// A configurable nominal roll over js/nr-columns.js: preset, columns, quick
+// chips, per-column filters and a header-tap sort. The view state lives per
+// device in localStorage (NR.load/NR.save); the search box is session-only,
+// like the mount picker. The Default preset is the Roster as it always was.
+let _nrSearch = "";
+const nrState = () => NR.load();
+function nrSet(s) { NR.save(s); render(); }
+
+// Scope first (topbar platoon/section/role/group, then the mount picker), in
+// the senior-first order every roster list uses. sortByRank copies, so
+// STATE.roster itself is never reordered. "both" counts under either side.
+function nrScoped() {
   const mf = STATE.rosterMount;
-  const scoped = sortByRank(filteredRoster())
+  return sortByRank(filteredRoster())
     .filter(r => !mf || mountOf(r) === mf || mountOf(r) === "both");
-  const rosterToday = todayISO();
-  // Camp column reads the SHARED out-of-camp definition (outOfCampMap) so it can
-  // never disagree with the dashboard / parade strength — medical and leave count
-  // as out here, not just manual book-outs. Colours/labels mirror the dashboard
-  // "Currently Out of Camp" panel.
-  const campOutMap = outOfCampMap(rosterToday);
-  // Token names (see dashSecOutOfCamp) so the badge wash tracks the palette.
-  const CAMP_COLOR = { medical: "--red", leave: "--purple", bookedout: "--orange" };
-  const CAMP_WHY = { medical: "Medical", leave: "Leave", bookedout: "Booked out" };
-  // Status column = the recruit's CURRENTLY-active medical status(es), derived
-  // from the medical layer (same source as the dashboard) rather than the stale
-  // roster `status` field. No active status → ACTIVE.
-  const effByD4 = {};
-  currentMedicalEffectiveAll(rosterToday).forEach(e => { effByD4[e.d4] = e.statuses; });
+}
+
+function renderRoster(el) {
+  const s = nrState();
+  const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${filteredRoster().length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
+  const opt = (v, l, sel) => `<option value="${escapeAttr(v)}"${sel ? " selected" : ""}>${escapeHtml(l)}</option>`;
+  const modified = NR.isModified(s);
+  const presetOpts = NR.PRESETS.map(p => opt(p.id, p.label, !modified && s.preset === p.id)).join("")
+    + s.custom.map(p => opt(p.id, p.label, !modified && s.preset === p.id)).join("")
+    + (modified ? opt("", "Custom columns", true) : "");
   // Push/Export operate on the FULL roster — scoping is a view concern; we
   // don't want the user to silently overwrite the sheet with only their slice.
-  const titleSuffix = isFilterActive() ? ` <span style="color:var(--accent);font-size:13px">[${filterLabel()}: ${scoped.length}/${STATE.roster.length}]</span>` : ` (${STATE.roster.length})`;
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="font-size:18px;font-weight:700">Master Roster${titleSuffix}</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver, from each man's role">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <h2 style="font-size:18px;font-weight:700">Master NR${titleSuffix}</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="nr-preset" class="topbar-select${s.preset !== "default" || modified ? " active" : ""}" onchange="setNRPreset(this.value)" title="Saved column layouts">${presetOpts}</select>
+        <button class="btn" onclick="openNRColumns()" title="Choose which columns to show">+ Columns</button>
+        <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver / Bronco Operator, from each man's role">
           ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
         </select>
-        <button class="btn" onclick="openCommanderForm()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
-        <button class="btn" onclick="openGroupsForm()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
-        <button class="btn" onclick="exportCSV(STATE.roster,'roster.csv')">Export CSV</button>
-        <button class="btn btn-success" onclick="pushTab('Roster',STATE.roster)" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
+        <div class="dropdown-wrapper">
+          <button id="nr-more-btn" class="btn" onclick="toggleNRMenu(event)" aria-label="More roster actions" title="More">⋯</button>
+          <div id="nr-menu" class="dropdown-menu hidden">
+            <button type="button" onclick="exportNRView(); closeNRMenu()">Export view (CSV)</button>
+            <button type="button" onclick="copyNRView(); closeNRMenu()">Copy view</button>
+            <button type="button" onclick="exportCSV(STATE.roster,'roster.csv'); closeNRMenu()" title="Every field of every man, ignoring the view">Export full roster (CSV)</button>
+            <button type="button" onclick="pushTab('Roster',STATE.roster); closeNRMenu()" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
+            <button type="button" onclick="openCommanderForm(); closeNRMenu()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
+            <button type="button" onclick="openGroupsForm(); closeNRMenu()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
+          </div>
+        </div>
       </div>
     </div>
-    ${scoped.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Role</th><th>Status</th><th>Camp</th><th>BMI</th><th>RSIs</th></tr></thead><tbody>
-    ${scoped.map(r => {
-      const bmi = calcBMI(r);
-      const isCmd = r.role === "Commander";
-      const nameCell = isCmd ? `${r.rank ? r.rank + " " : ""}${r.name}` : r.name;
-      const idCell = isCmd ? "" : r.id;
-      const roleCell = isCmd ? `<span class="badge badge-purple">Commander</span>` : `${r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`}<div style="margin-top:2px">${mountBadge(r)}</div>`;
-      // Book Out / Book In toggle reflecting the shared booked-out flag.
-      const effStatuses = effByD4[r.id];
-      const statusCell = (effStatuses && effStatuses.length)
-        ? effStatuses.map(s => `<div style="padding:2px 0">${medTagBadge(s.tag)}</div>`).join("")
-        : statusBadge("Active");
-      // CAMP cell = effective status (why they're out, or "In camp") + a state-
-      // specific lever: in camp → Book out (unified modal, today or a range);
-      // booked out → Book in (plain undo); out via MC/leave record → Book in
-      // anyway (campIn override, self-confirms); manual book-in active → Undo
-      // book-in. The badge reads outOfCampMap, so it can never disagree with
-      // the dashboard.
-      const outInfo = campOutMap.get(r.id);
-      const forcedIn = !outInfo && isForcedIn(r, rosterToday) && derivedCampOut(r.id, rosterToday);
-      // The "back" date rides along with the badge — it spans chained records,
-      // so an extended MC can't be read as ending at the first record.
-      const campBadge = outInfo
-        ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:color-mix(in srgb, var(${CAMP_COLOR[outInfo.kind] || "--muted"}) 13%, transparent);color:var(${CAMP_COLOR[outInfo.kind] || "--muted"})" title="Out of camp — ${escapeAttr(outInfo.reason || "")}${outInfo.back ? ` (back ${isoToDisplayDate(outInfo.back)})` : ""}">Out · ${CAMP_WHY[outInfo.kind] || outInfo.kind}</span>${backLine(outInfo)}`
-        : forcedIn
-          ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(var(--tealRGB),.13);color:var(--teal)" title="Manually kept in camp today — would be out: ${escapeAttr(forcedIn.reason || "")}. Resets tomorrow.">In camp · manual</span>`
-          : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(var(--greenRGB),.09);color:var(--green)">In camp</span>`;
-      const campToggle = outInfo
-        ? (outInfo.kind === "bookedout"
-          ? `<button class="btn btn-icon btn-success" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); undoBookOut('${r.id}')" title="Removes today's book-out">↩ Book in</button>`
-          : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px;color:var(--teal)" onclick="event.stopPropagation(); markPresentToday('${r.id}')" title="Count as present today despite the ${outInfo.kind} record (resets tomorrow)">✓ Book in anyway</button>`)
-        : forcedIn
-          ? `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); clearPresentOverride('${r.id}')" title="Remove the manual book-in; they return to their out status">✕ Undo book-in</button>`
-          : `<button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation(); openBookOutForm({ d4: '${r.id}' })" title="Book out of camp for today or a date range">🚪 Book out</button>`;
-      const campCell = `<div style="display:inline-flex;flex-direction:column;gap:3px;align-items:center">${campBadge}${campToggle}</div>`;
-      return `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${idCell}</td><td style="text-align:left">${nameCell}</td><td>${roleCell}</td><td>${statusCell}</td><td style="white-space:nowrap">${campCell}</td><td style="font-weight:700;color:${bmiColor(bmi)}">${isCmd ? '—' : (bmi ?? '—')}</td><td style="color:${(rsiCount[r.id] || 0) > 1 ? 'var(--red)' : 'var(--muted)'}">${rsiCount[r.id] || 0}</td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : `<div class="empty-state">${STATE.roster.length ? `No ${mf ? MOUNT_LABEL[mf].toLowerCase() + " " : ""}personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`}`;
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <input id="nr-search" class="topbar-select" style="cursor:text;min-width:0;flex:1 1 160px;max-width:260px" placeholder="Search this view..." value="${escapeAttr(_nrSearch)}" oninput="setNRSearch(this.value)">
+      ${NR.CHIPS.map(c => `<button type="button" class="lc-wiz-filter-chip${s.chips.includes(c.id) ? " active" : ""}" data-nr-chip="${c.id}" onclick="toggleNRChip('${c.id}')">${c.label}</button>`).join("")}
+    </div>
+    <div id="nr-body">${nrBodyHtml(s)}</div>`;
+}
+
+// Summary line + table. Re-rendered on its own while typing in the search box
+// so the input keeps focus.
+function nrBodyHtml(s) {
+  s = s || nrState();
+  const mf = STATE.rosterMount;
+  const scoped = nrScoped();
+  if (!scoped.length) {
+    return `<div class="empty-state">${STATE.roster.length ? `No ${mf ? MOUNT_LABEL[mf].toLowerCase() + " " : ""}personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`;
+  }
+  const ctx = NR.makeCtx(todayISO());
+  const cols = NR.visibleCols(s);
+  const rows = NR.apply(scoped, s, ctx, _nrSearch);
+  const out = rows.filter(r => ctx.outMap.has(r.id)).length;
+  const narrowed = s.chips.length || NR.activeFilterCount(s) || _nrSearch.trim();
+  const summary = `<div id="nr-summary" style="font-size:11px;color:var(--muted);margin-bottom:8px">
+    <strong style="color:var(--text)">${rows.length}</strong> shown of ${scoped.length} · in camp <strong style="color:var(--teal)">${rows.length - out}</strong> · out <strong style="color:${out ? "var(--orange)" : "var(--dim)"}">${out}</strong>
+    ${narrowed ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px;margin-left:6px" onclick="clearNRFilters()">✕ Clear filters</button>` : ` <span style="color:var(--dim)">· tap a column heading to sort or filter</span>`}
+  </div>`;
+  if (!rows.length) return summary + `<div class="empty-state">No personnel match these filters.</div>`;
+  // Every heading is a spreadsheet-style menu (sort, filter by value, hide).
+  // The ▾ is always there so it reads as tappable; it turns accent-coloured
+  // while that column is sorted, and gains a funnel while it is filtered, like
+  // a sheet's filter button.
+  const marker = c => {
+    const sorted = s.sort && s.sort.id === c.id;
+    const filtered = NR.filterActive(s.filters[c.id]);
+    const sym = sorted ? (s.sort.dir === "asc" ? "▲" : "▼") : "▾";
+    // An inline funnel rather than a glyph: phone fonts do not all carry one.
+    const funnel = filtered ? `<svg class="nr-th-funnel" viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 1h9L6 5.2V9L4 8V5.2z" fill="currentColor"/></svg>` : "";
+    return ` <span class="nr-th-ico${sorted || filtered ? " on" : ""}"${filtered ? ' data-filtered="1"' : ""} aria-hidden="true">${funnel}${sym}</span>`;
+  };
+  const thAttr = c => {
+    const style = c.th || "";
+    return `${c.sticky ? ' class="nr-sticky"' : ""}${style ? ` style="${style};cursor:pointer"` : ' style="cursor:pointer"'}`;
+  };
+  const head = cols.map(c => `<th${thAttr(c)} data-nr-th="${c.id}" onclick="openNRColMenu('${c.id}', this)" title="Sort, filter or hide ${escapeAttr(c.label)}">${escapeHtml(c.label)}${marker(c)}</th>`).join("");
+  const body = rows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer">${cols.map(c => {
+    const cls = [c.tdClass, c.sticky ? "nr-sticky" : ""].filter(Boolean).join(" ");
+    const st = NR.tdStyleOf(c, r, ctx);
+    return `<td${cls ? ` class="${cls}"` : ""}${st ? ` style="${st}"` : ""}>${NR.cellOf(c, r, ctx)}</td>`;
+  }).join("")}</tr>`).join("");
+  return summary + `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// The rows and columns the screen is showing right now, for export / copy.
+function nrCurrentView() {
+  const s = nrState();
+  const ctx = NR.makeCtx(todayISO());
+  const cols = NR.visibleCols(s);
+  return { s, ctx, cols, rows: NR.apply(nrScoped(), s, ctx, _nrSearch) };
+}
+function nrPresetLabel(s) {
+  if (NR.isModified(s)) return "Custom columns";
+  const p = NR.presetById(s.preset, s.custom);
+  return p ? p.label : "Default";
+}
+
+function setNRPreset(id) {
+  const s = nrState();
+  if (!id || !NR.presetById(id, s.custom)) return;
+  // Preset id only (built-in ids are fixed words; custom ones are recorded as
+  // "custom" so a name a person typed never reaches the usage table).
+  try {
+    if (typeof TELEMETRY !== "undefined" && TELEMETRY._record) {
+      TELEMETRY._record({ k: "click", n: "nr_preset:" + (/^u/.test(id) ? "custom" : id) });
+    }
+  } catch (e) { /* telemetry must never break the view */ }
+  nrSet(NR.applyPreset(s, id));
+}
+function toggleNRChip(id) { nrSet(NR.toggleChip(nrState(), id)); }
+// ── Column menu (the spreadsheet filter) ────────────────
+// Tap a heading: sort A-Z / Z-A, tick the values to keep (with a search box
+// and (Select all), exactly like a Sheets / Excel filter), or hide the column.
+// Ticks apply as you go - there is no OK to forget. The menu lives on <body>,
+// outside #content, so redrawing the table under it does not close it.
+let _nrMenuCol = "";
+
+function nrMenuEl() { return document.getElementById("nr-colmenu"); }
+function closeNRColMenu() {
+  nrMenuEl()?.remove();
+  _nrMenuCol = "";
+}
+// The values a column offers, counted over the rows every OTHER filter (and
+// the search box) leaves - a sheet lists what is visible, not what exists.
+function nrMenuValues(id) {
+  const s = nrState();
+  const c = NR.COL[id];
+  const ctx = NR.makeCtx(todayISO());
+  const others = Object.assign({}, s, { filters: Object.assign({}, s.filters) });
+  delete others.filters[id];
+  const counts = new Map();
+  NR.apply(nrScoped(), others, ctx, _nrSearch).forEach(r =>
+    NR.filterVals(c, r, ctx).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
+  const f = s.filters[id];
+  if (f && Array.isArray(f.in)) f.in.forEach(v => { if (!counts.has(v)) counts.set(v, 0); });
+  return [...counts.keys()]
+    .sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }))
+    .map(v => ({ v, n: counts.get(v) }));
+}
+function openNRColMenu(id, th) {
+  const c = NR.COL[id];
+  if (!c) return;
+  if (_nrMenuCol === id && nrMenuEl()) { closeNRColMenu(); return; }
+  closeNRColMenu();
+  _nrMenuCol = id;
+  const s = nrState();
+  const f = s.filters[id];
+  const keep = f && Array.isArray(f.in) ? new Set(f.in) : null;
+  const vals = nrMenuValues(id);
+  const words = c.type === "number" ? ["Smallest to largest", "Largest to smallest"]
+    : c.type === "date" ? ["Oldest to newest", "Newest to oldest"] : ["Sort A → Z", "Sort Z → A"];
+  const sortBtn = (dir, label) => {
+    const on = s.sort && s.sort.id === id && s.sort.dir === dir;
+    return `<button type="button" data-nr-sort="${dir}" onclick="nrMenuSort('${dir}')"${on ? ' style="color:var(--accentLift);font-weight:700"' : ""}>${dir === "asc" ? "↑" : "↓"} ${label}${on ? " ✓" : ""}</button>`;
+  };
+  const shown = NR.visibleCols(s);
+  const menu = document.createElement("div");
+  menu.id = "nr-colmenu";
+  menu.className = "dropdown-menu nr-colmenu";
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", c.label + " column");
+  menu.innerHTML = `
+    <div class="nr-colmenu-title">${escapeHtml(c.label)}</div>
+    ${sortBtn("asc", words[0])}${sortBtn("desc", words[1])}
+    <div class="nr-colmenu-sep"></div>
+    <div class="nr-colmenu-sub">Filter by value</div>
+    <input id="nr-colmenu-q" type="search" class="nr-colmenu-q" placeholder="Search values" autocomplete="off" oninput="nrMenuSearch(this.value)">
+    <div id="nr-colmenu-list" class="nr-colmenu-list">
+      <label class="nr-colmenu-row nr-colmenu-all"><input type="checkbox" id="nr-colmenu-all" onchange="nrMenuSelectAll(this.checked)"> (Select all)</label>
+      ${vals.map(({ v, n }) => `<label class="nr-colmenu-row" data-v="${escapeAttr(v.toLowerCase())}"><input type="checkbox" data-nr-val="${escapeAttr(v)}"${!keep || keep.has(v) ? " checked" : ""} onchange="nrMenuTick()"> <span class="nr-colmenu-v">${v === "" ? '<span style="color:var(--dim)">(blank)</span>' : escapeHtml(v)}</span><span class="nr-colmenu-n">${n}</span></label>`).join("")}
+    </div>
+    <div class="nr-colmenu-sep"></div>
+    <div class="nr-colmenu-foot">
+      ${shown.length > 1 ? `<button type="button" onclick="nrMenuHide()">Hide column</button>` : "<span></span>"}
+      <button type="button" class="nr-colmenu-done" onclick="closeNRColMenu()">Done</button>
+    </div>`;
+  document.body.appendChild(menu);
+  nrSyncSelectAll();
+  // Anchor under the heading, kept on screen. Fixed, so a sideways-scrolled
+  // table or a short phone screen cannot clip it.
+  const r = th.getBoundingClientRect();
+  const w = Math.min(280, window.innerWidth - 16);
+  menu.style.width = w + "px";
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+  const top = Math.min(r.bottom + 4, window.innerHeight - 220);
+  menu.style.top = Math.max(8, top) + "px";
+  menu.style.maxHeight = (window.innerHeight - Math.max(8, top) - 8) + "px";
+}
+function nrMenuBoxes() { return [...document.querySelectorAll("#nr-colmenu-list input[data-nr-val]")]; }
+function nrSyncSelectAll() {
+  const all = document.getElementById("nr-colmenu-all");
+  if (!all) return;
+  const vis = nrMenuBoxes().filter(b => b.closest("label").style.display !== "none");
+  const on = vis.filter(b => b.checked).length;
+  all.checked = vis.length > 0 && on === vis.length;
+  all.indeterminate = on > 0 && on < vis.length;
+}
+function nrMenuSearch(q) {
+  const needle = String(q || "").trim().toLowerCase();
+  document.querySelectorAll("#nr-colmenu-list label[data-v]").forEach(l => {
+    l.style.display = !needle || l.dataset.v.includes(needle) ? "" : "none";
+  });
+  nrSyncSelectAll();
+}
+// (Select all) acts on the values the search leaves, like a sheet: search
+// "gun", untick all, and only the matches change.
+function nrMenuSelectAll(on) {
+  nrMenuBoxes().filter(b => b.closest("label").style.display !== "none").forEach(b => { b.checked = on; });
+  nrMenuTick();
+}
+function nrMenuTick() {
+  const id = _nrMenuCol;
+  if (!NR.COL[id]) return;
+  const boxes = nrMenuBoxes();
+  const s = nrState();
+  const filters = Object.assign({}, s.filters);
+  // Everything ticked is no filter at all, so new values (a man enlisted
+  // tomorrow) are not silently hidden by a filter that meant "all".
+  if (boxes.every(b => b.checked)) delete filters[id];
+  else filters[id] = { in: boxes.filter(b => b.checked).map(b => b.dataset.nrVal) };
+  NR.save(Object.assign({}, s, { filters }));
+  nrSyncSelectAll();
+  nrRefreshBody();
+}
+function nrMenuSort(dir) {
+  const id = _nrMenuCol;
+  NR.save(NR.setSort(nrState(), id, dir));
+  closeNRColMenu();
+  render();
+}
+function nrMenuHide() {
+  const id = _nrMenuCol;
+  const s = nrState();
+  const cols = NR.visibleCols(s).map(c => c.id).filter(x => x !== id);
+  closeNRColMenu();
+  if (!cols.length) return;
+  nrSet(Object.assign({}, s, { cols }));
+}
+// Redraw only the summary + table, so the open menu and the search box keep
+// their place.
+function nrRefreshBody() {
+  const body = document.getElementById("nr-body");
+  if (body) body.innerHTML = nrBodyHtml();
+}
+
+function setNRSearch(v) {
+  _nrSearch = String(v || "");
+  const body = document.getElementById("nr-body");
+  if (body) body.innerHTML = nrBodyHtml();
+}
+function clearNRFilters() {
+  _nrSearch = "";
+  nrSet(Object.assign(nrState(), { chips: [], filters: {} }));
+}
+function toggleNRMenu(e) {
+  e?.stopPropagation();
+  document.getElementById("nr-menu")?.classList.toggle("hidden");
+}
+function closeNRMenu() {
+  document.getElementById("nr-menu")?.classList.add("hidden");
+}
+// Outside-tap close lives with the report menu's, in js/main.js.
+
+function exportNRView() {
+  const v = nrCurrentView();
+  const slug = nrPresetLabel(v.s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "view";
+  exportCSV(NR.csvRows(v.rows, v.cols, v.ctx), `master-nr-${slug}-${todayISO()}.csv`);
+}
+// Plain text for WhatsApp, on copyReportToClipboard's clipboard pattern.
+async function copyNRView() {
+  const v = nrCurrentView();
+  const text = NR.copyText(v.rows, v.cols, v.ctx, `MASTER NR - ${nrPresetLabel(v.s).toUpperCase()} (${isoToDisplayDate(todayISO())}${isFilterActive() ? ", " + filterLabel() : ""})`);
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("nr-more-btn");
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      setTimeout(() => { btn.textContent = original; }, 1800);
+    }
+  } catch {
+    openModal("Copy view", `<textarea id="nr-copy-text" class="cmp-paste" rows="14" readonly>${escapeHtml(text)}</textarea>`);
+    const ta = document.getElementById("nr-copy-text");
+    if (ta) { ta.focus(); ta.select(); }
+    alert("Copy blocked — text is selected, press Cmd+C / Ctrl+C to copy.");
+  }
+}
+
+// ── Columns modal ─────────────────────────────────────────
+// Grouped checkboxes (the group-members list's markup), each with a filter by
+// type. Apply rewrites the view; ticking a column keeps the current order and
+// appends new ones in catalogue order.
+function openNRColumns() {
+  const s = nrState();
+  const shown = new Set(NR.visibleCols(s).map(c => c.id));
+  const groups = NR.GROUPS.map(g => {
+    const cols = NR.COLUMNS.filter(c => c.group === g);
+    const rows = cols.map(c => `<label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:4px;background:var(--surface2);cursor:pointer">
+        <input type="checkbox" data-nr-col="${c.id}"${shown.has(c.id) ? " checked" : ""} style="width:16px;height:16px;cursor:pointer">
+        <span style="font-size:12px">${escapeHtml(c.label)}</span>
+      </label>`).join("");
+    const note = g === "Personal (sensitive)" ? ` <span style="font-weight:400;text-transform:none;letter-spacing:0">- personal details, off by default</span>` : "";
+    return `<div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${g}${note}</div>
+      <div style="display:flex;flex-direction:column;gap:3px">${rows}</div>
+    </div>`;
+  }).join("");
+  const isCustom = /^u/.test(s.preset) && !NR.isModified(s);
+  openModal("Columns", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted)">Tick the columns to show. To sort or filter, tap a column heading in the table. Saved on this device only.</div>
+      <div id="nr-cols" style="max-height:52vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">${groups}</div>
+      <div class="form-group"><label>Save as a preset (optional)</label><input id="nr-preset-name" maxlength="40" placeholder="e.g. Guard list"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary" style="flex:1" onclick="submitNRColumns()">Apply</button>
+        ${isCustom ? `<button class="btn btn-danger" onclick="deleteNRPreset()" title="Delete the preset '${escapeAttr(NR.presetById(s.preset, s.custom).label)}' from this device">Delete preset</button>` : ""}
+      </div>
+    </div>`);
+  document.querySelector(".modal")?.classList.add("wide");
+}
+
+function submitNRColumns() {
+  const s = nrState();
+  const ticked = new Set([...document.querySelectorAll("#nr-cols input[data-nr-col]:checked")].map(el => el.dataset.nrCol));
+  if (!ticked.size) { alert("Pick at least one column."); return; }
+  const current = NR.visibleCols(s).map(c => c.id).filter(id => ticked.has(id));
+  const cols = current.concat(NR.COLUMNS.map(c => c.id).filter(id => ticked.has(id) && !current.includes(id)));
+
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const next = Object.assign({}, s, { cols });
+  const name = val("nr-preset-name").trim().slice(0, 40);
+  if (name) {
+    const id = "u" + Date.now().toString(36);
+    next.custom = s.custom.concat({ id, label: name, cols });
+    next.preset = id;
+    next.cols = null;
+  } else {
+    const p = NR.presetById(s.preset, s.custom) || NR.PRESETS[0];
+    if (cols.join(",") === p.cols.join(",")) next.cols = null;
+  }
+  NR.save(next);
+  closeModal();
+  render();
+}
+function deleteNRPreset() {
+  const s = nrState();
+  const p = NR.presetById(s.preset, s.custom);
+  if (!p || !/^u/.test(p.id)) return;
+  if (!confirm(`Delete the preset "${p.label}" from this device?`)) return;
+  const next = NR.applyPreset(Object.assign({}, s, { custom: s.custom.filter(x => x.id !== p.id) }), "default");
+  NR.save(next);
+  closeModal();
+  render();
 }
 
 function renderAttendance(el) {
