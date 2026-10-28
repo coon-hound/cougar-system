@@ -1711,18 +1711,23 @@ function renderAttendance(el) {
 }
 
 // ── Conduct Detail tab ────────────────────────────────────
-// One conduct at a time: pick a session, see who attended and who didn't.
-// A session is (date, time, conductId, scope) — the same tuple the Log Conduct
-// wizard saves and the chat-format copy reads. Detail rows enumerate the
-// absentees, so the attenders are the session's scoped roster minus those.
-// State is module-scope rather than persisted — it resets on reload.
+// One conduct at a time: pick a session, see who attended and who didn't, and
+// take the name lists out (copy for chat, CSV for this conduct, or one grid
+// of every conduct). A session is (date, time, conductId, scope) — the same
+// tuple the Log Conduct wizard saves and the chat-format copy reads. Detail
+// rows enumerate the absentees, so the attenders are the session's scoped
+// roster minus those. State is module-scope — it resets on reload.
 let _cdSel = "";
 let _cdSessionSearch = "";
 let _cdPersonSearch = "";
 
 const cdKey = x => `${x.date}|${x.time || ""}|${x.conductId || ""}|${scopeKey(x)}`;
 const CD_TYPE_LABEL = { PX: "Status", RSI: "RSI", Fallout: "Fallout", ReportSick: "Report Sick" };
+const CD_TYPE_ORDER = ["PX", "Fallout", "ReportSick", "RSI"];
 const cdTypeColor = t => t === "PX" ? "orange" : t === "RSI" ? "red" : t === "Fallout" ? "purple" : "yellow";
+// "1402 ALPHA TWO", or "3SG TAN" for a commander (no 4D shown).
+const cdWho = d4 => [displayId(d4), displayPersonLabel(d4)].filter(Boolean).join(" ");
+const cdPltLabel = p => p ? `Platoon ${p}` : "Coy HQ";
 
 // Every space-separated word must appear somewhere in the haystack.
 const cdMatches = (hay, q) => String(q || "").toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
@@ -1745,17 +1750,35 @@ function cdSessions() {
 }
 
 // Who attended / didn't for one session, within the global scope filter.
+// Absentees run in parade-state order (Status, Fallout, Report Sick), then 4D.
 function cdSessionPeople(s) {
   const visible = visibleD4Set();
   const absent = STATE.conductDetail.filter(d => cdKey(d) === s.key && passesFilter(d.d4, visible))
-    .sort((a, b) => a.type < b.type ? -1 : a.type > b.type ? 1 : a.d4 < b.d4 ? -1 : 1);
+    .sort((a, b) => (CD_TYPE_ORDER.indexOf(a.type) - CD_TYPE_ORDER.indexOf(b.type)) || (a.d4 < b.d4 ? -1 : 1));
   const absentSet = new Set(absent.map(d => d.d4));
-  const attended = conductScopeRoster(s.scope).filter(r => passesFilter(r.id, visible) && !absentSet.has(r.id));
-  return { absent, absentSet, attended };
+  const inScope = conductScopeRoster(s.scope).filter(r => passesFilter(r.id, visible));
+  const attended = inScope.filter(r => !absentSet.has(r.id));
+  return { absent, absentSet, attended, inScope };
 }
 
+// Roster objects grouped by platoon, in 4D order: [["Platoon 1", [...]], ...].
+function cdByPlatoon(rows) {
+  const groups = new Map();
+  [...rows].sort((a, b) => a.id < b.id ? -1 : 1).forEach(r => {
+    const p = getPlt(r);
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p).push(r);
+  });
+  return [...groups.entries()].sort(([a], [b]) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }));
+}
+
+// Dates are searchable the ways people type them: "22 oct", "22/10",
+// "22/10/26", "2210", "2026-10-22".
 function cdSessionHay(s) {
-  return `${s.date} ${s.time} ${fmtHrs(s.time) || ""} ${conductName(s.conductId) || ""} ${conductScopeLabel(s.scope)}`.toLowerCase();
+  const iso = displayDateToISO(s.date) || "";
+  const [y, m, d] = iso.split("-");
+  const dates = iso ? `${iso} ${d}/${m} ${d}/${m}/${y.slice(2)} ${d}/${m}/${y} ${d}${m} ${d}${m}${y.slice(2)} ${+d}/${+m}` : "";
+  return `${s.date} ${dates} ${s.time} ${fmtHrs(s.time) || ""} ${conductName(s.conductId) || ""} ${conductScopeLabel(s.scope)}`.toLowerCase();
 }
 
 // Jump here from an Attendance row.
@@ -1804,32 +1827,141 @@ function cdSessionListHtml(sessions) {
 }
 
 function cdPeopleHtml(s) {
-  const { absent, attended } = cdSessionPeople(s);
+  const { absent, attended, inScope } = cdSessionPeople(s);
   const q = _cdPersonSearch;
   const absentRows = absent.filter(d => cdMatches(`${d.d4} ${getName(d.d4)} ${CD_TYPE_LABEL[d.type] || d.type} ${d.reason || ""}`.toLowerCase(), q));
   const attendedRows = attended.filter(r => cdMatches(`${r.id} ${r.name || ""}`.toLowerCase(), q));
   // Per-type counts sit in the list's own header, not in tiles above it.
-  const breakdown = ["PX", "Fallout", "ReportSick", "RSI"]
+  const breakdown = CD_TYPE_ORDER
     .map(t => [t, absent.filter(d => d.type === t).length]).filter(([, n]) => n)
     .map(([t, n]) => `${CD_TYPE_LABEL[t]} ${n}`).join(" · ");
-  // The reason is the name's second line, so the table fits a phone.
-  const absentTable = absentRows.length ? `<div class="table-wrap" id="cd-absent"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th></th></tr></thead><tbody>
-    ${absentRows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(d.d4)}</td><td style="text-align:left;white-space:normal">${displayPersonLabel(d.d4)}${d.reason ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${d.reason}</div>` : ""}</td><td>${badge(CD_TYPE_LABEL[d.type] || d.type, cdTypeColor(d.type))}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
-    </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
-  const attendedTable = attendedRows.length ? `<div class="table-wrap" id="cd-attended"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th></tr></thead><tbody>
-    ${attendedRows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td><td style="text-align:left">${displayPersonLabel(r.id)}</td></tr>`).join("")}
-    </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px">${attended.length ? "No one matches." : "No one in scope attended."}</div>`;
+  // Two-line rows (who / type + reason) so the list fits a phone.
+  const absentList = absentRows.length ? `<div id="cd-absent" style="display:flex;flex-direction:column;gap:4px">
+    ${absentRows.map(d => `<div onclick="openPerson('${d.d4}')" style="cursor:pointer;padding:7px 8px 7px 10px;border-radius:6px;background:var(--surface2);display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px"><span class="mono" style="color:var(--accent);font-weight:700">${displayId(d.d4)}</span> ${displayPersonLabel(d.d4)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">${badge(CD_TYPE_LABEL[d.type] || d.type, cdTypeColor(d.type))} ${d.reason || ""}</div>
+      </div>
+      <button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button><button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button>
+    </div>`).join("")}
+  </div>` : `<div style="color:var(--muted);font-size:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
+  // Attenders as name chips by platoon (the Polar-gaps chip), with each
+  // platoon's turnout, so 100+ names stay one screen of reading.
+  const pltTotal = new Map(cdByPlatoon(inScope).map(([p, rows]) => [p, rows.length]));
+  const attendedList = attendedRows.length ? `<div id="cd-attended" style="display:flex;flex-direction:column;gap:10px">
+    ${cdByPlatoon(attendedRows).map(([p, rows]) => `<div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${cdPltLabel(p)} · ${rows.length}${q ? "" : ` of ${pltTotal.get(p) || rows.length}`}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">
+        ${rows.map(r => `<button class="btn" style="font-size:11px;padding:3px 7px" onclick="openPerson('${r.id}')"><span class="mono" style="color:var(--accent);font-weight:700">${displayId(r.id)}</span> ${displayPersonLabel(r.id)}</button>`).join("")}
+      </div>
+    </div>`).join("")}
+  </div>` : `<div style="color:var(--muted);font-size:12px">${attended.length ? "No one matches." : "No one in scope attended."}</div>`;
   return `
     <div class="grid-2" style="align-items:start">
       <div>
         <h3>Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})${breakdown ? ` · ${breakdown}` : ""}</span></h3>
-        ${absentTable}
+        ${absentList}
       </div>
       <div>
         <h3>Attended <span style="color:var(--dim);font-weight:400;font-size:11px">(${attendedRows.length}${q ? ` of ${attended.length}` : ""})</span></h3>
-        ${attendedTable}
+        ${attendedList}
       </div>
     </div>`;
+}
+
+// ── Taking the lists out ──
+const cdSessionTitle = s => `${conductName(s.conductId) || "Conduct"}, ${s.date}${s.time ? " " + fmtHrs(s.time) : ""}`;
+const cdFileSlug = v => String(v).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+// Chat-ready name list: absentees by type with reasons, then (for "all")
+// attenders by platoon. Respects the global scope filter, like the screen.
+function cdNameListText(s, which) {
+  const { absent, absentSet, attended } = cdSessionPeople(s);
+  const lines = [
+    cdSessionTitle(s).toUpperCase(),
+    `${conductScopeLabel(s.scope)}${isFilterActive() ? " · " + filterLabel() : ""}`,
+    `Attended: ${attended.length}/${attended.length + absentSet.size}`,
+    "",
+    `DIDN'T ATTEND (${absent.length})`
+  ];
+  CD_TYPE_ORDER.forEach(t => {
+    const rows = absent.filter(d => d.type === t);
+    if (!rows.length) return;
+    lines.push(`${CD_TYPE_LABEL[t]} (${rows.length})`);
+    rows.forEach((d, i) => lines.push(`${i + 1}. ${cdWho(d.d4)}${d.reason ? " - " + d.reason : ""}`));
+  });
+  if (!absent.length) lines.push("Nil");
+  if (which === "all") {
+    lines.push("", `ATTENDED (${attended.length})`);
+    cdByPlatoon(attended).forEach(([p, rows]) => {
+      lines.push(`${cdPltLabel(p)} (${rows.length})`);
+      rows.forEach((r, i) => lines.push(`${i + 1}. ${cdWho(r.id)}`));
+    });
+  }
+  return lines.join("\n");
+}
+
+async function copyCDNameList(which) {
+  closeDropdowns();
+  const s = cdSessions().find(x => x.key === _cdSel);
+  if (!s) return;
+  const text = cdNameListText(s, which);
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById("cd-export-btn");
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = "✓ Copied!";
+      setTimeout(() => { btn.textContent = original; }, 1800);
+    }
+  } catch {
+    openModal("Copy name list", `<textarea id="cd-copy-text" class="cmp-paste" rows="14" readonly>${escapeHtml(text)}</textarea>`);
+    const ta = document.getElementById("cd-copy-text");
+    if (ta) { ta.focus(); ta.select(); }
+    alert("Copy blocked — text is selected, press Cmd+C / Ctrl+C to copy.");
+  }
+}
+
+// One row per man in scope for this conduct, attenders and absentees together.
+function exportCDConductCSV() {
+  closeDropdowns();
+  const s = cdSessions().find(x => x.key === _cdSel);
+  if (!s) return;
+  const { absent, inScope } = cdSessionPeople(s);
+  const byD4 = new Map(absent.map(d => [d.d4, d]));
+  const ids = [...new Set([...inScope.map(r => r.id), ...absent.map(d => d.d4)])].sort();
+  const rows = ids.map(id => {
+    const r = STATE.roster.find(x => x.id === id) || {};
+    const d = byD4.get(id);
+    return { "4D": displayId(id), Name: displayPersonLabel(id), Platoon: r.id ? getPlt(r) : "", Section: r.id ? getSect(r) : "", Attended: d ? "No" : "Yes", Type: d ? (CD_TYPE_LABEL[d.type] || d.type) : "", Reason: d?.reason || "" };
+  });
+  exportCSV(rows, `attendance-${cdFileSlug(cdSessionTitle(s))}.csv`);
+}
+
+// Every conduct as one grid: a row per man, a column per conduct (oldest
+// first) holding Present, the absence type, or blank when he was out of that
+// conduct's scope, and a Missed count. For "who missed any route march".
+function exportCDGridCSV() {
+  closeDropdowns();
+  const sessions = cdSessions().reverse();
+  const visible = visibleD4Set();
+  const people = conductScopeRoster(SCOPE_COMPANY).filter(r => passesFilter(r.id, visible)).sort((a, b) => a.id < b.id ? -1 : 1);
+  const cols = sessions.map(s => {
+    const absent = new Map(STATE.conductDetail.filter(d => cdKey(d) === s.key).map(d => [d.d4, CD_TYPE_LABEL[d.type] || d.type]));
+    return { label: `${s.date}${s.time ? " " + s.time : ""} ${conductName(s.conductId) || ""}`.trim(), absent, inScope: new Set(conductScopeRoster(s.scope).map(r => r.id)) };
+  });
+  const rows = people.map(r => {
+    const row = { "4D": displayId(r.id), Name: displayPersonLabel(r.id), Platoon: getPlt(r), Section: getSect(r) };
+    let missed = 0;
+    cols.forEach(c => {
+      const t = c.absent.get(r.id);
+      if (t) missed++;
+      row[c.label] = t || (c.inScope.has(r.id) ? "Present" : "");
+    });
+    row.Missed = missed;
+    return row;
+  });
+  exportCSV(rows, `attendance-all-conducts-${todayISO()}.csv`);
 }
 
 function renderConductDetail(el) {
@@ -1872,7 +2004,7 @@ function renderConductDetail(el) {
               <span style="color:var(--muted)" aria-hidden="true">▾</span>
             </button>
             <div id="cd-picker" class="dropdown-menu hidden" style="left:0;right:0;transform-origin:top left">
-              <input id="cd-session-search" type="search" class="nr-colmenu-q" placeholder="Search conduct or date" autocomplete="off" value="${escapeAttr(_cdSessionSearch)}" oninput="setCDSessionSearch(this.value)">
+              <input id="cd-session-search" type="search" class="nr-colmenu-q" placeholder="Search conduct or date (e.g. route 22/10)" autocomplete="off" value="${escapeAttr(_cdSessionSearch)}" oninput="setCDSessionSearch(this.value)">
               <div id="cd-sessions" class="nr-colmenu-list" style="max-height:320px">${cdSessionListHtml(sessions)}</div>
             </div>
           </div>
@@ -1880,9 +2012,18 @@ function renderConductDetail(el) {
           </div>
           ${s.attendanceId ? `<div style="display:flex;gap:6px;margin-left:auto"><button class="btn btn-icon" type="button" onclick="copyConductChatFormat('${s.attendanceId}')" title="Copy WhatsApp-format parade state message">📋</button><button class="btn btn-icon" type="button" onclick="openLogConductWizard('${s.attendanceId}')" title="Edit conduct (wizard)">✎</button></div>` : ""}
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-bottom:14px">
-          <div id="cd-rate" style="font-size:13px;color:var(--muted)"><span class="mono" style="font-size:22px;font-weight:700;color:${rateColor}">${attended.length}</span> of ${total} attended · ${r}%</div>
-          <input id="cd-person-search" class="topbar-select" style="cursor:text;flex:0 1 320px;min-width:0" placeholder="Search 4D or name in this conduct..." value="${escapeAttr(_cdPersonSearch)}" oninput="setCDPersonSearch(this.value)">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:14px">
+          <div id="cd-rate" style="font-size:13px;color:var(--muted);margin-right:auto"><span class="mono" style="font-size:22px;font-weight:700;color:${rateColor}">${attended.length}</span> of ${total} attended · ${r}%</div>
+          <input id="cd-person-search" class="topbar-select" style="cursor:text;flex:1 1 200px;max-width:320px;min-width:0" placeholder="Search 4D or name in this conduct..." value="${escapeAttr(_cdPersonSearch)}" oninput="setCDPersonSearch(this.value)">
+          <div class="dropdown-wrapper">
+            <button id="cd-export-btn" class="btn" type="button" onclick="toggleDropdown('cd-export-menu', event)">Export ▾</button>
+            <div id="cd-export-menu" class="dropdown-menu hidden">
+              <button type="button" onclick="copyCDNameList('all')">Copy name list (attended + didn't)</button>
+              <button type="button" onclick="copyCDNameList('absent')">Copy didn't attend only</button>
+              <button type="button" onclick="exportCDConductCSV()">Download this conduct (CSV)</button>
+              <button type="button" onclick="exportCDGridCSV()" title="A row per man, a column per conduct: Present, the absence type, or blank if out of scope">Download all conducts as a grid (CSV)</button>
+            </div>
+          </div>
         </div>
         <div id="cd-people">${cdPeopleHtml(s)}</div>
       </div>`;

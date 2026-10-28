@@ -85,4 +85,63 @@ test.describe("Conduct Detail: who attended a conduct", () => {
     await expect(page.locator('.nav-btn[data-nav="detail"]')).toHaveClass(/active/);
     await expect(page.locator("#content")).toContainText("Didn't attend (2)");
   });
+
+  test("conduct search takes dates the way people type them", async ({ page }) => {
+    await seedAndGoto(page);
+    await seedSession(page);
+    await page.locator('.nav-btn[data-nav="detail"]').click();
+    await page.locator("#cd-pick").click();
+    for (const q of ["28/10", "28/10/26", "2810", "2026-10-28", "route 28 oct"]) {
+      await page.locator("#cd-session-search").fill(q);
+      await expect(page.locator("#cd-sessions .cd-session"), q).toHaveCount(1);
+    }
+  });
+
+  test("attenders are grouped by platoon with each platoon's turnout", async ({ page }) => {
+    await seedAndGoto(page);
+    await seedSession(page);
+    await page.locator('.nav-btn[data-nav="detail"]').click();
+    // 1401/1402 are out, so platoon 1 has 1 of 3; platoon 2 all 3.
+    await expect(page.locator("#cd-attended")).toContainText("Platoon 1 · 1 of 3");
+    await expect(page.locator("#cd-attended")).toContainText("Platoon 2 · 3 of 3");
+  });
+
+  test("the copied name list carries both lists, absentees with reasons", async ({ page }) => {
+    await seedAndGoto(page);
+    await seedSession(page);
+    await page.locator('.nav-btn[data-nav="detail"]').click();
+    const [all, absentOnly] = await page.evaluate(() => {
+      const s = cdSessions().find(x => x.key === _cdSel);
+      return [cdNameListText(s, "all"), cdNameListText(s, "absent")];
+    });
+    expect(all).toContain("ROUTE MARCH, 28 OCT 2026 0900 HRS");
+    expect(all).toContain("Attended: 4/6");
+    expect(all).toContain("DIDN'T ATTEND (2)\nStatus (1)\n1. 1401 ALPHA ONE - knee MC\nFallout (1)\n1. 1402 ALPHA TWO - cramp");
+    expect(all).toContain("ATTENDED (4)\nPlatoon 1 (1)\n1. 1403 ALPHA THREE\nPlatoon 2 (3)");
+    expect(absentOnly).toContain("DIDN'T ATTEND (2)");
+    expect(absentOnly).not.toContain("ATTENDED (4)");
+  });
+
+  test("CSV exports: this conduct, and every conduct as a grid", async ({ page }) => {
+    await seedAndGoto(page);
+    await seedSession(page);
+    await page.locator('.nav-btn[data-nav="detail"]').click();
+    const readDownload = async label => {
+      await page.locator("#cd-export-btn").click();
+      const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: label }).click()]);
+      const fs = require("fs");
+      return { name: dl.suggestedFilename(), text: fs.readFileSync(await dl.path(), "utf8") };
+    };
+    const one = await readDownload("Download this conduct (CSV)");
+    expect(one.name).toMatch(/^attendance-route-march-28-oct-2026-0900-hrs\.csv$/);
+    expect(one.text).toContain("4D,Name,Platoon,Section,Attended,Type,Reason");
+    expect(one.text).toContain("1401,ALPHA ONE,1,4,No,Status,knee MC");
+    expect(one.text).toContain("1403,ALPHA THREE,1,4,Yes,,");
+    const grid = await readDownload("Download all conducts as a grid (CSV)");
+    const [head, ...rows] = grid.text.trim().split(/\r?\n/);
+    expect(head).toContain("28 Oct 2026 0900 Route March");
+    expect(head.endsWith(",Missed")).toBe(true);
+    expect(rows.find(r => r.startsWith("1402,"))).toContain("Fallout");
+    expect(rows.find(r => r.startsWith("1403,"))).toContain("Present");
+  });
 });

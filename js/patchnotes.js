@@ -26,8 +26,9 @@ const PATCH_NOTES = [
     title: "Who came to a conduct",
     intro: "The Detail tab now shows one conduct at a time: who attended and who didn't.",
     items: [
-      { t: "⌕ Find a conduct", d: "The newest conduct opens first. Tap its name to search by conduct or date, or use ‹ › to step to the one before or after." },
-      { t: "✓ Attended and ✕ Didn't attend", d: "Side by side, with the reason for each man who missed it. Search a 4D or name to check one man." },
+      { t: "⌕ Find a conduct", d: "The newest conduct opens first. Tap its name and type the conduct or the date, like 22/10. ‹ › step to the one before or after." },
+      { t: "✓ Who came, by platoon", d: "Everyone who attended, platoon by platoon with each platoon's count. Who didn't attend is listed with the reason. Search a 4D or name to check one man." },
+      { t: "⇩ Take the lists out", d: "Export copies the name list for WhatsApp, or downloads this conduct as a spreadsheet. It can also download every conduct as one sheet: a row per man, a column per conduct." },
       { t: "✓ From Attendance", d: "Tap a row on the Attendance tab to see who came to that conduct." }
     ]
   },
