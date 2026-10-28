@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 167;
+const APP_VERSION = 168;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,8 +21,8 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 167,
-    date: "22 Oct 2026",
+    v: 168,
+    date: "28 Oct 2026",
     title: "Fewer taps",
     intro: "The things you do most now take fewer taps.",
     items: [
@@ -30,8 +30,21 @@ const PATCH_NOTES = [
       { t: "✚ Act from a man's card", d: "Open a man and tap Report sick, Appointment or Leave. He is already picked in the form." },
       { t: "⌕ Search shows names", d: "Search results show the name, not just the 4D. Press Go on the keyboard to open the top result." },
       { t: "◱ One tap to the parade state", d: "On the Dashboard the left button opens First Parade before noon and Last Parade after. If you mostly use another report, it opens that one. ▾ still lists them all." },
-      { t: "🚪 Book Out remembers", d: "Book Out opens on the choice you used last time: today or date range, and who it applies to." },
-      { t: "⋯ Roster tidied", d: "+ Commander and Groups have moved into the ⋯ button on the Roster page." }
+      { t: "🚪 Book Out remembers", d: "Book Out opens on the choice you used last time: today or date range, and who it applies to." }
+    ]
+  },
+  {
+    v: 167,
+    date: "22 Oct 2026",
+    title: "Master NR",
+    intro: "The Roster tab is now the Master NR. It looks the same until you pick a different view.",
+    items: [
+      { t: "🗂 Views", d: "Pick a view at the top: Daily strength, Out of camp, Medical, IPPT, Leave or Contacts / NOK. Default is the roster you know." },
+      { t: "▾ Filter like a spreadsheet", d: "Tap any column heading, the same as Google Sheets or Excel. Sort A to Z, search the values, and tick only the ones you want: untick (Select all), then tick Gunner to see only the Gunners. A man who is 2 LMG / Gunner counts as a Gunner too." },
+      { t: "☑ Columns", d: "Tap + Columns to choose what shows and save your own view. Your views stay on your phone." },
+      { t: "🚙 Bronco Operators are Mounted", d: "They now count as vehicle crew, alongside Gunners and Hunter Drivers." },
+      { t: "⚡ Quick filters", d: "One tap for In camp, Out of camp, On status, On MC/LD, On leave or Appointment today." },
+      { t: "⋯ More", d: "Export or copy exactly what you see. + Commander, Groups, the full export and Re-push all have moved under ⋯." }
     ]
   },
   {

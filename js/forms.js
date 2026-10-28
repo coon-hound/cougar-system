@@ -1651,7 +1651,7 @@ function submitCommander() {
 // one-off ("2 LMG / Gunner") never needs a code change.
 const BILLET_SUGGESTIONS = [
   "1 LMG", "2 LMG", "GL", "2 MAT", "GPMG Main", "GPMG Assistant", "Steel Net",
-  "Medic", "Runner", "PC Runner", "Hunter Driver", "Gunner"
+  "Medic", "Runner", "PC Runner", "Hunter Driver", "Gunner", "Bronco Operator"
 ];
 function openBilletForm(d4) {
   const r = STATE.roster.find(x => x.id === d4 && x.role !== "Commander"); if (!r) return;

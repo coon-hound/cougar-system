@@ -30,7 +30,7 @@ test("phone: each bar tab is one tap, nothing covers it, and both bars follow", 
   await expect(page.locator("#mobile-nav-toggle")).toBeVisible();
   expect(await activeTabs(page)).toEqual(["dashboard"]);
 
-  for (const [tab, heading] of [["medical", "Report Sick Log"], ["attendance", "Conduct Attendance"], ["roster", "Master Roster"], ["dashboard", "Company Strength Board"]]) {
+  for (const [tab, heading] of [["medical", "Report Sick Log"], ["attendance", "Conduct Attendance"], ["roster", "Master NR"], ["dashboard", "Company Strength Board"]]) {
     const sel = `#tabbar [data-tab="${tab}"]`;
     // What a finger at the centre of the tab would actually hit.
     const hit = await page.evaluate((s) => {
@@ -135,7 +135,7 @@ test("phone: the bar still works after a sheet, a search and the drawer", async 
   await page.tap("#sidebar-backdrop", { position: { x: 360, y: 300 } });
   await expect(page.locator("#sidebar")).not.toHaveClass(/open/);
   await page.tap('#tabbar [data-tab="roster"]');
-  await expect(page.locator("#content")).toContainText("Master Roster");
+  await expect(page.locator("#content")).toContainText("Master NR");
 });
 
 test("desktop: no bottom bar, sidebar as before", async ({ page }) => {

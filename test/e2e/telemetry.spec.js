@@ -56,7 +56,7 @@ test("captures inline handler names, and never their arguments", async ({ page }
   await gotoWithTelemetry(page);
 
   await page.click('[data-nav="roster"]');
-  await expect(page.locator("#content")).toContainText("Roster");
+  await expect(page.locator("#content")).toContainText("Master NR");
   // A row action in the roster table — an inline onclick carrying a 4D.
   const rowBtn = page.locator('#content [onclick^="openPerson("]').first();
   await rowBtn.click();

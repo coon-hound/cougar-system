@@ -71,7 +71,7 @@ test("book out: opens on the mode and scope this device used last", async ({ pag
 test("roster: + Commander and Groups live behind ⋯", async ({ page }) => {
   await seedAndGoto(page);
   await page.click('.nav-btn[data-nav="roster"]');
-  const menu = page.locator("#roster-menu");
+  const menu = page.locator("#nr-menu");
   await expect(menu).toBeHidden();
   await expect(page.locator("#content > div > div > button", { hasText: "+ Commander" })).toHaveCount(0);
   await page.locator('#content button[aria-label="More roster actions"]').click();

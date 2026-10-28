@@ -100,13 +100,14 @@ const TELEMETRY = (function () {
     group_members:   { start: "openGroupMembersForm",   done: "submitGroupMembers",   label: "Group Members" },
     combined_group:  { start: "openCombinedForm",       done: "submitCombined",       keepsModalOpen: true, label: "Combined Group" },
     commander:       { start: "openCommanderForm",      done: "submitCommander",      label: "Add Commander" },
-    billet:          { start: "openBilletForm",         done: "submitBillet",         label: "Edit Role" }
+    billet:          { start: "openBilletForm",         done: "submitBillet",         label: "Edit Role" },
+    nr_columns:      { start: "openNRColumns",          done: "submitNRColumns",      label: "Master NR Columns" }
   };
 
   // Human-readable labels for the views, used by the insights read-out. Keyed
   // by STATE.nav. Anything not listed falls back to the raw nav key.
   const VIEW_LABELS = {
-    dashboard: "Dashboard", roster: "Roster", attendance: "Attendance",
+    dashboard: "Dashboard", roster: "Master NR", attendance: "Attendance",
     detail: "Conduct Detail", medical: "Medical", ippt: "IPPT",
     leave: "Out / Leave",
   duty: "Duty Schedule",

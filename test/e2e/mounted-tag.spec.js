@@ -7,9 +7,9 @@ test.describe("Mounted / dismounted", () => {
   test("mountOf reads the role, and a mixed role is both", async ({ page }) => {
     await seedAndGoto(page);
     const got = await page.evaluate(() => [
-      "Hunter Driver", "Gunner", " gunner ", "1 LMG", "", "2 LMG / Gunner", "GPMG / Gunner", "(2GL) / PC Runner",
+      "Hunter Driver", "Gunner", " gunner ", "1 LMG", "", "2 LMG / Gunner", "GPMG / Gunner", "(2GL) / PC Runner", "BRONCO OPERATOR",
     ].map(billet => mountOf({ role: "Recruit", billet })));
-    expect(got).toEqual(["mounted", "mounted", "mounted", "dismounted", "dismounted", "both", "both", "dismounted"]);
+    expect(got).toEqual(["mounted", "mounted", "mounted", "dismounted", "dismounted", "both", "both", "dismounted", "mounted"]);
     expect(await page.evaluate(() => mountOf({ role: "Commander", billet: "Gunner" }))).toBe("");
   });
 
