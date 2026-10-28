@@ -22,7 +22,8 @@ test.describe("Conduct Detail: who attended a conduct", () => {
 
     const content = page.locator("#content");
     await expect(content.locator(".cd-session").first()).toContainText("Route March");
-    await expect(content).toContainText("Didn't attend (2)");
+    await expect(content.locator("#cd-rate")).toHaveText("4 of 6 attended · 67%");
+    await expect(content).toContainText("Didn't attend (2) · Status 1 · Fallout 1");
     await expect(content).toContainText("Attended (4)");
     await expect(content.locator("#cd-absent")).toContainText("knee MC");
     await expect(content.locator("#cd-absent")).toContainText("Status");

@@ -1808,8 +1808,13 @@ function cdPeopleHtml(s) {
   const q = _cdPersonSearch;
   const absentRows = absent.filter(d => cdMatches(`${d.d4} ${getName(d.d4)} ${CD_TYPE_LABEL[d.type] || d.type} ${d.reason || ""}`.toLowerCase(), q));
   const attendedRows = attended.filter(r => cdMatches(`${r.id} ${r.name || ""}`.toLowerCase(), q));
-  const absentTable = absentRows.length ? `<div class="table-wrap" id="cd-absent"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th style="text-align:left">Reason</th><th></th></tr></thead><tbody>
-    ${absentRows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(d.d4)}</td><td style="text-align:left">${displayPersonLabel(d.d4)}</td><td>${badge(CD_TYPE_LABEL[d.type] || d.type, cdTypeColor(d.type))}</td><td style="text-align:left;max-width:280px;white-space:normal;font-size:11px">${d.reason || ""}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
+  // Per-type counts sit in the list's own header, not in tiles above it.
+  const breakdown = ["PX", "Fallout", "ReportSick", "RSI"]
+    .map(t => [t, absent.filter(d => d.type === t).length]).filter(([, n]) => n)
+    .map(([t, n]) => `${CD_TYPE_LABEL[t]} ${n}`).join(" · ");
+  // The reason is the name's second line, so the table fits a phone.
+  const absentTable = absentRows.length ? `<div class="table-wrap" id="cd-absent"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th><th>Type</th><th></th></tr></thead><tbody>
+    ${absentRows.map(d => `<tr onclick="openPerson('${d.d4}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(d.d4)}</td><td style="text-align:left;white-space:normal">${displayPersonLabel(d.d4)}${d.reason ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${d.reason}</div>` : ""}</td><td>${badge(CD_TYPE_LABEL[d.type] || d.type, cdTypeColor(d.type))}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="event.stopPropagation(); openConductDetailForm('${d.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="event.stopPropagation(); deleteEntry('conductDetail', '${d.id}', 'conduct detail record')" title="Delete">✕</button></td></tr>`).join("")}
     </tbody></table></div>` : `<div style="color:var(--muted);font-size:12px">${absent.length ? "No one matches." : "Everyone in scope attended."}</div>`;
   const attendedTable = attendedRows.length ? `<div class="table-wrap" id="cd-attended"><table><thead><tr><th>4D</th><th style="text-align:left">Name</th></tr></thead><tbody>
     ${attendedRows.map(r => `<tr onclick="openPerson('${r.id}')" style="cursor:pointer"><td class="mono" style="font-weight:700;color:var(--accent)">${displayId(r.id)}</td><td style="text-align:left">${displayPersonLabel(r.id)}</td></tr>`).join("")}
@@ -1817,11 +1822,11 @@ function cdPeopleHtml(s) {
   return `
     <div class="grid-2" style="align-items:start">
       <div>
-        <h3>✕ Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})</span></h3>
+        <h3>Didn't attend <span style="color:var(--dim);font-weight:400;font-size:11px">(${absentRows.length}${q ? ` of ${absent.length}` : ""})${breakdown ? ` · ${breakdown}` : ""}</span></h3>
         ${absentTable}
       </div>
       <div>
-        <h3>✓ Attended <span style="color:var(--dim);font-weight:400;font-size:11px">(${attendedRows.length}${q ? ` of ${attended.length}` : ""})</span></h3>
+        <h3>Attended <span style="color:var(--dim);font-weight:400;font-size:11px">(${attendedRows.length}${q ? ` of ${attended.length}` : ""})</span></h3>
         ${attendedTable}
       </div>
     </div>`;
@@ -1847,8 +1852,7 @@ function renderConductDetail(el) {
 
   let sessionCard = `<div class="card empty-state">No conducts logged yet. Log one from the Attendance tab.</div>`;
   if (s) {
-    const { absent, absentSet, attended } = cdSessionPeople(s);
-    const ct = t => absent.filter(d => d.type === t).length;
+    const { absentSet, attended } = cdSessionPeople(s);
     const total = attended.length + absentSet.size;
     const r = pct(attended.length, total);
     const rateColor = r >= 95 ? "var(--green)" : r >= 70 ? "var(--orange)" : "var(--red)";
@@ -1876,14 +1880,10 @@ function renderConductDetail(el) {
           </div>
           ${s.attendanceId ? `<div style="display:flex;gap:6px;margin-left:auto"><button class="btn btn-icon" type="button" onclick="copyConductChatFormat('${s.attendanceId}')" title="Copy WhatsApp-format parade state message">📋</button><button class="btn btn-icon" type="button" onclick="openLogConductWizard('${s.attendanceId}')" title="Edit conduct (wizard)">✎</button></div>` : ""}
         </div>
-        <div class="stats-row">
-          <div class="stat"><label>Attended</label><div class="val" style="color:${rateColor}">${attended.length}<span style="font-size:13px;color:var(--muted)">/${total}</span></div><div class="sub">${r}%</div></div>
-          <div class="stat"><label>Status</label><div class="val" style="color:var(--orange)">${ct("PX")}</div></div>
-          <div class="stat"><label>Fallout</label><div class="val" style="color:var(--purple)">${ct("Fallout")}</div></div>
-          <div class="stat"><label>Report Sick</label><div class="val" style="color:var(--yellow)">${ct("ReportSick")}</div></div>
-          ${ct("RSI") ? `<div class="stat"><label>RSI</label><div class="val" style="color:var(--red)">${ct("RSI")}</div></div>` : ""}
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-bottom:14px">
+          <div id="cd-rate" style="font-size:13px;color:var(--muted)"><span class="mono" style="font-size:22px;font-weight:700;color:${rateColor}">${attended.length}</span> of ${total} attended · ${r}%</div>
+          <input id="cd-person-search" class="topbar-select" style="cursor:text;flex:0 1 320px;min-width:0" placeholder="Search 4D or name in this conduct..." value="${escapeAttr(_cdPersonSearch)}" oninput="setCDPersonSearch(this.value)">
         </div>
-        <input id="cd-person-search" class="topbar-select" style="cursor:text;width:100%;max-width:320px;margin-bottom:12px" placeholder="Search 4D or name in this conduct..." value="${escapeAttr(_cdPersonSearch)}" oninput="setCDPersonSearch(this.value)">
         <div id="cd-people">${cdPeopleHtml(s)}</div>
       </div>`;
   }
