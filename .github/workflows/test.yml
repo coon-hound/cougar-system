@@ -37,7 +37,9 @@ jobs:
           retention-days: 7
 
   integrity:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which has no postgresql-16 package
+    # ("Unable to locate package"). 24.04 ships 16, matching PG_BIN below.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
