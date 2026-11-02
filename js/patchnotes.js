@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 172;
+const APP_VERSION = 173;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,18 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 173,
+    date: "2 Nov 2026",
+    title: "Qualifications, PES and SOC",
+    intro: "Each man's card now shows his PES and latest SOC, the weapons he is THT-trained on, and his qualifications such as CPR/AED and the basic drone package.",
+    items: [
+      { t: "🩺 PES and SOC on the profile", d: "Open a man: PES and SOC sit in his Profile next to ration and education." },
+      { t: "🎯 THT weapons and 🎓 quals", d: "Shown as chips under his role. Tap ✎ next to his role to change them, or to add a qualification with an expiry date." },
+      { t: "🎓 Award to many at once", d: "Roster ⋯ menu → 🎓 Quals shows who holds each qualification, and lets you tick everyone who just passed a course." },
+      { t: "📋 Qualifications view", d: "On the Roster, pick the Qualifications view to see PES, SOC, THT weapons and quals for everyone in one table." }
+    ]
+  },
   {
     v: 172,
     date: "2 Nov 2026",

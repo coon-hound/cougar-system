@@ -1359,6 +1359,7 @@ function renderRoster(el) {
             <button type="button" onclick="pushTab('Roster',STATE.roster); closeNRMenu()" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
             <button type="button" onclick="openCommanderForm(); closeNRMenu()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
             <button type="button" onclick="openGroupsForm(); closeNRMenu()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
+            <button type="button" onclick="openQualsForm(); closeNRMenu()" title="Who holds which qualification; award one to many people at once">🎓 Quals</button>
           </div>
         </div>
       </div>
