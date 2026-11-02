@@ -96,10 +96,14 @@ test.describe("Section roles", () => {
     const holders = await page.evaluate(() => qualHolders("Range Safety Officer").map(h => h.r.id).sort());
     expect(holders).toEqual(["0091", "9911", "9912"]);
 
-    // Roster filter narrows to holders and adds the expiry column.
-    await page.evaluate(() => { STATE.nav = "roster"; STATE.filterRole = ""; render(); setRosterQual("Range Safety Officer"); });
+    // The Master NR CESP view, filtered on the Qualifications column, narrows
+    // to the holders.
+    await page.evaluate(() => {
+      STATE.nav = "roster"; STATE.filterRole = ""; render(); setNRPreset("cesp");
+      const s = NR.load(); s.filters.quals = { in: ["Range Safety Officer"] }; nrSet(s);
+    });
     await expect(page.locator("#content tbody tr")).toHaveCount(3);
-    await expect(page.locator("#content thead")).toContainText("Expiry");
+    await expect(page.locator("#content thead")).toContainText("Qualifications");
 
     // One holder goes on MC today: the panel still lists him, as unavailable.
     await page.evaluate((d) => {
@@ -111,5 +115,30 @@ test.describe("Section roles", () => {
     await panel.locator("button", { hasText: "Range Safety Officer" }).click();
     await expect(panel).toContainText("2 available of 3");
     await expect(page.locator("#wiz-qual-panel div", { hasText: "TEST BRAVO" }).last()).toContainText("MC");
+  });
+
+  test("PES and SOC on the profile, THT weapons as chips, editable from the roles form", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => {
+      STATE.roster.push(...normalizeRoster([{ id: "9913", name: "TEST CHARLIE", role: "Recruit",
+        pes: "B1", socLevel: "SOC5", thtPrimary: "MATADOR", thtSecondary: "LMG", quals: "CPR/AED" }]));
+      openPerson("9913");
+    });
+    const modal = page.locator(".modal");
+    await expect(modal).toContainText("PES: B1");
+    await expect(modal).toContainText("SOC: SOC5");
+    await expect(modal).toContainText("THT MATADOR");
+    await expect(modal).toContainText("THT LMG");
+    await expect(modal).toContainText("CPR/AED");
+    // The card shows weapons only, never which slot.
+    await expect(modal).not.toContainText("Primary");
+
+    await page.evaluate(() => openRolesForm("9913"));
+    await page.locator("#f-pes").selectOption("B2");
+    await page.locator("#f-soc").selectOption("None");
+    await page.locator("#f-tht2").selectOption("");
+    await page.locator("text=Save").last().click();
+    const r = await page.evaluate(() => { const x = STATE.roster.find(r => r.id === "9913"); return [x.pes, x.socLevel, x.thtPrimary, x.thtSecondary]; });
+    expect(r).toEqual(["B2", "None", "MATADOR", ""]);
   });
 });

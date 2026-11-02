@@ -84,6 +84,8 @@ function openPerson(d4) {
       ${fact("Ration", p.ration)}
       ${fact("Edu", edu)}
       ${fact("Motorcycle", moto || "No")}
+      ${fact("PES", escapeHtml(p.pes))}
+      ${fact("SOC", escapeHtml(p.socLevel))}
     </div>
   </div>`;
 
@@ -1658,7 +1660,7 @@ const BILLET_SUGGESTIONS = [
 // Same idea for extra roles and qualifications: suggestions, never a fixed list.
 const SECONDARY_ROLE_SUGGESTIONS = ["Medic", "Runner", "PC Runner", "Signaller", "Driver", "Storeman", "IC Ammo", "Safety Marshal"];
 const QUAL_SUGGESTIONS = [
-  "CPR", "AED", "First Aid", "Combat Medic", "Range Safety Officer", "Range Conducting Officer",
+  "CPR/AED", "Basic Drone", "CPR", "AED", "First Aid", "Combat Medic", "Range Safety Officer", "Range Conducting Officer",
   "Live Firing Safety", "Water Safety", "Lifeguard", "Class 3 Licence", "Class 4 Licence",
   "Military Driver", "Signals", "Rappelling", "Physical Training Instructor"
 ];
@@ -1673,12 +1675,14 @@ const tagDatalist = (id, suggestions, used) =>
 function rolesStripHtml(p) {
   const roles = getSecondaryRoles(p);
   const quals = getQuals(p).sort((a, b) => a.name.localeCompare(b.name));
-  if (!roles.length && !quals.length) {
+  const tht = thtWeapons(p);
+  if (!roles.length && !quals.length && !tht.length) {
     return `<div style="margin:-6px 0 12px"><button class="btn btn-icon" style="font-size:11px;padding:3px 9px;color:var(--muted)" onclick="openRolesForm('${p.id}')">+ roles &amp; quals</button></div>`;
   }
   const today = todayISO();
   return `<div class="tag-row" style="margin:-6px 0 12px">
     ${roles.map(x => badge(escapeHtml(x), "accent")).join("")}
+    ${tht.map(w => `<span class="badge badge-green" title="THT-trained weapon">🎯 THT ${escapeHtml(w)}</span>`).join("")}
     ${quals.map(q => qualChip(q, today)).join("")}
     ${p.role === "Commander" ? `<button class="btn btn-icon" style="font-size:11px;padding:2px 7px" onclick="openRolesForm('${p.id}')" title="Edit roles and qualifications">✎</button>` : ""}
   </div>`;
@@ -1694,6 +1698,15 @@ function rolesAddQualRow() {
   document.getElementById("f-qual-rows")?.insertAdjacentHTML("beforeend", qualRowHtml());
   const rows = document.querySelectorAll("#f-qual-rows [data-qual-name]");
   rows[rows.length - 1]?.focus();
+}
+
+// A select over a vocabulary that keeps a value outside it (an imported "B3"
+// the list does not know) rather than silently blanking it on save.
+function cespSelect(id, label, options, value, blank) {
+  const v = String(value || "");
+  const opts = v && !options.includes(v) ? [...options, v] : options;
+  return `<div class="form-group" style="margin:0"><label for="${id}">${label}</label>
+    <select id="${id}"><option value="">${blank}</option>${opts.map(o => `<option value="${escapeAttr(o)}"${o === v ? " selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select></div>`;
 }
 
 // One editor for everything a person is used for: primary role (recruits
@@ -1717,6 +1730,12 @@ function openRolesForm(d4) {
           ${tagDatalist("f-qual-list", QUAL_SUGGESTIONS, allQualNames())}
           <button type="button" class="btn" style="margin-top:6px;font-size:12px" onclick="rolesAddQualRow()">+ Add qualification</button>
         </div>
+        <div class="grid-2" style="gap:10px">
+          ${cespSelect("f-tht1", "THT weapon (primary)", THT_WEAPONS, r.thtPrimary, "Not trained")}
+          ${cespSelect("f-tht2", "THT weapon (secondary)", THT_WEAPONS, r.thtSecondary, "Not trained")}
+          ${cespSelect("f-pes", "PES", PES_GRADES, r.pes, "Not recorded")}
+          ${cespSelect("f-soc", "Latest SOC", SOC_LEVELS, r.socLevel, "Not recorded")}
+        </div>
         <button type="submit" class="btn btn-primary">Save</button>
       </div>
     </form>`);
@@ -1734,6 +1753,10 @@ function submitRoles(d4) {
   if (r.role !== "Commander") r.billet = gv("f-billet").trim();
   r.secondaryRoles = [...new Set(roles)].join(", ");
   r.quals = serializeQuals(quals);
+  r.thtPrimary = gv("f-tht1");
+  r.thtSecondary = gv("f-tht2");
+  r.pes = gv("f-pes");
+  r.socLevel = gv("f-soc");
   saveLocal(); closeModal(); render();
   if (STATE.apiUrl) autoSync("Roster", { type: "upsert", row: r });
 }

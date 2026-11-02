@@ -501,7 +501,14 @@ function normalizeRoster(roster) {
       // Safety"), comma-delimited like groups. Parsed by getSecondaryRoles /
       // getQuals in helpers.js. Commanders carry them too.
       secondaryRoles: rest.secondaryRoles != null ? String(rest.secondaryRoles) : "",
-      quals: rest.quals != null ? String(rest.quals) : ""
+      quals: rest.quals != null ? String(rest.quals) : "",
+      // CESP fields (0015, real roster columns). PES grade ("A", "B1"...),
+      // latest SOC ("SOC5", "None" = never did one), and the THT-trained
+      // weapons. Primary/secondary is stored; the card shows weapons only.
+      pes: rest.pes != null ? String(rest.pes) : "",
+      socLevel: rest.socLevel != null ? String(rest.socLevel) : "",
+      thtPrimary: rest.thtPrimary != null ? String(rest.thtPrimary) : "",
+      thtSecondary: rest.thtSecondary != null ? String(rest.thtSecondary) : ""
     };
   });
 }

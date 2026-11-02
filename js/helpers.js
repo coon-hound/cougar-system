@@ -150,6 +150,17 @@ function qualState(q, dateIso) {
   if (left === null) return "valid";
   return left < 0 ? "expired" : left <= QUAL_EXPIRING_DAYS ? "expiring" : "valid";
 }
+// CESP badge fields. Vocabularies are suggestions for the editor and the
+// import's validation; the columns are free text so a new grade never needs
+// a code change.
+const PES_GRADES = ["A", "B1", "B2", "B3", "B4", "C2", "C9", "E1", "E9", "F"];
+const SOC_LEVELS = ["SOC1", "SOC2", "SOC3", "SOC4", "SOC5", "None"];
+const THT_WEAPONS = ["MATADOR", "LMG", "M203"];
+// The weapons a man is THT-trained on, primary first, without the slot: the
+// card shows "THT MATADOR", never which one was primary.
+function thtWeapons(r) {
+  return [...new Set([r && r.thtPrimary, r && r.thtSecondary].map(w => String(w || "").trim()).filter(Boolean))];
+}
 // Qual names and roles must not carry the delimiters their storage uses.
 function tagNameOk(s) { return !!s && !/[,@|]/.test(s); }
 function allQualNames() {
