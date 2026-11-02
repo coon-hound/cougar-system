@@ -8,7 +8,7 @@ function openModal(title, html) {
 function closeModal() {
   document.getElementById("modal-overlay").classList.add("hidden");
   // Reset the wide-modal flag so the next form-style modal isn't oversized.
-  document.querySelector(".modal")?.classList.remove("wide");
+  document.querySelector(".modal")?.classList.remove("wide", "fit");
 }
 
 // The IPPT part of a person's profile: best per station across every attempt
