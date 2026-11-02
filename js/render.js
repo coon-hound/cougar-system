@@ -2296,7 +2296,7 @@ function ipptSeriesSection(series, rows, aggMode) {
     else buckets[5]++;
   }
 
-  const personRow = (d4, right) => `<div onclick="openPerson('${d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;align-items:center">
+  const personRow = (d4, right) => `<div onclick="openPersonIPPT('${d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;align-items:center">
     <span>${displayId(d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(d4)}</span> ` : ""}${displayPersonLabel(d4)}</span>${right}</div>`;
   const tableRows = attemptScoped.slice().sort((a, b) => ipptOrderKey(a) - ipptOrderKey(b) || String(a.d4).localeCompare(String(b.d4)));
 
@@ -2339,7 +2339,7 @@ function ipptSeriesSection(series, rows, aggMode) {
       <div class="card"${yttRecruits ? "" : ` style="grid-column:1 / -1"`}>
         <h3>Top Performers <span style="color:var(--muted);font-weight:400;font-size:10px">by ${aggMode === "best" ? "best" : "latest"} attempt</span></h3>
         ${topPerformers.length ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">
-          ${topPerformers.map((e, idx) => `<div onclick="openPerson('${e.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;align-items:center;gap:8px">
+          ${topPerformers.map((e, idx) => `<div onclick="openPersonIPPT('${e.d4}')" style="cursor:pointer;font-size:11px;padding:6px 8px;border-radius:4px;background:var(--surface2);display:flex;align-items:center;gap:8px">
             <span class="mono" style="font-weight:700;color:var(--muted);min-width:18px">#${idx + 1}</span>
             <span style="flex:1">${displayId(e.d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(e.d4)}</span> ` : ""}${displayPersonLabel(e.d4)}</span>
             <span class="mono" style="font-weight:700">${e.score}</span>
@@ -2373,14 +2373,14 @@ function ipptSeriesSection(series, rows, aggMode) {
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px">
         <div style="flex:1;min-width:220px">
           <h3 style="font-size:12px;color:var(--green)">▲ Most improved</h3>
-          ${movers.filter(p => p.delta > 0).slice(0, 5).map(p => `<div onclick="openPerson('${p.d4}')" style="cursor:pointer;font-size:11px;padding:5px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          ${movers.filter(p => p.delta > 0).slice(0, 5).map(p => `<div onclick="openPersonIPPT('${p.d4}')" style="cursor:pointer;font-size:11px;padding:5px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
             <span>${displayId(p.d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(p.d4)}</span> ` : ""}${displayPersonLabel(p.d4)}</span>
             <span class="mono" style="white-space:nowrap">${p.s1} → ${p.s2} <strong style="color:var(--green)">+${p.delta}</strong></span>
           </div>`).join("") || `<div style="color:var(--muted);font-size:11px;padding:4px">No one improved</div>`}
         </div>
         <div style="flex:1;min-width:220px">
           <h3 style="font-size:12px;color:var(--red)">▼ Biggest drops</h3>
-          ${movers.filter(p => p.delta < 0).slice(-5).reverse().map(p => `<div onclick="openPerson('${p.d4}')" style="cursor:pointer;font-size:11px;padding:5px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          ${movers.filter(p => p.delta < 0).slice(-5).reverse().map(p => `<div onclick="openPersonIPPT('${p.d4}')" style="cursor:pointer;font-size:11px;padding:5px 8px;border-radius:4px;background:var(--surface2);display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
             <span>${displayId(p.d4) ? `<span class="mono" style="color:var(--accent);font-weight:700">${displayId(p.d4)}</span> ` : ""}${displayPersonLabel(p.d4)}</span>
             <span class="mono" style="white-space:nowrap">${p.s1} → ${p.s2} <strong style="color:var(--red)">${p.delta}</strong></span>
           </div>`).join("") || `<div style="color:var(--muted);font-size:11px;padding:4px">No one dropped 🎉</div>`}
@@ -2394,7 +2394,7 @@ function ipptSeriesSection(series, rows, aggMode) {
     </div>` : ""}
 
     ${tableRows.length ? `<div class="table-wrap"><table><thead><tr><th>4D</th><th>Name</th><th>IPPT</th><th>Date</th><th>PU</th><th>SU</th><th>2.4km</th><th>Score</th><th>Award</th><th></th></tr></thead><tbody>
-    ${tableRows.map(i => `<tr><td class="mono" style="font-weight:700">${displayId(i.d4)}</td><td style="text-align:left">${displayPersonLabel(i.d4)}</td><td style="white-space:nowrap">${L(i.attempt)}</td><td style="white-space:nowrap">${displayDateToISO(i.date) ? isoToShortDate(displayDateToISO(i.date)) : (i.date || "—")}</td><td>${i.pushups}</td><td>${i.situps}</td><td>${i.runTime}</td><td style="font-weight:700;font-size:15px">${isYTT(i) ? '<span style="color:var(--muted)">—</span>' : i.score}</td><td>${ipptAwardBadge(i)}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="openIPPTForm('${i.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="deleteEntry('ippt', '${i.id}', 'IPPT entry')" title="Delete">✕</button></td></tr>`).join("")}
+    ${tableRows.map(i => `<tr><td class="mono" style="font-weight:700">${displayId(i.d4)}</td><td style="text-align:left">${displayPersonLabel(i.d4)}</td><td style="white-space:nowrap">${L(i.attempt)}</td><td style="white-space:nowrap">${displayDateToISO(i.date) ? isoToShortDate(displayDateToISO(i.date)) : (i.date || "—")}</td><td>${i.pushups}</td><td>${i.situps}</td><td>${i.runTime}</td><td style="font-weight:700;font-size:15px;cursor:pointer" onclick="openPersonIPPT('${i.d4}')" title="IPPT history and best per station">${isYTT(i) ? '<span style="color:var(--muted)">—</span>' : i.score}</td><td>${ipptAwardBadge(i)}</td><td style="white-space:nowrap"><button class="btn btn-icon" onclick="openIPPTForm('${i.id}')" title="Edit">✎</button> <button class="btn btn-icon btn-danger" onclick="deleteEntry('ippt', '${i.id}', 'IPPT entry')" title="Delete">✕</button></td></tr>`).join("")}
     </tbody></table></div>` : `<div class="empty-state">No results${attemptFilter ? ` for ${L(attemptFilter)}` : ""}${isFilterActive() ? ` in ${filterLabel()}` : ""}.</div>`}`;
 
   const buildCharts = () => {
