@@ -23,6 +23,16 @@ const PATCH_NOTES = [
   {
     v: 171,
     date: "2 Nov 2026",
+    title: "One box to pick a person",
+    intro: "The person search and the person list are now the same box.",
+    items: [
+      { t: "▾ Tap to see everyone", d: "Tap the box and the full list drops down. Tap a name to pick him." },
+      { t: "⌕ Or type", d: "Type a 4D or part of a name in the same box and the list shrinks as you type. Enter picks the first man on it." }
+    ]
+  },
+  {
+    v: 170,
+    date: "2 Nov 2026",
     title: "A man's IPPT at a glance",
     intro: "Tap a man's IPPT score to see every IPPT he has taken and his best at each station.",
     items: [

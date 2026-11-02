@@ -73,7 +73,8 @@ test("a 503 (server busy) self-heals: retries in place, ends Saved, zero user ta
   await page.click(`.nav-btn[data-nav="dashboard"]`);
   await page.click("text=+ Book Out");
   await page.selectOption("#f-bo-scope", "person");
-  await page.selectOption("#f-bo-d4", { index: 1 });
+  await page.click("#f-bo-d4-q");
+  await page.locator("#f-bo-d4-menu [role=option]").first().click();
   await page.fill("#f-bo-reason", "MO");
   await page.click("#f-bo-submit");
 
@@ -99,7 +100,8 @@ test("a 401 (access revoked) shows 'Sign in again' and stops retrying", async ({
   await page.click(`.nav-btn[data-nav="dashboard"]`);
   await page.click("text=+ Book Out");
   await page.selectOption("#f-bo-scope", "person");
-  await page.selectOption("#f-bo-d4", { index: 1 });
+  await page.click("#f-bo-d4-q");
+  await page.locator("#f-bo-d4-menu [role=option]").first().click();
   await page.fill("#f-bo-reason", "MO");
   await page.click("#f-bo-submit");
 

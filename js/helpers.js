@@ -1495,43 +1495,111 @@ function rosterSelect(id = "form-d4", required = true, selected = "", roleFilter
     : `${r.id} ${r.name}`;
   const onchangeAttr = opts.onchange ? ` onchange="${escapeAttr(opts.onchange)}"` : "";
   const fieldStyle = "width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box";
-  // A type-to-find box above the dropdown: scrolling ~100 names on a phone is
-  // slow. The <select> stays the real field (gv(id), required, onchange).
-  return `<div class="roster-pick"><input id="${id}-q" type="search" enterkeyhint="done" autocomplete="off" placeholder="Search 4D or name..." oninput="rosterSelectFilter('${id}', this.value)" onkeydown="rosterSelectKey(event, '${id}')" style="${fieldStyle};margin-bottom:4px"><select id="${id}" ${required ? "required" : ""}${onchangeAttr} style="${fieldStyle}"><option value="">Select...</option>${rows.map(r => `<option value="${r.id}" ${r.id === selected ? "selected" : ""}>${escapeAttr(optLabel(r))}</option>`).join("")}</select></div>`;
+  const pick = rows.find(r => r.id === selected);
+  // One box that is both the search and the dropdown: tap it to see everyone,
+  // type to narrow the same list (scrolling ~100 names on a phone is slow).
+  // The hidden <select> stays the real field, so gv(id), onchange and the
+  // callers are unchanged; the box only drives it. `required` moves to the
+  // box, which is emptied on blur unless it shows a pick.
+  return `<div class="roster-pick dropdown-wrapper" style="display:block">` +
+    `<input id="${id}-q" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-menu" enterkeyhint="done" autocomplete="off" placeholder="Search 4D or name..." value="${pick ? escapeAttr(optLabel(pick)) : ""}" ${required ? "required" : ""} onfocus="rosterPickOpen('${id}')" onclick="rosterPickOpen('${id}')" oninput="rosterSelectFilter('${id}', this.value)" onkeydown="rosterSelectKey(event, '${id}')" onblur="rosterPickBlur('${id}')" style="${fieldStyle}">` +
+    `<select id="${id}" hidden tabindex="-1" aria-hidden="true"${onchangeAttr}><option value="">Select...</option>${rows.map(r => `<option value="${r.id}" ${r.id === selected ? "selected" : ""}>${escapeAttr(optLabel(r))}</option>`).join("")}</select>` +
+    // mousedown is cancelled so tapping a name never blurs the box first.
+    `<div id="${id}-menu" class="dropdown-menu hidden" role="listbox" onmousedown="event.preventDefault()" style="left:0;right:0;transform-origin:top left;max-height:260px;overflow-y:auto"></div>` +
+    `</div>`;
 }
 
-// Narrows a rosterSelect to the people whose 4D / rank / name contain every
-// typed word. Options are removed rather than hidden (iOS ignores hidden
-// <option>s). The current pick is kept so typing never silently changes it,
-// and a single match is picked straight away (onchange fires as if tapped).
-function rosterSelectFilter(id, q) {
-  const sel = document.getElementById(id);
-  if (!sel) return [];
-  if (!sel._allOpts) sel._allOpts = [...sel.options];
-  const [blank, ...people] = sel._allOpts;
+// The people whose 4D / rank / name contain every typed word, read from the
+// hidden select's options (the source of truth for labels and order).
+function rosterPickHits(sel, q) {
   const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
-  const hits = people.filter(o => {
+  const hits = [...sel.options].slice(1).filter(o => {
     const hay = (o.value + " " + o.text).toLowerCase();
     return words.every(w => hay.includes(w));
   });
-  const prev = sel.value;
-  sel.replaceChildren(blank, ...people.filter(o => hits.includes(o) || (prev && o.value === prev)));
-  sel.value = prev;
-  blank.text = !words.length ? "Select..." : hits.length ? `${hits.length} found - select...` : "No one found";
-  if (words.length && hits.length === 1 && prev !== hits[0].value) rosterSelectPick(sel, hits[0].value);
+  return { words, hits };
+}
+function rosterPickRender(id, q) {
+  const sel = document.getElementById(id);
+  const menu = document.getElementById(`${id}-menu`);
+  if (!sel || !menu) return [];
+  const { hits } = rosterPickHits(sel, q);
+  menu.innerHTML = hits.length
+    ? hits.map(o => {
+        const on = o.value === sel.value;
+        return `<button type="button" role="option" aria-selected="${on}" data-v="${escapeAttr(o.value)}" onclick="rosterPickChoose('${id}', this.dataset.v)"${on ? ` style="color:var(--accentLift);font-weight:700"` : ""}>${escapeAttr(o.text)}</button>`;
+      }).join("")
+    : `<div style="color:var(--muted);font-size:12px;padding:8px 12px">No one found</div>`;
+  return hits;
+}
+function rosterPickShow(id, open) {
+  document.getElementById(`${id}-menu`)?.classList.toggle("hidden", !open);
+  document.getElementById(`${id}-q`)?.setAttribute("aria-expanded", String(open));
+}
+// Tapping the box lists everyone (not only whoever matches the name it shows),
+// with its text selected so typing replaces it.
+function rosterPickOpen(id) {
+  const q = document.getElementById(`${id}-q`);
+  const menu = document.getElementById(`${id}-menu`);
+  if (!q || !menu || !menu.classList.contains("hidden")) return;
+  document.querySelectorAll(".dropdown-menu").forEach(m => { if (m !== menu) m.classList.add("hidden"); });
+  rosterPickRender(id, "");
+  rosterPickShow(id, true);
+  menu.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  q.select();
+}
+// Typing narrows the list. The current pick is kept until another is made, and
+// a single match is picked straight away (onchange fires as if tapped).
+function rosterSelectFilter(id, q) {
+  const sel = document.getElementById(id);
+  if (!sel) return [];
+  const hits = rosterPickRender(id, q);
+  rosterPickShow(id, true);
+  if (rosterPickHits(sel, q).words.length && hits.length === 1 && sel.value !== hits[0].value) {
+    rosterSelectPick(sel, hits[0].value);
+    rosterPickRender(id, q);
+  }
   return hits;
 }
 function rosterSelectPick(sel, value) {
   sel.value = value;
   sel.dispatchEvent(new Event("change", { bubbles: true }));
 }
-// Enter in the search box picks the first match instead of submitting the form.
+// The box shows the pick's label, or nothing when there is no pick.
+function rosterPickSettle(id) {
+  const sel = document.getElementById(id);
+  const q = document.getElementById(`${id}-q`);
+  if (!sel || !q) return;
+  q.value = sel.value ? (sel.selectedOptions[0]?.text || "") : "";
+  rosterPickShow(id, false);
+}
+function rosterPickChoose(id, value) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  if (sel.value !== value) rosterSelectPick(sel, value);
+  rosterPickSettle(id);
+}
+// Leaving the box: an emptied box clears the pick; half-typed text that was
+// never picked goes back to showing the pick.
+function rosterPickBlur(id) {
+  const sel = document.getElementById(id);
+  const q = document.getElementById(`${id}-q`);
+  if (!sel || !q) return;
+  if (!q.value.trim() && sel.value) rosterSelectPick(sel, "");
+  rosterPickSettle(id);
+}
+// Enter picks the first match instead of submitting the form; Escape closes
+// the list without closing the modal.
 function rosterSelectKey(e, id) {
+  if (e.key === "Escape") {
+    const menu = document.getElementById(`${id}-menu`);
+    if (menu && !menu.classList.contains("hidden")) { e.preventDefault(); e.stopPropagation(); rosterPickSettle(id); }
+    return;
+  }
   if (e.key !== "Enter") return;
   e.preventDefault();
   const hits = rosterSelectFilter(id, e.target.value);
-  const sel = document.getElementById(id);
-  if (sel && hits.length && sel.value !== hits[0].value) rosterSelectPick(sel, hits[0].value);
+  if (hits.length) rosterPickChoose(id, hits[0].value);
 }
 function formField(id, label, type = "text", placeholder = "", extra = "") {
   const ph = placeholder ? ` placeholder="${placeholder}"` : "";

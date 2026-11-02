@@ -1,48 +1,84 @@
-// Feature spec: every person picker has a type-to-find box above it.
+// Feature spec: every person picker is ONE box that is both a search and a
+// dropdown.
 //
-// Drives the REAL Book Appointment form (rosterSelect). Typing narrows the
-// dropdown, a single match is picked (and the form's onchange sees it), Enter
-// picks the first match without submitting, and the pick survives a filter
-// that would otherwise hide it.
+// Drives the REAL Book Appointment form (rosterSelect). Tapping the box lists
+// everyone; typing narrows that same list; tapping a name picks him; a single
+// match is picked (and the form's onchange sees it); Enter picks the first
+// match without submitting; leaving the box with half-typed text puts the
+// pick's name back. The hidden <select> stays the real field.
 const { test, expect } = require("@playwright/test");
 const { seedAndGoto } = require("./support");
 
-const optionValues = (page) =>
-  page.$$eval("#f-d4 option", (els) => els.map((e) => e.value).filter(Boolean));
+const listed = (page, id) =>
+  page.$$eval(`#${id}-menu [role=option]`, (els) => els.map((e) => e.dataset.v));
 
-test.describe("type to find a person", () => {
-  test("search narrows the appointment picker and picks a single match", async ({ page }) => {
+test.describe("one box to pick a person", () => {
+  test("search and dropdown are the same box in the appointment form", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await seedAndGoto(page);
     await page.evaluate(() => openAppointmentForm(""));
     const q = page.locator("#f-d4-q");
+    const menu = page.locator("#f-d4-menu");
     await expect(q).toBeVisible();
-    const all = await optionValues(page);
+    // No second control: the real select is hidden.
+    await expect(page.locator("#f-d4")).toBeHidden();
+    await expect(menu).toBeHidden();
+
+    // Tap: the whole list drops down.
+    await q.click();
+    await expect(menu).toBeVisible();
+    const all = await listed(page, "f-d4");
     expect(all.length).toBeGreaterThan(5);
 
-    // Name words, any order, any case.
+    // Tap a name: picked, the box shows him, the list closes.
+    await menu.locator('[data-v="2403"]').click();
+    await expect(page.locator("#f-d4")).toHaveValue("2403");
+    await expect(menu).toBeHidden();
+    await expect(q).toHaveValue(/^2403 /);
+
+    // Type in the same box: name words, any order, any case; one match is picked.
+    await q.click();
     await q.fill("one alpha");
-    expect(await optionValues(page)).toEqual(["1401"]);
+    await expect(menu).toBeVisible();
+    expect(await listed(page, "f-d4")).toEqual(["1401"]);
     await expect(page.locator("#f-d4")).toHaveValue("1401");
 
-    // A 4D prefix; the earlier pick stays listed so it is never lost silently.
+    // A 4D prefix lists the matches; the pick stands until another is made.
     await q.fill("240");
-    expect(await optionValues(page)).toEqual(["1401", "2401", "2402", "2403"]);
+    expect(await listed(page, "f-d4")).toEqual(["2401", "2402", "2403"]);
     await expect(page.locator("#f-d4")).toHaveValue("1401");
 
     // Enter picks the first match and does not submit the form.
     await q.fill("bravo");
     await q.press("Enter");
     await expect(page.locator("#f-d4")).toHaveValue("2401");
-    await expect(page.locator("#f-d4-q")).toBeVisible();
+    await expect(q).toBeVisible();
+    await expect(menu).toBeHidden();
 
-    // Nobody matches: says so; clearing brings everyone back.
+    // Nobody matches: says so; leaving the box puts the pick's name back.
+    await q.click();
     await q.fill("zzz");
-    await expect(page.locator("#f-d4 option").first()).toHaveText("No one found");
-    await q.fill("");
-    expect(await optionValues(page)).toEqual(all);
+    await expect(menu).toContainText("No one found");
+    await page.locator(".modal h3").first().click();
+    await expect(q).toHaveValue(/^2401 /);
+    await expect(page.locator("#f-d4")).toHaveValue("2401");
+
+    // Reopening lists everyone again, not just the current pick.
+    await q.click();
+    expect(await listed(page, "f-d4")).toEqual(all);
     expect(errors).toEqual([]);
+  });
+
+  test("an empty box blocks a required form, and clearing it clears the pick", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => openAppointmentForm("", { d4: "2402" }));
+    const q = page.locator("#f-d4-q");
+    await expect(q).toHaveValue(/^2402 /);
+    await q.fill("");
+    await page.locator(".modal h3").first().click();
+    await expect(page.locator("#f-d4")).toHaveValue("");
+    expect(await q.evaluate((el) => el.validity.valueMissing)).toBe(true);
   });
 
   test("a single match fires the picker's onchange (Book Out reason prefill path)", async ({ page }) => {

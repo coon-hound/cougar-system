@@ -72,7 +72,7 @@ test.describe("people list by rank, highest first", () => {
     // The shared picker (rosterSelect) behind Medical / IPPT / Book Out /
     // Leave / Log Conduct. Asserting it once covers all of them.
     await page.evaluate(() => openMedicalForm());
-    await expect(page.locator("#f-d4")).toBeVisible();
+    await expect(page.locator("#f-d4-q")).toBeVisible();
     expect(await optionValues(page, "#f-d4")).toEqual(EXPECTED);
 
     // The label still reads "rank name" for a commander, so the order is
@@ -119,7 +119,7 @@ test.describe("people list by rank, highest first", () => {
     await page.screenshot({ path: "test-results/rank-ordering-roster-390.png", fullPage: true });
 
     await page.evaluate(() => openMedicalForm());
-    await expect(page.locator("#f-d4")).toBeVisible();
+    await expect(page.locator("#f-d4-q")).toBeVisible();
     expect(await optionValues(page, "#f-d4")).toEqual(EXPECTED);
     await page.screenshot({ path: "test-results/rank-ordering-picker-390.png", fullPage: true });
   });
