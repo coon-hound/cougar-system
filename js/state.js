@@ -43,8 +43,9 @@ const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 //   v3 "cougar-data-v3"  - intake 16 before platoon 9 was re-sectioned
 //   v5 "cougar-data-v5"  - before section 9-4 closed up behind a departure
 //   v6 "cougar-data-v6"  - before a man moved 7-2 -> 9-4 and a late enlistee joined 7-2
-const STORAGE_KEY = "cougar-data-v9";
-const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5", "cougar-data-v6", "cougar-data-v7", "cougar-data-v8"];
+//   v9 "cougar-data-v9"  - before a man moved 9-3 -> 9-2 (9307 -> 9210) and 9-3 closed up
+const STORAGE_KEY = "cougar-data-v10";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5", "cougar-data-v6", "cougar-data-v7", "cougar-data-v8", "cougar-data-v9"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
