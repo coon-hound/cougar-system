@@ -147,7 +147,8 @@ test("adding a result files it under the phase picked in the form", async ({ pag
   await gotoIPPT(page);
   await page.locator("button", { hasText: "+ Add" }).click();
   await expect(page.locator("#f-series")).toHaveValue("KH");
-  await page.selectOption("#f-d4", "2402");
+  await page.click("#f-d4-q");
+  await page.click(`#f-d4-menu [data-v="2402"]`);
   await page.selectOption("#f-attempt", "1");
   await page.fill("#f-pu", "40"); await page.fill("#f-su", "40");
   await page.fill("#f-run-min", "11"); await page.fill("#f-run-sec", "30");
@@ -160,11 +161,59 @@ test("adding a result files it under the phase picked in the form", async ({ pag
   await expect(page.locator(`${KH} .card`, { hasText: "YTT Chase List" })).not.toContainText("BRAVO TWO");
 });
 
+test("the profile's IPPT card shows best and most recent, and opens the IPPT details", async ({ page }) => {
+  await gotoIPPT(page);
+  const expected = await page.evaluate(() => {
+    const rows = STATE.ippt.filter((r) => r.d4 === "1401" && !isYTT(r)).sort((a, b) => ipptOrderKey(a) - ipptOrderKey(b));
+    const lbl = (r) => ipptConductLabel(ipptSeriesOf(r), r.attempt, true);
+    const best = rows.reduce((b, r) => (+r.score > +b.score ? r : b), rows[0]);
+    const last = rows[rows.length - 1];
+    return { best: String(best.score), bestFrom: lbl(best), last: String(last.score), lastFrom: lbl(last) };
+  });
+  await page.evaluate(() => openPerson("1401"));
+  const card = page.locator("#person-ippt-stat");
+  await expect(card).toContainText(`Best · ${expected.bestFrom}`);
+  await expect(card).toContainText(`Most recent · ${expected.lastFrom}`);
+  await expect(card.locator(".val").first()).toHaveText(expected.best);
+  await expect(card.locator(".val").nth(1)).toHaveText(expected.last);
+
+  // Collapsed until the card is tapped; tapping again closes it.
+  const sec = page.locator("#person-ippt");
+  await expect(sec).toBeHidden();
+  await card.click();
+  await expect(sec).toBeVisible();
+  await expect(page.locator("#person-ippt-history")).toBeVisible();
+  await expect(page.locator("#person-ippt-caret")).toHaveText("▴ hide");
+  await card.click();
+  await expect(sec).toBeHidden();
+  await expect(page.locator("#person-ippt-caret")).toHaveText("▾ details");
+});
+
 test("a person's profile labels IPPTs by phase, BMT first", async ({ page }) => {
   await gotoIPPT(page);
-  await page.evaluate(() => openPerson("1401"));
-  const badges = page.locator("#modal-body .badge-accent", { hasText: /^(BMT|KH) \d/ });
-  await expect(badges).toHaveCount(4);
-  await expect(badges.first()).toContainText("BMT 1");
-  await expect(badges.last()).toContainText("KH 1");
+  await page.evaluate(() => openPersonIPPT("1401"));
+  const rows = page.locator("#person-ippt-history tbody tr");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.first()).toContainText("BMT 1");
+  await expect(rows.last()).toContainText("KH 1");
+});
+
+test("a person's profile shows his best per station, each from the IPPT it came from", async ({ page }) => {
+  await gotoIPPT(page);
+  const expected = await page.evaluate(() => {
+    const rows = STATE.ippt.filter((r) => r.d4 === "1401" && !isYTT(r));
+    const pick = (val, better) => rows.reduce((b, r) => (val(r) > 0 && (!b || better(val(r), val(b))) ? r : b), null);
+    const lbl = (r) => ipptConductLabel(ipptSeriesOf(r), r.attempt, true);
+    const pu = pick((r) => +r.pushups, (a, b) => a > b);
+    const run = pick((r) => parseRunTimeToSeconds(r.runTime), (a, b) => a < b);
+    return { pu: String(pu.pushups), puFrom: lbl(pu), run: run.runTime, runFrom: lbl(run) };
+  });
+  // Tapping a score in the results table lands on his IPPT section.
+  await page.locator('td[onclick="openPersonIPPT(\'1401\')"]').first().click();
+  await expect(page.locator("#person-ippt")).toBeVisible();
+  const stat = (label) => page.locator("#person-ippt .stat", { has: page.locator("label", { hasText: new RegExp(`^${label}$`) }) });
+  await expect(stat("Push-ups")).toContainText(expected.pu);
+  await expect(stat("Push-ups")).toContainText(expected.puFrom);
+  await expect(stat("2.4km")).toContainText(expected.run);
+  await expect(stat("2.4km")).toContainText(expected.runFrom);
 });

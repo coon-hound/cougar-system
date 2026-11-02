@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 171;
+const APP_VERSION = 173;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,7 +21,7 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 171,
+    v: 173,
     date: "2 Nov 2026",
     title: "Qualifications, PES and SOC",
     intro: "Each man's card now shows his PES and latest SOC, the weapons he is THT-trained on, and his qualifications such as CPR/AED and the basic drone package.",
@@ -33,13 +33,34 @@ const PATCH_NOTES = [
     ]
   },
   {
+    v: 172,
+    date: "2 Nov 2026",
+    title: "IPPT card in the profile",
+    intro: "The IPPT card in a man's profile now shows two scores, and opens the rest of his IPPT.",
+    items: [
+      { t: "Best and most recent", d: "The card shows his best IPPT score and his most recent one, each with the IPPT it came from." },
+      { t: "▾ Tap for details", d: "Tap the card to open his best per station, progression chart and every attempt. Tap again to close it. Opening a man from the IPPT tab shows them straight away." }
+    ]
+  },
+  {
+    v: 171,
+    date: "2 Nov 2026",
+    title: "One box to pick a person",
+    intro: "The person search and the person list are now the same box.",
+    items: [
+      { t: "▾ Tap to see everyone", d: "Tap the box and the full list drops down. Tap a name to pick him." },
+      { t: "⌕ Or type", d: "Type a 4D or part of a name in the same box and the list shrinks as you type. Enter picks the first man on it." }
+    ]
+  },
+  {
     v: 170,
     date: "2 Nov 2026",
-    title: "Type to find a person",
-    intro: "Forms that ask you to pick a person now have a search box above the list.",
+    title: "A man's IPPT at a glance",
+    intro: "Tap a man's IPPT score to see every IPPT he has taken and his best at each station.",
     items: [
-      { t: "⌕ Search 4D or name", d: "Type a 4D, a name or part of one and the list shrinks to the men who match. If only one man matches, he is picked for you." },
-      { t: "↵ Enter picks", d: "Press Enter to pick the first man on the list. You can still scroll the list like before." }
+      { t: "★ Best per station", d: "His best score, most push-ups, most sit-ups and fastest 2.4km, and which IPPT each one was from." },
+      { t: "☰ IPPT history", d: "Every IPPT he has taken, BMT first, with each station's result. His bests are in orange." },
+      { t: "⌕ From the IPPT tab", d: "Tap a score in the results table, or a name in Top Performers or Most improved, to go straight to his IPPT." }
     ]
   },
   {
