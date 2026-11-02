@@ -150,7 +150,7 @@ function qualState(q, dateIso) {
   if (left === null) return "valid";
   return left < 0 ? "expired" : left <= QUAL_EXPIRING_DAYS ? "expiring" : "valid";
 }
-// CESP badge fields. Vocabularies are suggestions for the editor and the
+// PES, SOC and THT fields. Vocabularies are suggestions for the editor and the
 // import's validation; the columns are free text so a new grade never needs
 // a code change.
 const PES_GRADES = ["A", "B1", "B2", "B3", "B4", "C2", "C9", "E1", "E9", "F"];

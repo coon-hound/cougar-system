@@ -1,7 +1,7 @@
 -- ============================================================================
--- 0015_cesp_fields.sql - PES, latest SOC and THT weapons as roster columns
+-- 0015_quals_fields.sql - PES, latest SOC and THT weapons as roster columns
 --
--- The CESP badge needs four facts per man that the roster did not hold:
+-- Four facts per man that the roster did not hold:
 --   pes           PES grade ("A", "B1", "B2", "E1"...)
 --   socLevel      latest SOC passed ("SOC1".."SOC5", "None" = never did one)
 --   thtPrimary    THT-trained primary weapon ("MATADOR", "LMG", "M203", "")

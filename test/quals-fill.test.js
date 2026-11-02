@@ -1,4 +1,4 @@
-// Tests for the CESP badge form import (scripts/cesp-fill.mjs).
+// Tests for the qualifications form import (scripts/quals-fill.mjs).
 //
 // The form has no 4D, so the part worth testing is who a row lands on: only an
 // exact name in the right platoon and section, or a hand pin. Names here are
@@ -24,12 +24,12 @@ const ROSTER = [
 ];
 
 async function main() {
-  const F = await import(pathToFileURL(path.join(ROOT, "scripts/cesp-fill.mjs")).href);
+  const F = await import(pathToFileURL(path.join(ROOT, "scripts/quals-fill.mjs")).href);
 
-  suite("cesp-fill - reading the form");
+  suite("quals-fill - reading the form");
 
   await test("every column maps, NOT TRAINED is blank, Never do SOC is None", () => {
-    const p = F.planCesp(HEAD + row("Wei Tan Alpha", 7, 1, "MATADOR", "NOT TRAINED", "B1", "QUALIFIED", "NOT QUALIFIED", "Never do SOC"), ROSTER);
+    const p = F.planQualsFill(HEAD + row("Wei Tan Alpha", 7, 1, "MATADOR", "NOT TRAINED", "B1", "QUALIFIED", "NOT QUALIFIED", "Never do SOC"), ROSTER);
     eq(p.skipped, []);
     eq(p.rows.length, 1);
     eq(p.rows[0].id, "7101");
@@ -38,26 +38,26 @@ async function main() {
   });
 
   await test("an unknown weapon or PES skips the row rather than storing junk", () => {
-    const p = F.planCesp(HEAD + row("ALPHA TAN WEI", 7, 1, "RIFLE", "LMG", "Z9", "QUALIFIED", "QUALIFIED", "SOC5"), ROSTER);
+    const p = F.planQualsFill(HEAD + row("ALPHA TAN WEI", 7, 1, "RIFLE", "LMG", "Z9", "QUALIFIED", "QUALIFIED", "SOC5"), ROSTER);
     eq(p.rows.length, 0);
     ok(/thtPrimary/.test(p.skipped[0].why) && /PES/.test(p.skipped[0].why));
   });
 
-  suite("cesp-fill - which seat a row lands on");
+  suite("quals-fill - which seat a row lands on");
 
   await test("BIN carries no information: the name matches in any order", () => {
-    const p = F.planCesp(HEAD + row("BRAVO CHARLIE MUHAMMAD", 7, 2, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER);
+    const p = F.planQualsFill(HEAD + row("BRAVO CHARLIE MUHAMMAD", 7, 2, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER);
     eq(p.rows.map(r => r.id), ["7203"]);
   });
 
   await test("a right name in the wrong platoon/section is not written", () => {
-    const p = F.planCesp(HEAD + row("ECHO NG KAI", 9, 3, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER);
+    const p = F.planQualsFill(HEAD + row("ECHO NG KAI", 9, 3, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER);
     eq(p.rows.length, 0);
     ok(/9402/.test(p.skipped[0].why));
   });
 
   await test("a near-miss spelling is skipped with the closest seats, never guessed", () => {
-    const p = F.planCesp(HEAD + row("ECHO NG KAY", 9, 4, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER);
+    const p = F.planQualsFill(HEAD + row("ECHO NG KAY", 9, 4, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER);
     eq(p.rows.length, 0);
     ok(/no exact name match/.test(p.skipped[0].why));
     ok(p.skipped[0].near.some(n => n.startsWith("9402")));
@@ -65,14 +65,14 @@ async function main() {
 
   await test("a name on two seats is ambiguous; a pin settles it", () => {
     const csv = HEAD + row("DELTA LIM", 8, 3, "M203", "LMG", "B2", "NOT QUALIFIED", "QUALIFIED", "SOC3");
-    eq(F.planCesp(csv, ROSTER).rows.length, 0);
-    const p = F.planCesp(csv, ROSTER, new Map([[2, "8305"]]));
+    eq(F.planQualsFill(csv, ROSTER).rows.length, 0);
+    const p = F.planQualsFill(csv, ROSTER, new Map([[2, "8305"]]));
     eq(p.rows.map(r => [r.id, r.how]), [["8305", "pinned"]]);
     eq(p.rows[0].quals, ["Basic Drone"]);
   });
 
   await test("a pin to a seat that does not exist is refused", () => {
-    const p = F.planCesp(HEAD + row("NOBODY", 7, 1, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER, new Map([[2, "7999"]]));
+    const p = F.planQualsFill(HEAD + row("NOBODY", 7, 1, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4"), ROSTER, new Map([[2, "7999"]]));
     eq(p.rows.length, 0);
     ok(/7999/.test(p.skipped[0].why));
   });
@@ -80,12 +80,12 @@ async function main() {
   await test("two form rows on one seat: neither is trusted", () => {
     const csv = HEAD + row("ALPHA TAN WEI", 7, 1, "LMG", "M203", "A", "QUALIFIED", "QUALIFIED", "SOC4")
                      + row("TAN ALPHA WEI", 7, 1, "MATADOR", "", "B1", "QUALIFIED", "QUALIFIED", "SOC5");
-    const p = F.planCesp(csv, ROSTER);
+    const p = F.planQualsFill(csv, ROSTER);
     eq(p.rows.length, 0);
     eq(p.skipped.map(s => s.line), [2, 3]);
   });
 
-  suite("cesp-fill - quals are only ever added");
+  suite("quals-fill - quals are only ever added");
 
   await test("existing quals and their expiry survive; a held qual is not re-added", () => {
     const q = F.addQuals("CPR/AED@2027-03-31, Range Safety", ["CPR/AED", "Basic Drone"]);

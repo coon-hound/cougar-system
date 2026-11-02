@@ -1702,7 +1702,7 @@ function rolesAddQualRow() {
 
 // A select over a vocabulary that keeps a value outside it (an imported "B3"
 // the list does not know) rather than silently blanking it on save.
-function cespSelect(id, label, options, value, blank) {
+function profileSelect(id, label, options, value, blank) {
   const v = String(value || "");
   const opts = v && !options.includes(v) ? [...options, v] : options;
   return `<div class="form-group" style="margin:0"><label for="${id}">${label}</label>
@@ -1731,10 +1731,10 @@ function openRolesForm(d4) {
           <button type="button" class="btn" style="margin-top:6px;font-size:12px" onclick="rolesAddQualRow()">+ Add qualification</button>
         </div>
         <div class="grid-2" style="gap:10px">
-          ${cespSelect("f-tht1", "THT weapon (primary)", THT_WEAPONS, r.thtPrimary, "Not trained")}
-          ${cespSelect("f-tht2", "THT weapon (secondary)", THT_WEAPONS, r.thtSecondary, "Not trained")}
-          ${cespSelect("f-pes", "PES", PES_GRADES, r.pes, "Not recorded")}
-          ${cespSelect("f-soc", "Latest SOC", SOC_LEVELS, r.socLevel, "Not recorded")}
+          ${profileSelect("f-tht1", "THT weapon (primary)", THT_WEAPONS, r.thtPrimary, "Not trained")}
+          ${profileSelect("f-tht2", "THT weapon (secondary)", THT_WEAPONS, r.thtSecondary, "Not trained")}
+          ${profileSelect("f-pes", "PES", PES_GRADES, r.pes, "Not recorded")}
+          ${profileSelect("f-soc", "Latest SOC", SOC_LEVELS, r.socLevel, "Not recorded")}
         </div>
         <button type="submit" class="btn btn-primary">Save</button>
       </div>

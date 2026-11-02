@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // ============================================================================
-// cesp-fill.mjs - load the CESP BADGE ELIGIBILITY form into the roster.
+// quals-fill.mjs - load a qualifications form (Google Forms export) into the roster.
 //
 //   Preview (runs every write, then rolls back):
-//     DATABASE_URL=... node scripts/cesp-fill.mjs "CESP BADGE ELIGIBILITY (Responses).csv"
+//     DATABASE_URL=... node scripts/quals-fill.mjs "Form Responses.csv"
 //
 //   Apply (one transaction):
 //     ... --apply
@@ -77,7 +77,7 @@ const HEADERS = [
 ];
 
 // One form cell → the stored value, or { error }.
-export function cespValue(field, raw) {
+export function qualsValue(field, raw) {
   const s = String(raw ?? "").trim().replace(/\s+/g, " ").toUpperCase();
   if (field === "thtPrimary" || field === "thtSecondary") {
     if (!s || s === "NOT TRAINED" || s === "NIL") return "";
@@ -101,7 +101,7 @@ export function cespValue(field, raw) {
   return s;
 }
 
-export function parseCesp(text) {
+export function parseQualsForm(text) {
   return parseCsv(text).map((raw, n) => {
     const v = {};
     for (const [header, value] of Object.entries(raw)) {
@@ -112,11 +112,11 @@ export function parseCesp(text) {
     const issues = [];
     const out = { line: n + 2, name: String(v.name ?? "").trim(), plt: String(v.plt ?? "").trim(), sect: String(v.sect ?? "").trim(), columns: {}, quals: [] };
     for (const f of COLUMNS) {
-      const r = cespValue(f, v[f]);
+      const r = qualsValue(f, v[f]);
       if (r && typeof r === "object") issues.push(r.error); else if (r) out.columns[f] = r;
     }
     for (const [f, q] of [["cpr", QUAL_CPR], ["drone", QUAL_DRONE]]) {
-      const r = cespValue(f, v[f]);
+      const r = qualsValue(f, v[f]);
       if (r && typeof r === "object") issues.push(r.error); else if (r === true) out.quals.push(q);
     }
     out.issues = issues;
@@ -135,7 +135,7 @@ const seatSect = id => (String(id).match(/^\d(\d)/) || [])[1] || "";
  * @param {Map<number,string>} pins  form line → 4D, set by hand
  * @returns {{ rows: {line, id, columns, quals, how}[], skipped: {line, why, near}[] }}
  */
-export function planCesp(text, roster, pins = new Map()) {
+export function planQualsFill(text, roster, pins = new Map()) {
   const byId = new Map(roster.map(r => [padD4(r.id), r]));
   const byKey = new Map();
   for (const r of roster) {
@@ -152,7 +152,7 @@ export function planCesp(text, roster, pins = new Map()) {
     .map(x => `${x.id} (${Math.round(x.score * 100)}%)`);
 
   const rows = [], skipped = [];
-  for (const f of parseCesp(text)) {
+  for (const f of parseQualsForm(text)) {
     if (f.issues.length) { skipped.push({ line: f.line, why: f.issues.join("; "), near: [] }); continue; }
     let seat = null, how = "";
     if (pins.has(f.line)) {
@@ -200,7 +200,7 @@ async function main() {
   const { DATABASE_URL } = process.env;
   if (args.errors.length || !args.file) {
     for (const e of args.errors) console.error(e);
-    console.error('usage: DATABASE_URL=... node scripts/cesp-fill.mjs <form.csv> [--pin LINE=4D]... [--overwrite] [--apply]');
+    console.error('usage: DATABASE_URL=... node scripts/quals-fill.mjs <form.csv> [--pin LINE=4D]... [--overwrite] [--apply]');
     process.exitCode = 2;
     return;
   }
@@ -211,7 +211,7 @@ async function main() {
   try {
     const [{ label: intake }] = await sql`select label from intakes where is_current limit 1`;
     const roster = await sql`select "id", "name" from roster where deleted_at is null and intake = ${intake}`;
-    const plan = planCesp(fs.readFileSync(args.file, "utf8"), roster, args.pins);
+    const plan = planQualsFill(fs.readFileSync(args.file, "utf8"), roster, args.pins);
 
     const report = [];
     try {

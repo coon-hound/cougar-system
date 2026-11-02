@@ -29,7 +29,7 @@ const PATCH_NOTES = [
       { t: "🩺 PES and SOC on the profile", d: "Open a man: PES and SOC sit in his Profile next to ration and education." },
       { t: "🎯 THT weapons and 🎓 quals", d: "Shown as chips under his role. Tap ✎ next to his role to change them, or to add a qualification with an expiry date." },
       { t: "🎓 Award to many at once", d: "Roster ⋯ menu → 🎓 Quals shows who holds each qualification, and lets you tick everyone who just passed a course." },
-      { t: "📋 CESP badge view", d: "On the Roster, pick the CESP badge view to see PES, SOC, THT weapons and quals for everyone in one table." }
+      { t: "📋 Qualifications view", d: "On the Roster, pick the Qualifications view to see PES, SOC, THT weapons and quals for everyone in one table." }
     ]
   },
   {

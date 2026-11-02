@@ -96,10 +96,10 @@ test.describe("Section roles", () => {
     const holders = await page.evaluate(() => qualHolders("Range Safety Officer").map(h => h.r.id).sort());
     expect(holders).toEqual(["0091", "9911", "9912"]);
 
-    // The Master NR CESP view, filtered on the Qualifications column, narrows
+    // The Master NR Qualifications view, filtered on the Qualifications column, narrows
     // to the holders.
     await page.evaluate(() => {
-      STATE.nav = "roster"; STATE.filterRole = ""; render(); setNRPreset("cesp");
+      STATE.nav = "roster"; STATE.filterRole = ""; render(); setNRPreset("quals");
       const s = NR.load(); s.filters.quals = { in: ["Range Safety Officer"] }; nrSet(s);
     });
     await expect(page.locator("#content tbody tr")).toHaveCount(3);
