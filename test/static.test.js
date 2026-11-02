@@ -24,8 +24,8 @@ module.exports = async function run() {
   suite("static: load-time guards");
 
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
-  // All local <script src="js/....js?v=NN"> in document order.
-  const scriptRe = /<script\s+src="(js\/[^"?]+)(?:\?v=(\d+))?"><\/script>/g;
+  // All local <script src="js/....js?v=dev"> in document order.
+  const scriptRe = /<script\s+src="(js\/[^"?]+)(?:\?v=([^"]+))?"><\/script>/g;
   const scripts = [];
   let m;
   while ((m = scriptRe.exec(html)) !== null) scripts.push({ src: m[1], v: m[2] });
@@ -43,12 +43,16 @@ module.exports = async function run() {
     new vm.Script(bundle, { filename: "bundle.js" }); // throws on dup const/let or syntax error
   });
 
-  // (b) Every local script must share one cache-busting ?v=NN — a mismatch ships
-  // partly-stale JS (e.g. new index.html + old cached api.js).
-  await test("all script tags use the same ?v= cache version", () => {
-    const versions = [...new Set(scripts.map(s => s.v))];
-    ok(scripts.every(s => s.v), "every js script has a ?v= version: " + JSON.stringify(scripts.map(s => s.src + "?v=" + s.v)));
-    ok(versions.length === 1, "expected one version across all scripts, found: " + JSON.stringify(versions));
+  // (b) Every local script and the stylesheet carry ?v=dev, which the deploy
+  // (scripts/build-site.mjs) stamps with the real version. A missing ?v= ships
+  // a file phones keep serving from cache; a hand-typed number is the old
+  // bump-per-PR scheme that made every two open PRs conflict.
+  await test("all script tags and styles.css use ?v=dev (the deploy stamps it)", () => {
+    ok(scripts.every(s => s.v), "every js script has a ?v=: " + JSON.stringify(scripts.map(s => s.src + "?v=" + s.v)));
+    const css = html.match(/href="styles\.css(?:\?v=([^"]+))?"/);
+    ok(css && css[1], "styles.css has a ?v=");
+    const wrong = scripts.filter(s => s.v !== "dev").map(s => s.src + "?v=" + s.v).concat(css[1] === "dev" ? [] : ["styles.css?v=" + css[1]]);
+    ok(!wrong.length, "don't hand-bump ?v= — leave it as ?v=dev, the deploy stamps it: " + JSON.stringify(wrong));
   });
 
   suite("static: no unbumped tracked-tab writes (heuristic)");

@@ -1,24 +1,26 @@
-// "What's New" patch notes. Shown once per version, in a modal on launch.
+// "What's New" patch notes. Shown once, in a modal on launch.
 //
-// How it works: APP_VERSION is the current release number (keep it equal to the
-// ?v=NNN cache-buster in index.html). We persist the last version a device has
-// seen under SEEN_VERSION_KEY. On launch, maybeShowPatchNotes() shows every
-// PATCH_NOTES entry newer than what this device last saw, then stamps the
-// current version so the same notes never re-appear.
+// TO SHIP A NOTE: add a file notes/YYYY-MM-DD-slug.json (see notes/README.md).
+// Do NOT add to PATCH_NOTES below and do NOT bump anything: one file per note
+// is what keeps two open PRs from conflicting. The deploy gathers the files
+// into notes/index.json and stamps the ?v= cache-buster itself.
 //
-// To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
-// then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
+// How it works: each device remembers the note ids it has been shown
+// (SEEN_NOTES_KEY) and is shown the rest once. PATCH_NOTES is the history from
+// when notes were numbered (v106-v172); it is frozen, still honoured for a
+// device that has not seen all of it, through SEEN_VERSION_KEY.
 
-const APP_VERSION = 172;
+const APP_VERSION = 172;   // frozen: the last hand-numbered release
 
-// Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
-// doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
-// CUSTOM_STATUS_KEY in state.js.
+// Their own localStorage keys (NOT inside STORAGE_KEY) so a data-cache "Clear
+// cache" doesn't wipe them and re-trigger the popup — same convention as
+// DIRTY_KEY / CUSTOM_STATUS_KEY in state.js.
 const SEEN_VERSION_KEY = "cougar-seen-version";
+const SEEN_NOTES_KEY = "cougar-seen-notes";
 
-// Newest first. `v` is the numeric version (matches APP_VERSION when released);
-// only entries with v > lastSeen are shown. `items` is a list of plain strings
-// (or {t, d} for a titled line with a description).
+// Frozen, newest first. `v` is the old numeric version; only entries with
+// v > lastSeen are shown. `items` is a list of plain strings (or {t, d} for a
+// titled line with a description).
 const PATCH_NOTES = [
   {
     v: 172,
@@ -412,7 +414,7 @@ function renderPatchNotesHtml(entries) {
   return entries.map(function (n) {
     var head =
       '<div style="display:flex;align-items:center;gap:8px;margin:0 0 6px">' +
-        '<span class="badge badge-accent">v' + n.v + '</span>' +
+        (n.v ? '<span class="badge badge-accent">v' + n.v + '</span>' : '') +
         (n.date ? '<span style="color:var(--muted);font-size:12px">' + n.date + '</span>' : '') +
       '</div>' +
       (n.title ? '<h4 style="margin:0 0 4px;color:var(--text)">' + n.title + '</h4>' : '') +
@@ -448,18 +450,62 @@ function stampSeenVersion() {
   try { localStorage.setItem(SEEN_VERSION_KEY, String(APP_VERSION)); } catch (e) {}
 }
 
-// Shows the "What's New" modal if this device hasn't seen the current version.
+// The ids of notes/*.json this device has been shown (null if never set).
+function loadSeenNoteIds() {
+  try {
+    var raw = localStorage.getItem(SEEN_NOTES_KEY);
+    if (raw == null) return null;
+    var ids = JSON.parse(raw);
+    return Array.isArray(ids) ? ids : null;
+  } catch (e) { return null; }
+}
+
+function stampSeenNoteIds(ids) {
+  try { localStorage.setItem(SEEN_NOTES_KEY, JSON.stringify(ids)); } catch (e) {}
+}
+
+// The notes from notes/*.json, gathered by the deploy into notes/index.json,
+// newest first. Empty when there is none (a local checkout, offline): the
+// app never waits on or fails over its own release notes.
+function fetchNoteIndex() {
+  if (typeof fetch !== "function") return Promise.resolve([]);
+  return fetch("notes/index.json", { cache: "no-cache" })
+    .then(function (r) { return r.ok ? r.json() : []; })
+    .then(function (list) { return Array.isArray(list) ? list : []; })
+    .catch(function () { return []; });
+}
+
+// Which notes to show. Pure, so the rules are testable:
+//   - brand-new device (has seen nothing of either kind): only the newest note,
+//     as a welcome, not the full history;
+//   - otherwise: frozen PATCH_NOTES newer than its last seen version, plus
+//     every notes/ entry it has not seen, newest first.
+function pickPatchNotes(legacy, fresh, seenVersion, seenIds) {
+  if (seenVersion == null && seenIds == null) return (fresh.length ? fresh : legacy).slice(0, 1);
+  var seen = {};
+  (seenIds || []).forEach(function (id) { seen[id] = true; });
+  return fresh.filter(function (n) { return !seen[n.id]; })
+    .concat(seenVersion == null ? [] : legacy.filter(function (n) { return n.v > seenVersion; }));
+}
+
+// Shows the "What's New" modal with anything this device hasn't seen.
 // Called at the end of bootstrap(), after the first render().
 function maybeShowPatchNotes() {
-  if (typeof openModal !== "function") return;   // modal infra must be loaded
-  var seen = loadSeenVersion();
-  // Brand-new device: show only the latest entry (a welcome / overview), not the
-  // full history. Returning devices see every entry newer than what they saw.
-  var entries = (seen == null)
-    ? PATCH_NOTES.slice(0, 1)
-    : PATCH_NOTES.filter(function (n) { return n.v > seen; });
-  // Stamp regardless, so a version with no notes still advances the marker.
-  stampSeenVersion();
-  if (!entries.length) return;
-  openModal("What's New", renderPatchNotesHtml(entries));
+  if (typeof openModal !== "function") return Promise.resolve();   // modal infra must be loaded
+  var seenVersion = loadSeenVersion();
+  var seenIds = loadSeenNoteIds();
+  return fetchNoteIndex().then(function (fresh) {
+    var entries = pickPatchNotes(PATCH_NOTES, fresh, seenVersion, seenIds);
+    // The index arrives after the app is usable. If he has already opened
+    // something, don't cover it: leave the notes unseen for next launch.
+    var overlay = document.getElementById("modal-overlay");
+    if (entries.length && overlay && !overlay.classList.contains("hidden")) return;
+    // Stamp regardless, so the markers advance even when there is nothing new.
+    stampSeenVersion();
+    var all = (seenIds || []).slice();
+    fresh.forEach(function (n) { if (all.indexOf(n.id) < 0) all.push(n.id); });
+    stampSeenNoteIds(all);
+    if (!entries.length) return;
+    openModal("What's New", renderPatchNotesHtml(entries));
+  });
 }
