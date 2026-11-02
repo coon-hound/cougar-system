@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 171;
+const APP_VERSION = 172;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 172,
+    date: "2 Nov 2026",
+    title: "IPPT card in the profile",
+    intro: "The IPPT card in a man's profile now shows two scores, and opens the rest of his IPPT.",
+    items: [
+      { t: "Best and most recent", d: "The card shows his best IPPT score and his most recent one, each with the IPPT it came from." },
+      { t: "▾ Tap for details", d: "Tap the card to open his best per station, progression chart and every attempt. Tap again to close it. Opening a man from the IPPT tab shows them straight away." }
+    ]
+  },
   {
     v: 171,
     date: "2 Nov 2026",

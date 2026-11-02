@@ -161,9 +161,37 @@ test("adding a result files it under the phase picked in the form", async ({ pag
   await expect(page.locator(`${KH} .card`, { hasText: "YTT Chase List" })).not.toContainText("BRAVO TWO");
 });
 
+test("the profile's IPPT card shows best and most recent, and opens the IPPT details", async ({ page }) => {
+  await gotoIPPT(page);
+  const expected = await page.evaluate(() => {
+    const rows = STATE.ippt.filter((r) => r.d4 === "1401" && !isYTT(r)).sort((a, b) => ipptOrderKey(a) - ipptOrderKey(b));
+    const lbl = (r) => ipptConductLabel(ipptSeriesOf(r), r.attempt, true);
+    const best = rows.reduce((b, r) => (+r.score > +b.score ? r : b), rows[0]);
+    const last = rows[rows.length - 1];
+    return { best: String(best.score), bestFrom: lbl(best), last: String(last.score), lastFrom: lbl(last) };
+  });
+  await page.evaluate(() => openPerson("1401"));
+  const card = page.locator("#person-ippt-stat");
+  await expect(card).toContainText(`Best · ${expected.bestFrom}`);
+  await expect(card).toContainText(`Most recent · ${expected.lastFrom}`);
+  await expect(card.locator(".val").first()).toHaveText(expected.best);
+  await expect(card.locator(".val").nth(1)).toHaveText(expected.last);
+
+  // Collapsed until the card is tapped; tapping again closes it.
+  const sec = page.locator("#person-ippt");
+  await expect(sec).toBeHidden();
+  await card.click();
+  await expect(sec).toBeVisible();
+  await expect(page.locator("#person-ippt-history")).toBeVisible();
+  await expect(page.locator("#person-ippt-caret")).toHaveText("▴ hide");
+  await card.click();
+  await expect(sec).toBeHidden();
+  await expect(page.locator("#person-ippt-caret")).toHaveText("▾ details");
+});
+
 test("a person's profile labels IPPTs by phase, BMT first", async ({ page }) => {
   await gotoIPPT(page);
-  await page.evaluate(() => openPerson("1401"));
+  await page.evaluate(() => openPersonIPPT("1401"));
   const rows = page.locator("#person-ippt-history tbody tr");
   await expect(rows).toHaveCount(4);
   await expect(rows.first()).toContainText("BMT 1");
