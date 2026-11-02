@@ -46,7 +46,8 @@ async function bookOutOnePerson(page, reason = "MO") {
   await page.click(`.nav-btn[data-nav="dashboard"]`);
   await page.click("text=+ Book Out");
   await page.selectOption("#f-bo-scope", "person");
-  await page.selectOption("#f-bo-d4", { index: 1 });
+  await page.click("#f-bo-d4-q");
+  await page.locator("#f-bo-d4-menu [role=option]").first().click();
   await page.fill("#f-bo-reason", reason);
   await page.click("#f-bo-submit");
 }

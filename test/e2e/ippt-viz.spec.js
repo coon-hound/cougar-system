@@ -147,7 +147,8 @@ test("adding a result files it under the phase picked in the form", async ({ pag
   await gotoIPPT(page);
   await page.locator("button", { hasText: "+ Add" }).click();
   await expect(page.locator("#f-series")).toHaveValue("KH");
-  await page.selectOption("#f-d4", "2402");
+  await page.click("#f-d4-q");
+  await page.click(`#f-d4-menu [data-v="2402"]`);
   await page.selectOption("#f-attempt", "1");
   await page.fill("#f-pu", "40"); await page.fill("#f-su", "40");
   await page.fill("#f-run-min", "11"); await page.fill("#f-run-sec", "30");

@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 170;
+const APP_VERSION = 171;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,16 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 171,
+    date: "2 Nov 2026",
+    title: "One box to pick a person",
+    intro: "The person search and the person list are now the same box.",
+    items: [
+      { t: "▾ Tap to see everyone", d: "Tap the box and the full list drops down. Tap a name to pick him." },
+      { t: "⌕ Or type", d: "Type a 4D or part of a name in the same box and the list shrinks as you type. Enter picks the first man on it." }
+    ]
+  },
   {
     v: 170,
     date: "2 Nov 2026",
