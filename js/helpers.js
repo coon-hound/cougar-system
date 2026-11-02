@@ -1494,7 +1494,44 @@ function rosterSelect(id = "form-d4", required = true, selected = "", roleFilter
     ? [r.rank, r.name].filter(Boolean).join(" ")
     : `${r.id} ${r.name}`;
   const onchangeAttr = opts.onchange ? ` onchange="${escapeAttr(opts.onchange)}"` : "";
-  return `<select id="${id}" ${required ? "required" : ""}${onchangeAttr} style="width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box"><option value="">Select...</option>${rows.map(r => `<option value="${r.id}" ${r.id === selected ? "selected" : ""}>${optLabel(r)}</option>`).join("")}</select>`;
+  const fieldStyle = "width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:12px;box-sizing:border-box";
+  // A type-to-find box above the dropdown: scrolling ~100 names on a phone is
+  // slow. The <select> stays the real field (gv(id), required, onchange).
+  return `<div class="roster-pick"><input id="${id}-q" type="search" enterkeyhint="done" autocomplete="off" placeholder="Search 4D or name..." oninput="rosterSelectFilter('${id}', this.value)" onkeydown="rosterSelectKey(event, '${id}')" style="${fieldStyle};margin-bottom:4px"><select id="${id}" ${required ? "required" : ""}${onchangeAttr} style="${fieldStyle}"><option value="">Select...</option>${rows.map(r => `<option value="${r.id}" ${r.id === selected ? "selected" : ""}>${escapeAttr(optLabel(r))}</option>`).join("")}</select></div>`;
+}
+
+// Narrows a rosterSelect to the people whose 4D / rank / name contain every
+// typed word. Options are removed rather than hidden (iOS ignores hidden
+// <option>s). The current pick is kept so typing never silently changes it,
+// and a single match is picked straight away (onchange fires as if tapped).
+function rosterSelectFilter(id, q) {
+  const sel = document.getElementById(id);
+  if (!sel) return [];
+  if (!sel._allOpts) sel._allOpts = [...sel.options];
+  const [blank, ...people] = sel._allOpts;
+  const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = people.filter(o => {
+    const hay = (o.value + " " + o.text).toLowerCase();
+    return words.every(w => hay.includes(w));
+  });
+  const prev = sel.value;
+  sel.replaceChildren(blank, ...people.filter(o => hits.includes(o) || (prev && o.value === prev)));
+  sel.value = prev;
+  blank.text = !words.length ? "Select..." : hits.length ? `${hits.length} found - select...` : "No one found";
+  if (words.length && hits.length === 1 && prev !== hits[0].value) rosterSelectPick(sel, hits[0].value);
+  return hits;
+}
+function rosterSelectPick(sel, value) {
+  sel.value = value;
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+}
+// Enter in the search box picks the first match instead of submitting the form.
+function rosterSelectKey(e, id) {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const hits = rosterSelectFilter(id, e.target.value);
+  const sel = document.getElementById(id);
+  if (sel && hits.length && sel.value !== hits[0].value) rosterSelectPick(sel, hits[0].value);
 }
 function formField(id, label, type = "text", placeholder = "", extra = "") {
   const ph = placeholder ? ` placeholder="${placeholder}"` : "";
