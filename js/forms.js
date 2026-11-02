@@ -11,6 +11,56 @@ function closeModal() {
   document.querySelector(".modal")?.classList.remove("wide");
 }
 
+// The IPPT part of a person's profile: best per station across every attempt
+// he has taken (YTT rows don't count), the score chart, then every attempt in
+// order, BMT first, with the station bests picked out in the table.
+function personIPPTSection(ippts) {
+  const taken = ippts.filter(i => !isYTT(i));
+  const lbl = i => ipptConductLabel(ipptSeriesOf(i), i.attempt, true);
+  const bestBy = (val, better) => taken.reduce((b, i) => {
+    const v = val(i);
+    return v > 0 && (!b || better(v, val(b))) ? i : b;
+  }, null);
+  const runSec = i => parseRunTimeToSeconds(i.runTime);
+  const best = {
+    score: bestBy(i => +i.score || 0, (a, b) => a > b),
+    pu: bestBy(i => +i.pushups || 0, (a, b) => a > b),
+    su: bestBy(i => +i.situps || 0, (a, b) => a > b),
+    run: bestBy(runSec, (a, b) => a < b),
+  };
+  const stat = (label, entry, val) => `<div class="stat"><label>${label}</label><div class="val" style="color:var(--orange)">${entry ? val : "—"}</div>${entry ? `<div style="font-size:10px;color:var(--dim)">${lbl(entry)}</div>` : ""}</div>`;
+  let html = `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">IPPT Best per Station</h4>`;
+  html += `<div class="stats-row" style="margin-bottom:10px">
+    ${stat("Score", best.score, best.score && best.score.score)}
+    ${stat("Push-ups", best.pu, best.pu && best.pu.pushups)}
+    ${stat("Sit-ups", best.su, best.su && best.su.situps)}
+    ${stat("2.4km", best.run, best.run && best.run.runTime)}
+  </div>`;
+  html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">IPPT Progression</h4>`;
+  html += `<div class="chart-box"><canvas id="person-ippt-chart"></canvas></div>`;
+  const th = (t, left) => `<th style="position:sticky;top:0;background:var(--surface2);padding:6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px${left ? ";text-align:left" : ""}">${t}</th>`;
+  const td = (v, hi) => `<td style="padding:6px 8px;font-size:11px;text-align:center${hi ? ";font-weight:700;color:var(--orange)" : ""}">${v}</td>`;
+  const dateOf = i => displayDateToISO(i.date) ? isoToShortDate(displayDateToISO(i.date)) : (i.date || "—");
+  html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">IPPT History <span style="color:var(--dim);font-weight:400">(${ippts.length})</span></h4>`;
+  html += `<div style="max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+    <table id="person-ippt-history" style="width:100%;border-collapse:collapse">
+      <thead><tr>${th("IPPT", true)}${th("Date", true)}${th("PU")}${th("SU")}${th("2.4km")}${th("Score")}</tr></thead>
+      <tbody>
+        ${ippts.map(i => isYTT(i)
+          ? `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px;font-size:11px;white-space:nowrap">${lbl(i)}</td><td style="padding:6px 8px;font-size:11px;color:var(--muted);white-space:nowrap">${dateOf(i)}</td><td colspan="4" style="padding:6px 8px;text-align:center">${ipptAwardBadge(i)}</td></tr>`
+          : `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 8px;font-size:11px;white-space:nowrap">${lbl(i)}</td><td style="padding:6px 8px;font-size:11px;color:var(--muted);white-space:nowrap">${dateOf(i)}</td>${td(i.pushups, i === best.pu)}${td(i.situps, i === best.su)}${td(`<span class="mono">${i.runTime}</span>`, i === best.run)}<td style="padding:6px 8px;font-size:11px;text-align:center;white-space:nowrap"><strong${i === best.score ? ' style="color:var(--orange)"' : ""}>${i.score}</strong> ${awardBadge(i.score)}</td></tr>`).join("")}
+      </tbody>
+    </table>
+  </div>`;
+  return html;
+}
+
+// From the IPPT tab: open the profile and land on the IPPT part of it.
+function openPersonIPPT(d4) {
+  openPerson(d4);
+  document.getElementById("person-ippt")?.scrollIntoView({ block: "start" });
+}
+
 function openPerson(d4) {
   const p = STATE.roster.find(r => r.id === d4); if (!p) return;
   const med = STATE.medical.filter(m => m.d4 === d4);
@@ -160,9 +210,7 @@ function openPerson(d4) {
   }
 
   if (ippts.length) {
-    html += `<h4 style="font-size:12px;color:var(--muted);margin:12px 0 8px">IPPT Progression</h4>`;
-    html += `<div class="chart-box"><canvas id="person-ippt-chart"></canvas></div>`;
-    html += ippts.map(i => `<span class="badge badge-accent" style="margin:2px">${ipptConductLabel(ipptSeriesOf(i), i.attempt, true)}: ${i.score} ${awardBadge(i.score)}</span>`).join("");
+    html += `<div id="person-ippt">${personIPPTSection(ippts)}</div>`;
   }
   if (med.length) {
     const today = todayISO();

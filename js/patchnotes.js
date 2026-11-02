@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 170;
+const APP_VERSION = 171;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -21,13 +21,14 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
   {
-    v: 170,
+    v: 171,
     date: "2 Nov 2026",
-    title: "Type to find a person",
-    intro: "Forms that ask you to pick a person now have a search box above the list.",
+    title: "A man's IPPT at a glance",
+    intro: "Tap a man's IPPT score to see every IPPT he has taken and his best at each station.",
     items: [
-      { t: "⌕ Search 4D or name", d: "Type a 4D, a name or part of one and the list shrinks to the men who match. If only one man matches, he is picked for you." },
-      { t: "↵ Enter picks", d: "Press Enter to pick the first man on the list. You can still scroll the list like before." }
+      { t: "★ Best per station", d: "His best score, most push-ups, most sit-ups and fastest 2.4km, and which IPPT each one was from." },
+      { t: "☰ IPPT history", d: "Every IPPT he has taken, BMT first, with each station's result. His bests are in orange." },
+      { t: "⌕ From the IPPT tab", d: "Tap a score in the results table, or a name in Top Performers or Most improved, to go straight to his IPPT." }
     ]
   },
   {

@@ -163,8 +163,28 @@ test("adding a result files it under the phase picked in the form", async ({ pag
 test("a person's profile labels IPPTs by phase, BMT first", async ({ page }) => {
   await gotoIPPT(page);
   await page.evaluate(() => openPerson("1401"));
-  const badges = page.locator("#modal-body .badge-accent", { hasText: /^(BMT|KH) \d/ });
-  await expect(badges).toHaveCount(4);
-  await expect(badges.first()).toContainText("BMT 1");
-  await expect(badges.last()).toContainText("KH 1");
+  const rows = page.locator("#person-ippt-history tbody tr");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.first()).toContainText("BMT 1");
+  await expect(rows.last()).toContainText("KH 1");
+});
+
+test("a person's profile shows his best per station, each from the IPPT it came from", async ({ page }) => {
+  await gotoIPPT(page);
+  const expected = await page.evaluate(() => {
+    const rows = STATE.ippt.filter((r) => r.d4 === "1401" && !isYTT(r));
+    const pick = (val, better) => rows.reduce((b, r) => (val(r) > 0 && (!b || better(val(r), val(b))) ? r : b), null);
+    const lbl = (r) => ipptConductLabel(ipptSeriesOf(r), r.attempt, true);
+    const pu = pick((r) => +r.pushups, (a, b) => a > b);
+    const run = pick((r) => parseRunTimeToSeconds(r.runTime), (a, b) => a < b);
+    return { pu: String(pu.pushups), puFrom: lbl(pu), run: run.runTime, runFrom: lbl(run) };
+  });
+  // Tapping a score in the results table lands on his IPPT section.
+  await page.locator('td[onclick="openPersonIPPT(\'1401\')"]').first().click();
+  await expect(page.locator("#person-ippt")).toBeVisible();
+  const stat = (label) => page.locator("#person-ippt .stat", { has: page.locator("label", { hasText: new RegExp(`^${label}$`) }) });
+  await expect(stat("Push-ups")).toContainText(expected.pu);
+  await expect(stat("Push-ups")).toContainText(expected.puFrom);
+  await expect(stat("2.4km")).toContainText(expected.run);
+  await expect(stat("2.4km")).toContainText(expected.runFrom);
 });
