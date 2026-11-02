@@ -55,10 +55,36 @@ function personIPPTSection(ippts) {
   return html;
 }
 
-// From the IPPT tab: open the profile and land on the IPPT part of it.
+// From the IPPT tab: open the profile with the IPPT part open, and land on it.
 function openPersonIPPT(d4) {
   openPerson(d4);
+  togglePersonIPPT(d4, true);
   document.getElementById("person-ippt")?.scrollIntoView({ block: "start" });
+}
+
+// The IPPT card in a profile opens and closes the IPPT part below it. The
+// chart is drawn on first open: one drawn while hidden comes out zero-sized.
+function togglePersonIPPT(d4, open) {
+  const sec = document.getElementById("person-ippt");
+  if (!sec) return;
+  const show = open ?? sec.style.display === "none";
+  sec.style.display = show ? "" : "none";
+  const caret = document.getElementById("person-ippt-caret");
+  if (caret) caret.textContent = show ? "▴ hide" : "▾ details";
+  if (show) drawPersonIPPTChart(d4);
+}
+function drawPersonIPPTChart(d4) {
+  const canvas = document.getElementById("person-ippt-chart");
+  if (!canvas || typeof Chart === "undefined" || Chart.getChart(canvas)) return;
+  const ippts = STATE.ippt.filter(i => i.d4 === d4).sort((a, b) => ipptOrderKey(a) - ipptOrderKey(b));
+  if (!ippts.length) return;
+  // Canvas cannot read `var(--x)`.
+  const orange = cssColor("--orange"), border = cssColor("--border");
+  new Chart(canvas, {
+    type: "line",
+    data: { labels: ippts.map(i => ipptConductLabel(ipptSeriesOf(i), i.attempt, true)), datasets: [{ data: ippts.map(i => +i.score), borderColor: orange, backgroundColor: cssColorA("--orange", ".2"), fill: true, tension: .3, pointRadius: 5 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: border } }, x: { grid: { color: border } } } }
+  });
 }
 
 function openPerson(d4) {
@@ -176,7 +202,16 @@ function openPerson(d4) {
   const rsClickable = med.length > 0;
   const medDays = new Set(med.map(m => m.date)).size;
   html += `<div class="stats-row"><div class="stat" ${rsClickable ? `onclick="toggleReportSickPatterns('${d4}')" style="cursor:pointer" title="Click to see patterns (unique days — multiple medical rows on the same day count as 1)"` : ""}><label>RSIs ${rsClickable ? '<span style="color:var(--dim);font-size:9px">▾ patterns</span>' : ''}</label><div class="val" style="color:${medDays > 1 ? 'var(--red)' : 'var(--muted)'}">${medDays}</div></div>`;
-  html += `<div class="stat"><label>IPPT Best</label><div class="val" style="color:var(--orange)">${ippts.length ? Math.max(...ippts.map(i => +i.score)) : "—"}</div></div>`;
+  // IPPT card: best score and most recent score (YTT rows carry no score).
+  // Tapping it opens the IPPT part below (station bests, progression,
+  // history), which starts collapsed.
+  const ipptTaken = ippts.filter(i => !isYTT(i));
+  const ipptTop = ipptTaken.reduce((b, i) => (+i.score || 0) > (b ? +b.score || 0 : -1) ? i : b, null);
+  const ipptLast = ipptTaken[ipptTaken.length - 1] || null;
+  const ipptLbl = i => ipptConductLabel(ipptSeriesOf(i), i.attempt, true);
+  const ipptVal = (label, entry, color) => `<div style="min-width:0"><div class="val"${color ? ` style="color:${color}"` : ""}>${entry ? entry.score : "—"}</div><div class="sub">${label}${entry ? ` · ${ipptLbl(entry)}` : ""}</div></div>`;
+  html += `<div class="stat" id="person-ippt-stat" ${ippts.length ? `onclick="togglePersonIPPT('${d4}')" style="cursor:pointer" title="Tap for best per station, progression and every attempt"` : ""}><label>IPPT ${ippts.length ? '<span id="person-ippt-caret" style="color:var(--dim);font-size:9px">▾ details</span>' : ''}</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${ipptVal("Best", ipptTop, "var(--orange)")}${ipptVal("Most recent", ipptLast)}</div></div>`;
   html += `</div>`;
   html += `<div id="rs-patterns" style="display:none"></div>`;
 
@@ -210,7 +245,7 @@ function openPerson(d4) {
   }
 
   if (ippts.length) {
-    html += `<div id="person-ippt">${personIPPTSection(ippts)}</div>`;
+    html += `<div id="person-ippt" style="display:none">${personIPPTSection(ippts)}</div>`;
   }
   if (med.length) {
     const today = todayISO();
@@ -274,30 +309,7 @@ function openPerson(d4) {
   // Wide modal: this view carries the conduct-participation and medical-history
   // tables side by side and needs more horizontal room than a form modal.
   document.querySelector(".modal")?.classList.add("wide");
-
-  // Charts need to be created after modal contents are in the DOM.
-  setTimeout(() => {
-    // Canvas cannot read `var(--x)` — resolve the tokens once for every chart
-    // built in this modal.
-    const PC = {
-      orange: cssColor("--orange"), orangeWash: cssColorA("--orange", ".2"),
-      accent: cssColor("--accent"), accentWash: cssColorA("--accent", ".13"),
-      red: cssColor("--red"), redWash: cssColorA("--red", ".13"),
-      teal: cssColor("--teal"), tealWash: cssColorA("--teal", ".2"),
-      yellow: cssColor("--yellow"), yellowWash: cssColorA("--yellow", ".2"),
-      purple: cssColor("--purple"), purpleWash: cssColorA("--purple", ".27"),
-      muted: cssColor("--muted"), border: cssColor("--border")
-    };
-    const ipptCanvas = document.getElementById("person-ippt-chart");
-    if (ipptCanvas && ippts.length) {
-      new Chart(ipptCanvas, {
-        type: "line",
-        data: { labels: ippts.map(i => ipptConductLabel(ipptSeriesOf(i), i.attempt, true)), datasets: [{ data: ippts.map(i => +i.score), borderColor: PC.orange, backgroundColor: PC.orangeWash, fill: true, tension: .3, pointRadius: 5 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100, grid: { color: PC.border } }, x: { grid: { color: PC.border } } } }
-      });
-    }
-
-  }, 100);
+  // The IPPT chart is drawn when the IPPT card is opened (togglePersonIPPT).
 }
 
 // Inline expand under the RSIs stat — shows day-of-week, status mix, timeline,
