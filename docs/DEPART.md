@@ -106,7 +106,7 @@ Historic parade-state snapshots are left alone for the same reason.
 
 The script prints this list too. It matters.
 
-1. **Bump `STORAGE_KEY` in `js/state.js`** and the uniform `?v=` in `index.html`, then deploy.
+1. **Bump `STORAGE_KEY` in `js/state.js`** and merge it; the deploy stamps a new `?v=`.
    This is what forces every phone to drop its cache.
    The rev bumps stop a stale phone overwriting anything; only dropping the cache stops it acting on the wrong man.
 2. **Re-issue invites** for anyone whose 4D moved.

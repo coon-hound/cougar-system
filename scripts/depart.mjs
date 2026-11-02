@@ -239,7 +239,7 @@ async function main() {
     }
     console.log("");
     console.log("Still to do by hand:");
-    console.log("  1. Bump STORAGE_KEY in js/state.js and the ?v= in index.html, then deploy.");
+    console.log("  1. Bump STORAGE_KEY in js/state.js and merge it; the deploy stamps a new ?v=.");
     console.log("     Every phone still holds the old seating; until the cache is dropped a");
     console.log("     commander can write a row against a 4D that now belongs to someone else.");
     console.log("  2. Re-issue invites for anyone whose 4D moved.");
