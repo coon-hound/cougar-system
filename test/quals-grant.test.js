@@ -72,6 +72,35 @@ async function main() {
     eq(p.excludedHolding, ["7103"]);
   });
 
+  suite("quals-grant - only the list");
+
+  await test("--only grants the listed men and nobody else; a holder is not rewritten", () => {
+    const p = plan("NAME\nTan Alpha\nDELTA LIM\n", { mode: "only" });
+    eq(p.unplaced, []);
+    eq(ids(p.grant), ["7101"]);
+    eq(ids(p.already), ["7103"]);
+    eq(p.excludedHolding, []);
+  });
+
+  await test("--only: an unplaced line is UNPLACED, so the man who fired is not missed silently", () => {
+    const p = plan("NAME\nechoo ng\n", { mode: "only" });
+    eq(p.unplaced.map((u) => u.line), [2]);
+    eq(p.grant, []);
+  });
+
+  await test("a 4D column places the line; a name that does not fully match the seat is flagged", () => {
+    const p = plan("4D,NAME\n7102,bravo delta\n7104,echo ng\n93,ghost\n", { mode: "only" });
+    eq(p.excluded.map((e) => [e.line, e.id, e.how, !!e.warn]), [[2, "7102", "4d", true], [3, "7104", "4d", false]]);
+    eq(p.unplaced.map((u) => u.line), [4], "a 4D that is no seat is refused");
+    eq(ids(p.grant), ["7102", "7104"]);
+  });
+
+  await test("arguments: --only works like --except, and the two cannot be combined", () => {
+    const a = G.parseArgs(["--qual", "LMG LF", "--only", "x.csv"]);
+    eq([a.errors, a.mode, a.file], [[], "only", "x.csv"]);
+    ok(G.parseArgs(["--qual", "X", "--only", "a.csv", "--except", "b.csv"]).errors.some((e) => /not both/.test(e)));
+  });
+
   await test("arguments: --qual and --except are required; a qual cannot hold , or @", () => {
     ok(G.parseArgs([]).errors.length >= 2);
     ok(G.parseArgs(["--qual", "A, B", "--except", "x.csv"]).errors.some((e) => /cannot contain/.test(e)));

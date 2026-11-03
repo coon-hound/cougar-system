@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // ============================================================================
 // quals-grant.mjs - give one qualification to everyone on the roster EXCEPT
-// the men on a list.
+// the men on a list, or to ONLY the men on a list.
 //
 //   Preview (runs every write, then rolls back):
 //     DATABASE_URL=... COUGAR_ENC_KEY=... node scripts/quals-grant.mjs \
 //       --qual "PTCO JVLF" --except not-qualified.csv
+//     DATABASE_URL=... COUGAR_ENC_KEY=... node scripts/quals-grant.mjs \
+//       --qual "LMG LF" --only fired.csv
 //
 //   Apply (one transaction):
 //     ... --apply
@@ -16,20 +18,23 @@
 //
 // WHAT IT WRITES
 // --------------
-// The qualification is appended to extra.quals of every live roster row
-// (commanders included) that is not on the list. It only ever ADDS: a man who
+// --except: the qualification is appended to extra.quals of every live roster
+// row (commanders included) that is not on the list. --only: it is appended to
+// the listed men and nobody else. It only ever ADDS: a man who
 // already has it is left alone, and a man on the list who already has it keeps
 // it - the list is "not qualified", which is not evidence enough to strip what
 // someone recorded.
 //
 // WHO IS EXCLUDED
 // ---------------
-// The list is a CSV with an NRIC column and a name column. Each line is placed
-// on a seat by its NRIC (keyed digest against the people registry, exact), or
-// failing that by an EXACT order-independent name match to exactly one seat.
-// The run REFUSES TO APPLY while any line is unplaced: an excluded man the
-// script could not find would otherwise be granted the qualification - the one
-// mistake this exists to avoid. --pin or --skip settles each such line.
+// The list is a CSV with a name column and optionally an NRIC or a 4D column.
+// Each line is placed on a seat by its 4D (read like --pin, but a name that
+// does not fully match that seat is flagged), by its NRIC (keyed digest
+// against the people registry, exact), or failing that by an EXACT
+// order-independent name match to exactly one seat. The run REFUSES TO APPLY
+// while any line is unplaced: with --except an unplaced man would be granted
+// the qualification, with --only a man who earned it would be missed.
+// --pin or --skip settles each such line.
 //
 // PRIVACY: the report prints list line numbers and 4Ds, never names or NRICs.
 // The raw NRIC stops in this process; only its digest is compared. Keep the
@@ -45,12 +50,16 @@ import { nameKey, nameSimilarity, nricKey, padD4, parseCsv } from "./intake-plan
 import { addQuals } from "./quals-fill.mjs";
 
 export function parseArgs(argv) {
-  const out = { apply: false, qual: "", file: "", pins: new Map(), skips: new Set(), errors: [] };
+  const out = { apply: false, qual: "", file: "", mode: "", pins: new Map(), skips: new Set(), errors: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--apply") out.apply = true;
     else if (a === "--qual") out.qual = String(argv[++i] ?? "").trim();
-    else if (a === "--except") out.file = String(argv[++i] ?? "").trim();
+    else if (a === "--except" || a === "--only") {
+      if (out.mode) out.errors.push("give one of --except or --only, not both");
+      out.mode = a.slice(2);
+      out.file = String(argv[++i] ?? "").trim();
+    }
     else if (a === "--pin") {
       const m = String(argv[++i] ?? "").match(/^(\d+)=(\d{1,4})$/);
       if (m) out.pins.set(+m[1], padD4(m[2]));
@@ -63,33 +72,38 @@ export function parseArgs(argv) {
   }
   if (!out.qual) out.errors.push("--qual is required");
   else if (/[,@]/.test(out.qual)) out.errors.push(`--qual "${out.qual}" cannot contain "," or "@" (they separate quals and expiries)`);
-  if (!out.file) out.errors.push("--except is required");
+  if (!out.file) out.errors.push("--except LIST or --only LIST is required");
   return out;
 }
 
 const canon = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** The list: { line, nric (raw, stays here), name }. Line numbers are CSV lines. */
+/** The list: { line, nric (raw, stays here), name, d4 }. Line numbers are CSV lines. */
 export function parseExceptList(text) {
   return parseCsv(text).map((raw, n) => {
     const v = {};
     for (const [h, val] of Object.entries(raw)) {
       const c = canon(h);
-      if (!("nric" in v) && c.includes("nric")) v.nric = val;
+      if (!("d4" in v) && c === "4d") v.d4 = val;
+      else if (!("nric" in v) && c.includes("nric")) v.nric = val;
       else if (!("name" in v) && (c === "name" || c === "fullname" || c.endsWith("name"))) v.name = val;
     }
-    return { line: n + 2, nric: String(v.nric ?? "").trim(), name: String(v.name ?? "").trim() };
-  }).filter(r => r.nric || r.name);
+    const d4 = String(v.d4 ?? "").trim();
+    const row = { line: n + 2, nric: String(v.nric ?? "").trim(), name: String(v.name ?? "").trim() };
+    if (d4) row.d4 = padD4(d4);
+    return row;
+  }).filter(r => r.nric || r.name || r.d4);
 }
 
 /**
- * Who is excluded, who gets the qual. Pure: no database.
+ * Who is on the list, who gets the qual. Pure: no database.
+ * mode "except" grants everyone NOT listed; "only" grants just the listed.
  * @param {string}   text     the list CSV
  * @param {object[]} roster   live rows { id, name, pid, role, quals }
  * @param {Map<string,string>} pidByNric  NRIC digest -> people.pid
  * @param {(s:string)=>string} hash       keyed digest
  */
-export function planGrant(text, roster, pidByNric, hash, { qual, pins = new Map(), skips = new Set() }) {
+export function planGrant(text, roster, pidByNric, hash, { qual, mode = "except", pins = new Map(), skips = new Set() }) {
   const byId = new Map(roster.map(r => [padD4(r.id), r]));
   const byPid = new Map(roster.filter(r => r.pid).map(r => [r.pid, r]));
   const byKey = new Map();
@@ -113,6 +127,14 @@ export function planGrant(text, roster, pidByNric, hash, { qual, pins = new Map(
       const seat = byId.get(pins.get(l.line));
       if (seat) excluded.push({ line: l.line, id: padD4(seat.id), how: "pinned" });
       else unplaced.push({ line: l.line, why: `pinned to ${pins.get(l.line)}, which is not a seat on the roster`, near: [] });
+      continue;
+    }
+    if (l.d4) {
+      const seat = byId.get(l.d4);
+      if (!seat) { unplaced.push({ line: l.line, why: `4D ${l.d4} is not a seat on the roster`, near: near(l.name) }); continue; }
+      const score = l.name ? nameSimilarity(l.name, seat.name) : 1;
+      const warn = score < 1 ? `name only ${Math.round(score * 100)}% like the seat's - check it` : "";
+      excluded.push({ line: l.line, id: padD4(seat.id), how: "4d", warn });
       continue;
     }
     const nk = nricKey(l.nric);
@@ -145,13 +167,13 @@ export function planGrant(text, roster, pidByNric, hash, { qual, pins = new Map(
   const grant = [], already = [];
   for (const r of roster) {
     const id = padD4(r.id);
-    if (out.has(id)) continue;
+    if (out.has(id) !== (mode === "only")) continue;
     (has(r) ? already : grant).push({ id, role: r.role || "" });
   }
   const sortId = (a, b) => a.id.localeCompare(b.id);
   return {
     excluded: excluded.sort((a, b) => a.line - b.line),
-    excludedHolding: roster.filter(r => out.has(padD4(r.id)) && has(r)).map(r => padD4(r.id)).sort(),
+    excludedHolding: mode === "only" ? [] : roster.filter(r => out.has(padD4(r.id)) && has(r)).map(r => padD4(r.id)).sort(),
     unplaced: unplaced.sort((a, b) => a.line - b.line),
     skipped,
     grant: grant.sort(sortId),
@@ -172,7 +194,7 @@ async function main() {
   const { DATABASE_URL, COUGAR_ENC_KEY } = process.env;
   if (args.errors.length) {
     for (const e of args.errors) console.error(e);
-    console.error('usage: DATABASE_URL=... COUGAR_ENC_KEY=... node scripts/quals-grant.mjs --qual "NAME" --except list.csv [--pin LINE=4D]... [--skip LINE]... [--apply]');
+    console.error('usage: DATABASE_URL=... COUGAR_ENC_KEY=... node scripts/quals-grant.mjs --qual "NAME" (--except|--only) list.csv [--pin LINE=4D]... [--skip LINE]... [--apply]');
     process.exitCode = 2;
     return;
   }
@@ -190,7 +212,8 @@ async function main() {
 
     console.log(`Qualification: ${args.qual}`);
     console.log(`Roster: ${roster.length} live seats (${byRole(roster.map(r => ({ role: r.role })))})`);
-    console.log(`\nExcluded by the list: ${plan.excluded.length}`);
+    const only = args.mode === "only";
+    console.log(`\n${only ? "On the list (only these can get it)" : "Excluded by the list"}: ${plan.excluded.length}`);
     for (const e of plan.excluded) {
       console.log(`  line ${String(e.line).padStart(3)}  ${e.id}  by ${e.how}${e.warn ? `  ! ${e.warn}` : ""}`);
     }
@@ -201,7 +224,7 @@ async function main() {
     if (plan.unplaced.length) {
       console.log(`\nUNPLACED ${plan.unplaced.length} list line(s):`);
       for (const u of plan.unplaced) console.log(`  line ${String(u.line).padStart(3)}  ${u.why}${u.near.length ? `  - closest: ${u.near.join(", ")}` : ""}`);
-      console.log("  Each would otherwise be GIVEN the qualification. Settle with --pin LINE=4D, or --skip LINE if he is not on the roster.");
+      console.log(`  Each would otherwise be ${only ? "MISSED" : "GIVEN the qualification"}. Settle with --pin LINE=4D, or --skip LINE if he is not on the roster.`);
     }
     console.log(`\nGets ${args.qual}: ${plan.grant.length} (${byRole(plan.grant)})`);
     console.log(`  ${plan.grant.map(g => g.id).join(" ") || "-"}`);
