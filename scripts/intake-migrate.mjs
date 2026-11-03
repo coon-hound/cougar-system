@@ -446,8 +446,8 @@ async function main() {
                 Object.entries(result.movedCounts).map(([t, n]) => `${t} ${n}`).join(", "));
     console.log("");
     console.log("Still to do by hand:");
-    console.log("  1. Bump STORAGE_KEY in js/state.js (cougar-data-v2 -> -v3) and the ?v= in");
-    console.log("     index.html. Every phone still holds the previous cohort in localStorage;");
+    console.log("  1. Bump STORAGE_KEY in js/state.js (cougar-data-v2 -> -v3) and merge it; the");
+    console.log("     deploy stamps a new ?v=. Every phone still holds the previous cohort in localStorage;");
     console.log("     the rev bumps above stop it overwriting anything, but until the cache is");
     console.log("     dropped those phones SHOW the old company.");
     console.log("  2. Redeploy the Edge Function so it picks up the new dropped_fields rows");

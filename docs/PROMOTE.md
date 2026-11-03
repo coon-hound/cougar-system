@@ -85,5 +85,5 @@ The 4D did not move, so no child table is touched, no invite needs re-issuing, a
 
 ## Immediately after
 
-1. Bump the uniform `?v=` in `index.html` and deploy, if a frontend change ships with it.
+1. If a frontend change ships with it, merge it; the deploy stamps a new `?v=` so phones pick it up.
 2. Nothing else. Reload a phone and check the parade state says PTE.

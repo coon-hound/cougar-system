@@ -23,7 +23,7 @@ scripts/ship.sh "feat: my thing"           # verify → commit → push → open
 Runs every applicable check and tees "one-look" evidence to `EVIDENCE.md` (diffstat + captured output + manual-test steps + PASS/FAIL).
 `EVIDENCE.md` is git-ignored: `ship.sh` sends it as the PR body, so the evidence is durable on the PR without a generated file rewriting itself on every branch and conflicting at merge.
 
-- Always: `node test/run.js` — sync units, multi-tab e2e, and static load-time guards (duplicate-declaration parse, uniform `?v=`, unbumped-write scan, raw-`setValues` scan). Zero-install.
+- Always: `node test/run.js` — sync units, multi-tab e2e, and static load-time guards (duplicate-declaration parse, `?v=dev` cache-busters, unbumped-write scan, raw-`setValues` scan). Zero-install.
 - If `apps-script-Code.gs` changed: `node --check` on a copy — paste-safety, since the backend is deployed by pasting this file.
 - If a frontend file (`js/*`, `index.html`, `styles.css`) changed: `npx playwright test` — headless Chromium drives the REAL frontend against seeded demo data with no network, and captures screenshots.
 
@@ -43,9 +43,10 @@ Add a spec per frontend feature under `test/e2e/*.spec.js` (see `boot.spec.js` f
 
 The two halves of the app deploy differently — state which one a change needs.
 
-- Frontend (`js/*`, `index.html`, `styles.css`): merge the PR, `git push`; GitHub Pages serves it.
-  Bump the uniform `?v=NN` cache-buster on every frontend change (a static test enforces that all script tags + `styles.css` share one version).
-  Version-bump coordination: `?v=` is a single number, so two open frontend PRs will both bump to the same `N` and the second to merge takes a trivial version-line conflict — re-bump or rebase it at merge time.
+- Frontend (`js/*`, `index.html`, `styles.css`): merge the PR; `.github/workflows/pages.yml` runs the node gate and publishes `master` to GitHub Pages.
+  Don't touch the `?v=dev` cache-busters: the deploy stamps a new number on every run (a static test rejects a hand-set one), so open PRs never collide on a version.
+  A user-visible change ships its patch note as its own `notes/<date>-<slug>.json` (see `notes/README.md`); `js/patchnotes.js` is frozen.
+  To make every phone reload without a code change (after a data migration): `gh workflow run pages.yml`.
 - Backend (`apps-script-Code.gs`): merge the PR(s) to `master`, then paste `master`'s `apps-script-Code.gs` into the Apps Script editor once.
   Two backend features can be separate PRs (disjoint hunks auto-merge); the deploy is a single paste of whatever `master` holds.
   A bot-only change needs just **Save**; a change to the web-app endpoints needs a **redeploy** (`/exec`).

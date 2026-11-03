@@ -87,7 +87,7 @@ If anything fails, nothing is committed and the previous cohort is untouched.
 
 The script prints this list too. It matters.
 
-1. **Bump `STORAGE_KEY` in `js/state.js`** (`cougar-data-v2` to `-v3`) and the `?v=` in `index.html`.
+1. **Bump `STORAGE_KEY` in `js/state.js`** (`cougar-data-v2` to `-v3`) and merge it; the deploy stamps a new `?v=`.
    Every phone in the field still holds the previous cohort in localStorage.
    The revision bumps stop those phones overwriting anything, but until the cache is dropped they still *show* the old company, and a commander acting on a recruit who is no longer here can create rows for a 4D nobody holds.
    Bumping the key is what forces every device to throw its cache away and pull fresh.

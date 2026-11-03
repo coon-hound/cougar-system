@@ -87,7 +87,7 @@ temporary key, the same child tables discovered from the catalogue, the same
 single transaction, the same `people` history and `intake_log` entries (logged
 as `swap`), and the same rev bump.
 
-The same two follow-ups apply afterwards: bump `STORAGE_KEY` and `?v=`, and
+The same two follow-ups apply afterwards: bump `STORAGE_KEY` (the deploy stamps `?v=`), and
 re-issue invites for both men.
 
 ## Moving a man to another section, and seating a late enlistee
@@ -158,7 +158,7 @@ The script prints this list too. It matters.
 The utility now increments the database seating version in the same locked transaction.
 Every operational copy must include this protection before use.
 
-1. **Bump `STORAGE_KEY` in `js/state.js`** and the uniform `?v=` in `index.html`, then deploy.
+1. **Bump `STORAGE_KEY` in `js/state.js`** and merge it; the deploy stamps a new `?v=`.
    This is what forces every phone to drop its cache.
    The rev bumps stop a stale phone overwriting anything; only dropping the cache stops it acting on the wrong man.
 

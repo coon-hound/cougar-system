@@ -19,7 +19,7 @@ No React, no bundler, no build step.
 
 Break one of these and `node test/run.js` fails.
 
-- **Bump `?v=` in `index.html` on every `js/*` or `styles.css` change.** It is a single uniform number across all script tags and `styles.css`; a static test enforces they all match. Without the bump, phones keep running stale cached code.
+- **Never hand-bump `?v=`.** Every script tag and `styles.css` in `index.html` carries `?v=dev`; the deploy (`.github/workflows/pages.yml` → `scripts/build-site.mjs`) stamps a fresh number on every push to `master`, so phones always reload. A static test rejects anything but `?v=dev`. Patch notes go in their own `notes/<date>-<slug>.json` (see `notes/README.md`), never in `js/patchnotes.js` — one file per note is what keeps two open PRs from conflicting.
 - **No duplicate top-level `const` / `let` across `js/*.js`.** All files are concatenated into one scope. A duplicate declaration blanks the entire dashboard at load. The static guard compiles all files as one program to catch this.
 - **Every direct write to a tracked tab must be followed by a `bumpRev`.** Otherwise other devices never learn the data changed. A heuristic scan checks for this.
 

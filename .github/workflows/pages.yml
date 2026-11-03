@@ -1,0 +1,54 @@
+name: deploy
+
+# Publishes master to GitHub Pages. Replaces the old "serve the master branch
+# as-is" Pages source, which forced every PR to hand-bump the ?v= cache-buster
+# (and two open PRs to collide on the same number).
+#
+# The repo's index.html says ?v=dev; scripts/build-site.mjs stamps the real
+# version into a COPY of the tree and gathers notes/*.json into
+# notes/index.json. Requires Settings -> Pages -> Source: "GitHub Actions".
+#
+# Run it by hand (Actions -> deploy -> Run workflow, or
+# `gh workflow run pages.yml`) to force every phone to reload without a code
+# change: each run gets a new version.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer push supersedes a queued one, never a running one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Same gate as the PR check, so a red master never reaches phones.
+      - run: node test/run.js
+      - name: Build site
+        # Continues the old hand-bumped numbering (last was 172) so versions
+        # stay readable and only go up.
+        run: |
+          rsync -a --exclude .git --exclude .github --exclude node_modules ./ _site/
+          node scripts/build-site.mjs _site "$((172 + ${{ github.run_number }}))"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

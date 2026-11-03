@@ -108,8 +108,8 @@ async function main() {
     }
     console.log("");
     console.log("Still to do by hand:");
-    console.log("  1. Bump the ?v= in index.html and deploy, so phones pick up any");
-    console.log("     frontend change shipped alongside this.");
+    console.log("  1. If a frontend change ships alongside this, merge it; the deploy");
+    console.log("     stamps a new ?v= so phones pick it up.");
     console.log("  2. Nothing else. The 4D did not move, so invites and caches stand.");
   } finally {
     await sql.end({ timeout: 5 });
