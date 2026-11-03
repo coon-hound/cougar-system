@@ -1,5 +1,7 @@
-// Feature spec for a recruit's section role (`billet`). Seeds synthetic people
-// at runtime and drives the real popup, form and Roster table.
+// Feature spec for roles and qualifications: a recruit's section role
+// (`billet`), extra roles and qualifications with optional expiry. Seeds
+// synthetic people at runtime and drives the real popup, forms, Roster table
+// and Log Conduct panel.
 const { test, expect } = require("@playwright/test");
 const { seedAndGoto } = require("./support");
 
@@ -18,7 +20,7 @@ test.describe("Section roles", () => {
     const body = page.locator("#modal-body");
     await expect(body).toContainText("1 LMG");
 
-    await page.evaluate(() => openBilletForm("9901"));
+    await page.evaluate(() => openRolesForm("9901"));
     await page.locator("#f-billet").fill("LAW 2IC");
     await page.locator("#modal-body button[type=submit]").click();
     await expect(page.locator("#modal-overlay")).toHaveClass(/hidden/);
@@ -38,5 +40,105 @@ test.describe("Section roles", () => {
     await seedAndGoto(page);
     const rows = await page.evaluate(() => normalizeRoster([{ id: "9903", name: "X" }]));
     expect(rows[0].billet).toBe("");
+    expect(rows[0].secondaryRoles).toBe("");
+    expect(rows[0].quals).toBe("");
+  });
+
+  test("roles and quals edited on the card show as chips and save to the row", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => {
+      STATE.roster.push(...normalizeRoster([{ id: "9904", name: "TEST MEDIC", role: "Recruit", quals: "Water Safety@2020-01-01" }]));
+      openRolesForm("9904");
+    });
+    await page.locator("#f-roles2").fill("Medic, Runner");
+    await page.locator("text=+ Add qualification").click();
+    await page.locator("[data-qual-name]").last().fill("CPR");
+    await page.locator("[data-qual-exp]").last().fill("2099-12-31");
+    await page.locator("#modal-body button[type=submit]").click();
+
+    const row = await page.evaluate(() => STATE.roster.find(r => r.id === "9904"));
+    expect(row.secondaryRoles).toBe("Medic, Runner");
+    expect(row.quals).toBe("Water Safety@2020-01-01, CPR@2099-12-31");
+
+    await page.evaluate(() => openPerson("9904"));
+    const body = page.locator("#modal-body");
+    await expect(body.locator(".badge", { hasText: "Medic" })).toBeVisible();
+    await expect(body.locator(".badge-green", { hasText: "CPR" })).toBeVisible();
+    await expect(body.locator(".qual-expired", { hasText: "Water Safety" })).toBeVisible();
+  });
+
+  test("a delimiter in a qual name is refused, nothing is saved", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => {
+      STATE.roster.push(...normalizeRoster([{ id: "9905", name: "TEST COMMA", role: "Recruit" }]));
+      openRolesForm("9905");
+    });
+    await page.locator("[data-qual-name]").first().fill("CPR@AED");
+    page.once("dialog", d => d.accept());
+    await page.locator("#modal-body button[type=submit]").click();
+    expect(await page.evaluate(() => STATE.roster.find(r => r.id === "9905").quals)).toBe("");
+  });
+
+  test("bulk award, roster filter and the Log Conduct panel", async ({ page }) => {
+    await seedAndGoto(page);
+    const today = await page.evaluate(() => todayISO());
+    await page.evaluate(() => {
+      STATE.roster.push(...normalizeRoster([
+        { id: "0091", name: "TEST SAFETY", role: "Commander", rank: "3SG" },
+        { id: "9911", name: "TEST ALPHA", role: "Recruit" },
+        { id: "9912", name: "TEST BRAVO", role: "Recruit" },
+      ]));
+      openQualAwardForm("Range Safety Officer");
+    });
+    for (const d4 of ["0091", "9911", "9912"]) await page.locator(`#group-member-list input[data-d4="${d4}"]`).check();
+    await page.locator("#f-award-exp").fill("2099-01-01");
+    await page.locator("text=Save holders").click();
+    const holders = await page.evaluate(() => qualHolders("Range Safety Officer").map(h => h.r.id).sort());
+    expect(holders).toEqual(["0091", "9911", "9912"]);
+
+    // The Master NR Qualifications view, filtered on the Qualifications column, narrows
+    // to the holders.
+    await page.evaluate(() => {
+      STATE.nav = "roster"; STATE.filterRole = ""; render(); setNRPreset("quals");
+      const s = NR.load(); s.filters.quals = { in: ["Range Safety Officer"] }; nrSet(s);
+    });
+    await expect(page.locator("#content tbody tr")).toHaveCount(3);
+    await expect(page.locator("#content thead")).toContainText("Qualifications");
+
+    // One holder goes on MC today: the panel still lists him, as unavailable.
+    await page.evaluate((d) => {
+      STATE.medical.push({ id: "m-test-1", d4: "9912", status: "MC", startDate: isoToDisplayDate(d), endDate: isoToDisplayDate(d), reason: "fever" });
+      openLogConductWizard();
+    }, today);
+    const panel = page.locator("#wiz-qual-panel");
+    await panel.locator("summary").click();
+    await panel.locator("button", { hasText: "Range Safety Officer" }).click();
+    await expect(panel).toContainText("2 available of 3");
+    await expect(page.locator("#wiz-qual-panel div", { hasText: "TEST BRAVO" }).last()).toContainText("MC");
+  });
+
+  test("PES and SOC on the profile, THT weapons as chips, editable from the roles form", async ({ page }) => {
+    await seedAndGoto(page);
+    await page.evaluate(() => {
+      STATE.roster.push(...normalizeRoster([{ id: "9913", name: "TEST CHARLIE", role: "Recruit",
+        pes: "B1", socLevel: "SOC5", thtPrimary: "MATADOR", thtSecondary: "LMG", quals: "CPR/AED" }]));
+      openPerson("9913");
+    });
+    const modal = page.locator(".modal");
+    await expect(modal).toContainText("PES: B1");
+    await expect(modal).toContainText("SOC: SOC5");
+    await expect(modal).toContainText("THT MATADOR");
+    await expect(modal).toContainText("THT LMG");
+    await expect(modal).toContainText("CPR/AED");
+    // The card shows weapons only, never which slot.
+    await expect(modal).not.toContainText("Primary");
+
+    await page.evaluate(() => openRolesForm("9913"));
+    await page.locator("#f-pes").selectOption("B2");
+    await page.locator("#f-soc").selectOption("None");
+    await page.locator("#f-tht2").selectOption("");
+    await page.locator("text=Save").last().click();
+    const r = await page.evaluate(() => { const x = STATE.roster.find(r => r.id === "9913"); return [x.pes, x.socLevel, x.thtPrimary, x.thtSecondary]; });
+    expect(r).toEqual(["B2", "None", "MATADOR", ""]);
   });
 });

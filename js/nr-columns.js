@@ -201,7 +201,8 @@ const NR = (() => {
   // Group order is the order the Columns modal lists them in.
   const G = {
     id: "Identity", camp: "Camp today", med: "Medical", leave: "Leave and movement",
-    fit: "Fitness", duty: "Duty and attendance", personal: "Personal (sensitive)",
+    fit: "Fitness", duty: "Duty and attendance", quals: "Qualifications",
+    personal: "Personal (sensitive)",
   };
   const COLUMNS = [
     // Identity
@@ -334,6 +335,15 @@ const NR = (() => {
       get: (r, ctx) => isCmd(r) ? dutyTallyOf(ctx.dutyTally, r.id).total : null },
     { id: "missed", label: "Conducts missed", group: G.duty, type: "number", get: (r, ctx) => ctx.missed[r.id] || 0 },
 
+    // Qualifications. PES and SOC are real roster columns (0015);
+    // THT shows weapons only, primary first, like the person card.
+    field("pes", "PES", G.quals, "enum"),
+    field("socLevel", "Latest SOC", G.quals, "enum"),
+    { id: "tht", label: "THT weapons", group: G.quals, type: "enum", get: r => thtWeapons(r) },
+    { id: "quals", label: "Qualifications", group: G.quals, type: "enum",
+      get: r => getQuals(r).map(q => q.name).sort((a, b) => a.localeCompare(b)),
+      td: "text-align:left;white-space:normal;max-width:220px;font-size:11px" },
+
     // Personal (sensitive). Decrypted by roster_api_row on every read, so they
     // are in STATE.roster for every signed-in device already (the person card
     // shows them). Off by default; only the Contacts / NOK preset turns them on.
@@ -399,6 +409,7 @@ const NR = (() => {
     { id: "medical", label: "Medical", cols: ["d4", "name", "plt", "status", "med_until", "mc_in_camp", "recovery", "rsis", "rs_30", "rs_last", "next_appt", "msk_regions"] },
     { id: "ippt", label: "IPPT", cols: ["d4", "name", "plt", "ippt_which", "ippt_score", "ippt_award", "ippt_run", "ippt_best", "ippt_change", "ytt"] },
     { id: "leave", label: "Leave", cols: ["d4", "name", "plt", "on_leave", "leave_type", "next_leave", "leave_quota", "al_used", "al_left", "oil_left"] },
+    { id: "quals", label: "Qualifications", cols: ["d4", "name", "plt", "sect", "pes", "socLevel", "tht", "quals"] },
     { id: "contacts", label: "Contacts / NOK", cols: ["d4", "name", "phone", "email", "nokName", "nokRelation", "nokPhone", "address", "dob", "bloodType", "allergies", "otherMedical"] },
   ];
 

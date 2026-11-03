@@ -212,6 +212,8 @@ body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',san
 .badge-accent{background:rgba(var(--accentRGB),.15);color:var(--accentLift);border:1px solid rgba(var(--accentRGB),.32)}
 .badge-teal{background:rgba(var(--tealRGB),.15);color:var(--teal);border:1px solid rgba(var(--tealRGB),.32)}
 .badge-pink{background:rgba(var(--pinkRGB),.15);color:var(--pink);border:1px solid rgba(var(--pinkRGB),.32)}
+.qual-expired{background:var(--surface2);color:var(--dim);border:1px solid var(--border);text-decoration:line-through}
+.tag-row{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 
 /* ── Buttons ───────────────────────────────────────────────
    Four ranks: primary (filled azure), success/danger (tinted, semantic),
@@ -302,6 +304,14 @@ tbody tr:last-child td{border-bottom:none}
 .modal-overlay{position:fixed;inset:0;background:rgba(3,6,13,.55);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px;animation:veil-in var(--d2) var(--ez) both}
 .modal{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--r4);padding:22px 24px 24px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto;min-height:0;box-shadow:var(--sh4),var(--lift);animation:dialog-in var(--d3) var(--spring) both}
 .modal.wide{max-width:780px}
+/* A modal whose one long list (.modal-fill) takes whatever height is left, so
+   the text above and the buttons below always show instead of the whole modal
+   scrolling under its sticky header (the Columns picker). */
+.modal.fit{display:flex;flex-direction:column}
+.modal.fit .modal-header{flex-shrink:0}
+.modal.fit #modal-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.modal.fit #modal-body>*{flex:1 1 auto;min-height:0}
+.modal.fit .modal-fill{flex:1 1 auto;min-height:140px;overflow-y:auto}
 /* Chart wrappers: explicit height so Chart.js (maintainAspectRatio:false) has
    something to fill instead of recomputing height from canvas width — that
    recompute is what was breaking the modal's overflow:auto scroll. */
@@ -313,7 +323,9 @@ tbody tr:last-child td{border-bottom:none}
    doesn't bleed through. ::before is the mobile drag handle (see media query);
    it lives on the header, not .modal, because .modal is the scroll container
    and a handle drawn there would scroll away. */
-.modal-header{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-22px -24px 16px;padding:20px 24px 12px;background:var(--surface);border-bottom:1px solid var(--border);border-radius:var(--r4) var(--r4) 0 0}
+/* top = minus the modal's top padding: sticky measures from inside the padding,
+   so top:0 parked the header 22px low, over the first line of the body. */
+.modal-header{position:sticky;top:-22px;z-index:10;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-22px -24px 16px;padding:20px 24px 12px;background:var(--surface);border-bottom:1px solid var(--border);border-radius:var(--r4) var(--r4) 0 0}
 .modal-header h3{font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--text);min-width:0}
 .modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;min-width:36px;min-height:36px;line-height:1;border-radius:var(--rp);flex-shrink:0;transition:color var(--d2) var(--ez),background-color var(--d2) var(--ez),transform var(--d1) var(--ez)}
 .modal-close:active{transform:scale(.9)}
@@ -806,7 +818,7 @@ button.dty-slot{cursor:pointer}
      are the real dismissals. */
   .modal-overlay{padding:0;align-items:flex-end;justify-content:center}
   .modal,.modal.wide{max-width:100%;width:100%;max-height:92vh;max-height:92dvh;height:auto;border-radius:var(--r4) var(--r4) 0 0;padding:20px 16px calc(28px + env(safe-area-inset-bottom,0));border-bottom:none;border-left:none;border-right:none;animation:sheet-in var(--d4) var(--spring) both}
-  .modal-header{margin:-20px -16px 14px;padding:22px 16px 11px;border-radius:var(--r4) var(--r4) 0 0}
+  .modal-header{top:-20px;margin:-20px -16px 14px;padding:22px 16px 11px;border-radius:var(--r4) var(--r4) 0 0}
   .modal-header::before{content:"";position:absolute;top:8px;left:50%;width:38px;height:4px;margin-left:-19px;border-radius:var(--rp);background:var(--surface3)}
   .modal-header h3{font-size:16px}
 

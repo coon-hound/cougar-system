@@ -43,8 +43,9 @@ const API_URL = localStorage.getItem(API_URL_KEY) || SUPABASE_API_URL;
 //   v3 "cougar-data-v3"  - intake 16 before platoon 9 was re-sectioned
 //   v5 "cougar-data-v5"  - before section 9-4 closed up behind a departure
 //   v6 "cougar-data-v6"  - before a man moved 7-2 -> 9-4 and a late enlistee joined 7-2
-const STORAGE_KEY = "cougar-data-v9";
-const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5", "cougar-data-v6", "cougar-data-v7", "cougar-data-v8"];
+//   v9 "cougar-data-v9"  - before a man moved 9-3 -> 9-2 (9307 -> 9210) and 9-3 closed up
+const STORAGE_KEY = "cougar-data-v10";
+const STORAGE_KEY_LEGACY = ["cougar-data", "cougar-data-v2", "cougar-data-v3", "cougar-data-v4", "cougar-data-v5", "cougar-data-v6", "cougar-data-v7", "cougar-data-v8", "cougar-data-v9"];
 const AUTH_KEY = "cougar-auth";
 const FILTER_KEY = "cougar-filter";
 const IPPT_AGG_KEY = "cougar-ippt-agg";
@@ -496,7 +497,19 @@ function normalizeRoster(roster) {
       groups: rest.groups != null ? String(rest.groups) : "",
       // Section role ("1 LMG", "GL", "2 MAT"…). Free text, "" = unassigned.
       // Not `role` (Commander/Recruit) and not `appt` (a commander's VC/SC).
-      billet: rest.billet != null ? String(rest.billet) : ""
+      billet: rest.billet != null ? String(rest.billet) : "",
+      // Extra roles ("Medic, Runner") and qualifications ("CPR@2027-03-31, Range
+      // Safety"), comma-delimited like groups. Parsed by getSecondaryRoles /
+      // getQuals in helpers.js. Commanders carry them too.
+      secondaryRoles: rest.secondaryRoles != null ? String(rest.secondaryRoles) : "",
+      quals: rest.quals != null ? String(rest.quals) : "",
+      // PES / SOC / THT (0015, real roster columns). PES grade ("A", "B1"...),
+      // latest SOC ("SOC5", "None" = never did one), and the THT-trained
+      // weapons. Primary/secondary is stored; the card shows weapons only.
+      pes: rest.pes != null ? String(rest.pes) : "",
+      socLevel: rest.socLevel != null ? String(rest.socLevel) : "",
+      thtPrimary: rest.thtPrimary != null ? String(rest.thtPrimary) : "",
+      thtSecondary: rest.thtSecondary != null ? String(rest.thtSecondary) : ""
     };
   });
 }

@@ -1359,6 +1359,7 @@ function renderRoster(el) {
             <button type="button" onclick="pushTab('Roster',STATE.roster); closeNRMenu()" title="Full re-write of this tab. Useful after manual sheet edits or to recover from a sync failure — normal edits auto-push.">↻ Re-push all</button>
             <button type="button" onclick="openCommanderForm(); closeNRMenu()" title="Add a commander to the roster (recruits come from the nominal roll)">+ Commander</button>
             <button type="button" onclick="openGroupsForm(); closeNRMenu()" title="Create / edit ad-hoc recruit groups (e.g. Guard Duty)">⦿ Groups</button>
+            <button type="button" onclick="openQualsForm(); closeNRMenu()" title="Who holds which qualification; award one to many people at once">🎓 Quals</button>
           </div>
         </div>
       </div>
@@ -1641,14 +1642,16 @@ function openNRColumns() {
   openModal("Columns", `
     <div style="display:flex;flex-direction:column;gap:10px">
       <div style="font-size:11px;color:var(--muted)">Tick the columns to show. To sort or filter, tap a column heading in the table. Saved on this device only.</div>
-      <div id="nr-cols" style="max-height:52vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">${groups}</div>
+      <div id="nr-cols" class="modal-fill" style="border:1px solid var(--border);border-radius:6px;padding:8px">${groups}</div>
       <div class="form-group"><label>Save as a preset (optional)</label><input id="nr-preset-name" maxlength="40" placeholder="e.g. Guard list"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" style="flex:1" onclick="submitNRColumns()">Apply</button>
         ${isCustom ? `<button class="btn btn-danger" onclick="deleteNRPreset()" title="Delete the preset '${escapeAttr(NR.presetById(s.preset, s.custom).label)}' from this device">Delete preset</button>` : ""}
       </div>
     </div>`);
-  document.querySelector(".modal")?.classList.add("wide");
+  // `fit`: the column list takes the height that is left, so the hint above
+  // and Apply below are always on screen.
+  document.querySelector(".modal")?.classList.add("wide", "fit");
 }
 
 function submitNRColumns() {
