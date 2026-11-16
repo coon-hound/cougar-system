@@ -1318,17 +1318,21 @@ function dashSecAppointments(visible, todayIso) {
 // chips, per-column filters and a header-tap sort. The view state lives per
 // device in localStorage (NR.load/NR.save); the search box is session-only,
 // like the mount picker. The Default preset is the Roster as it always was.
+//
+// Filtering is one tap per intent everywhere: tap a chip or a value to show
+// only it (+), tap its − to hide it, tap the same again to clear. Quick chips
+// cover camp, medical, leave, mounted and each platoon; + Filter reaches any
+// column, shown or not; every column filter in force is spelled out as a pill
+// above the table; and ☆ Save view keeps the lot as a named view.
 let _nrSearch = "";
 const nrState = () => NR.load();
 function nrSet(s) { NR.save(s); render(); }
 
-// Scope first (topbar platoon/section/role/group, then the mount picker), in
-// the senior-first order every roster list uses. sortByRank copies, so
-// STATE.roster itself is never reordered. "both" counts under either side.
+// The topbar scope (platoon/section/role/group, app-wide) first, in the
+// senior-first order every roster list uses. sortByRank copies, so
+// STATE.roster itself is never reordered.
 function nrScoped() {
-  const mf = STATE.rosterMount;
-  return sortByRank(filteredRoster())
-    .filter(r => !mf || mountOf(r) === mf || mountOf(r) === "both");
+  return sortByRank(filteredRoster());
 }
 
 function renderRoster(el) {
@@ -1345,14 +1349,12 @@ function renderRoster(el) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <h2 style="font-size:18px;font-weight:700">Master NR${titleSuffix}</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select id="nr-preset" class="topbar-select${s.preset !== "default" || modified ? " active" : ""}" onchange="setNRPreset(this.value)" title="Saved column layouts">${presetOpts}</select>
+        <select id="nr-preset" class="topbar-select${s.preset !== "default" || modified ? " active" : ""}" onchange="setNRPreset(this.value)" title="Column layouts and your saved views">${presetOpts}</select>
         <button class="btn" onclick="openNRColumns()" title="Choose which columns to show">+ Columns</button>
-        <select id="roster-mount" class="topbar-select${STATE.rosterMount ? " active" : ""}" onchange="STATE.rosterMount=this.value; render()" title="Mounted = Gunner / Hunter Driver / Bronco Operator, from each man's role">
-          ${[["", "All roles"], ["mounted", "Mounted"], ["dismounted", "Dismounted"]].map(([v, l]) => `<option value="${v}"${STATE.rosterMount === v ? " selected" : ""}>${l}</option>`).join("")}
-        </select>
         <div class="dropdown-wrapper">
           <button id="nr-more-btn" class="btn" onclick="toggleNRMenu(event)" aria-label="More roster actions" title="More">⋯</button>
           <div id="nr-menu" class="dropdown-menu hidden">
+            <button type="button" onclick="openNRSaveView(); closeNRMenu()" title="Keep these columns and filters as a named view on this device">☆ Save this view</button>
             <button type="button" onclick="exportNRView(); closeNRMenu()">Export view (CSV)</button>
             <button type="button" onclick="copyNRView(); closeNRMenu()">Copy view</button>
             <button type="button" onclick="exportCSV(STATE.roster,'roster.csv'); closeNRMenu()" title="Every field of every man, ignoring the view">Export full roster (CSV)</button>
@@ -1364,30 +1366,69 @@ function renderRoster(el) {
         </div>
       </div>
     </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <input id="nr-search" class="topbar-select" style="cursor:text;min-width:0;flex:1 1 160px;max-width:260px" placeholder="Search this view..." value="${escapeAttr(_nrSearch)}" oninput="setNRSearch(this.value)">
-      ${NR.CHIPS.map(c => `<button type="button" class="lc-wiz-filter-chip${s.chips.includes(c.id) ? " active" : ""}" data-nr-chip="${c.id}" onclick="toggleNRChip('${c.id}')">${c.label}</button>`).join("")}
+      <select id="nr-addfilter" class="topbar-select" style="width:96px" data-nr-open onchange="addNRFilter(this)" title="Filter on any column, shown or not" aria-label="Filter on a column">
+        <option value="" selected>+ Filter</option>
+        ${NR.GROUPS.map(g => `<optgroup label="${escapeAttr(g)}">${NR.COLUMNS.filter(c => c.group === g).map(c => opt(c.id, c.label, false)).join("")}</optgroup>`).join("")}
+      </select>
     </div>
+    <div class="nr-chiprow">${nrChipRowHtml(s)}</div>
     <div id="nr-body">${nrBodyHtml(s)}</div>`;
 }
 
-// Summary line + table. Re-rendered on its own while typing in the search box
-// so the input keeps focus.
+// A quick chip: the label shows only (+, green), the − hides (red). The one
+// in force reads as a ✕ on the − side, or as the label again, to clear.
+function nrQuickChipHtml(label, st, onIn, onOut, attrs) {
+  const cls = st === "in" ? " inc" : st === "out" ? " exc" : "";
+  const sign = st === "in" ? "+ " : st === "out" ? "− " : "";
+  const said = st === "in" ? ", showing only these" : st === "out" ? ", hidden" : "";
+  const L = escapeAttr(label);
+  return `<span class="nr-qchip${cls}" data-state="${st}"${attrs || ""}><button type="button" class="nr-qchip-main" aria-label="${L}${said}" title="${st === "in" ? "Tap to clear" : "Show only"}: ${L}" onclick="${onIn}">${sign}${escapeHtml(label)}</button><button type="button" class="nr-qchip-hide" aria-label="${st === "out" ? "Stop hiding" : "Hide"} ${L}" title="${st === "out" ? "Stop hiding" : "Hide"}: ${L}" onclick="${onOut}">${st === "out" ? "✕" : "−"}</button></span>`;
+}
+// The quick chips, plus one per platoon on the roll (and COY HQ) - a value
+// of the Platoon column, so it and the Platoon pill are the same filter.
+// Chips in force lead the row: on a phone it scrolls sideways, and a filter
+// that is hiding people must never be the part scrolled out of sight.
+function nrChipRowHtml(s) {
+  const chips = NR.CHIPS.map(c => ({ st: NR.chipState(s, c.id), html: st => nrQuickChipHtml(c.label, st,
+    `toggleNRChip('${c.id}','in')`, `toggleNRChip('${c.id}','out')`, ` data-nr-chip="${c.id}"`) }));
+  const plts = [...new Set(nrScoped().map(getPlt))]
+    .sort((a, b) => (a === "") - (b === "") || String(a).localeCompare(String(b), undefined, { numeric: true }));
+  if (plts.length > 1) plts.forEach(v => chips.push({ st: NR.valueState(s.filters.plt, v), html: st => nrQuickChipHtml(NR.valueLabel(NR.COL.plt, v), st,
+    `toggleNRPltChip('${escapeAttr(v)}','in')`, `toggleNRPltChip('${escapeAttr(v)}','out')`, ` data-nr-plt="${escapeAttr(v)}"`) }));
+  return chips.filter(c => c.st).concat(chips.filter(c => !c.st)).map(c => c.html(c.st)).join("");
+}
+
+// One pill per column filter in force, in words ("Status: MC or LD, not
+// RSO"). Tap it to change the filter, whether or not its column is shown;
+// tap its ✕ to drop it.
+function nrPillsHtml(s) {
+  const ids = NR.activeFilterIds(s);
+  if (!ids.length) return "";
+  return `<div id="nr-pills" class="nr-pills">${ids.map(id => {
+    const c = NR.COL[id];
+    const full = NR.describeFilter(c, s.filters[id], true);
+    return `<span class="nr-pill" data-nr-pill="${id}"><button type="button" class="nr-pill-main" data-nr-open onclick="openNRColMenu('${id}', this.parentNode)" title="${escapeAttr(c.label + ": " + full)}. Tap to change."><span class="nr-pill-k">${escapeHtml(c.label)}:</span> ${escapeHtml(NR.describeFilter(c, s.filters[id]))}</button><button type="button" class="nr-pill-x" onclick="removeNRFilter('${id}')" aria-label="Remove the ${escapeAttr(c.label)} filter" title="Remove this filter">✕</button></span>`;
+  }).join("")}</div>`;
+}
+
+// Pills + summary line + table. Re-rendered on its own while typing in the
+// search box so the input keeps focus.
 function nrBodyHtml(s) {
   s = s || nrState();
-  const mf = STATE.rosterMount;
   const scoped = nrScoped();
   if (!scoped.length) {
-    return `<div class="empty-state">${STATE.roster.length ? `No ${mf ? MOUNT_LABEL[mf].toLowerCase() + " " : ""}personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`;
+    return `<div class="empty-state">${STATE.roster.length ? `No personnel${isFilterActive() ? ` in ${filterLabel()}` : ""}.` : (STATE.authToken ? "Loading roster from sheet…" : "No invite redeemed on this device yet.")}</div>`;
   }
   const ctx = NR.makeCtx(todayISO());
   const cols = NR.visibleCols(s);
   const rows = NR.apply(scoped, s, ctx, _nrSearch);
   const out = rows.filter(r => ctx.outMap.has(r.id)).length;
-  const narrowed = s.chips.length || NR.activeFilterCount(s) || _nrSearch.trim();
-  const summary = `<div id="nr-summary" style="font-size:11px;color:var(--muted);margin-bottom:8px">
+  const narrowed = NR.narrowed(s) || _nrSearch.trim();
+  const summary = nrPillsHtml(s) + `<div id="nr-summary" style="font-size:11px;color:var(--muted);margin-bottom:8px">
     <strong style="color:var(--text)">${rows.length}</strong> shown of ${scoped.length} · in camp <strong style="color:var(--teal)">${rows.length - out}</strong> · out <strong style="color:${out ? "var(--orange)" : "var(--dim)"}">${out}</strong>
-    ${narrowed ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px;margin-left:6px" onclick="clearNRFilters()">✕ Clear filters</button>` : ` <span style="color:var(--dim)">· tap a column heading to sort or filter</span>`}
+    ${narrowed ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px;margin-left:6px" onclick="clearNRFilters()">✕ Clear filters</button>${NR.narrowed(s) ? ` <button class="btn btn-icon" style="font-size:10px;padding:2px 7px" onclick="openNRSaveView()" title="Keep these columns and filters as a named view">☆ Save view</button>` : ""}` : ` <span style="color:var(--dim)">· tap a chip to show only, its − to hide · tap a column heading to sort or filter</span>`}
   </div>`;
   if (!rows.length) return summary + `<div class="empty-state">No personnel match these filters.</div>`;
   // Every heading is a spreadsheet-style menu (sort, filter by value, hide).
@@ -1440,21 +1481,31 @@ function setNRPreset(id) {
   } catch (e) { /* telemetry must never break the view */ }
   nrSet(NR.applyPreset(s, id));
 }
-function toggleNRChip(id) { nrSet(NR.toggleChip(nrState(), id)); }
-// ── Column menu (the spreadsheet filter) ────────────────
-// Tap a heading: sort A-Z / Z-A, tick the values to keep (with a search box
-// and (Select all), exactly like a Sheets / Excel filter), or hide the column.
-// Ticks apply as you go - there is no OK to forget. The menu lives on <body>,
-// outside #content, so redrawing the table under it does not close it.
+function toggleNRChip(id, want) { nrSet(NR.toggleChip(nrState(), id, want)); }
+function toggleNRPltChip(v, want) { nrSet(NR.toggleValue(nrState(), "plt", String(v), want)); }
+// ── Column menu (filter + sort) ─────────────────────────
+// Tap a heading, a filter pill or a + Filter pick. Values come first, each
+// with a count: tap a value to show only it, tap its − to hide it, tap again
+// to clear. A long list gets a search box; a multi-valued column can ask for
+// any or all of its + values; a number column takes a range and a date column
+// a span; sort and show/hide sit in the footer. Taps apply as you go - there
+// is no OK to forget. The menu lives on <body>, outside #content, so
+// redrawing the table under it does not close it.
 let _nrMenuCol = "";
 
 function nrMenuEl() { return document.getElementById("nr-colmenu"); }
 function closeNRColMenu() {
   nrMenuEl()?.remove();
   _nrMenuCol = "";
+  // + Filter keeps its pick while the menu is up (so arrow keys on a closed
+  // picker can step on past it) and goes back to "+ Filter" here.
+  const pick = document.getElementById("nr-addfilter");
+  if (pick) pick.value = "";
 }
 // The values a column offers, counted over the rows every OTHER filter (and
-// the search box) leaves - a sheet lists what is visible, not what exists.
+// the search box) leaves - a sheet lists what is visible, not what exists. A
+// value the filter names that no row has any more stays listed at 0, so it
+// can still be cleared. Dates run oldest first and numbers smallest first.
 function nrMenuValues(id) {
   const s = nrState();
   const c = NR.COL[id];
@@ -1464,96 +1515,190 @@ function nrMenuValues(id) {
   const counts = new Map();
   NR.apply(nrScoped(), others, ctx, _nrSearch).forEach(r =>
     NR.filterVals(c, r, ctx).forEach(v => counts.set(v, (counts.get(v) || 0) + 1)));
-  const f = s.filters[id];
-  if (f && Array.isArray(f.in)) f.in.forEach(v => { if (!counts.has(v)) counts.set(v, 0); });
+  const f = s.filters[id] || {};
+  (f.in || []).concat(f.out || []).forEach(v => { if (!counts.has(v)) counts.set(v, 0); });
+  const key = v => c.type === "date" ? displayDateToISO(v) || v
+    : c.type === "number" ? parseFloat(String(v).replace(/[^\d.+-]/g, "")) : v;
   return [...counts.keys()]
-    .sort((a, b) => (a === "") - (b === "") || a.localeCompare(b, undefined, { numeric: true }))
+    .sort((a, b) => {
+      if ((a === "") !== (b === "")) return a === "" ? 1 : -1;
+      const ka = key(a), kb = key(b);
+      if (typeof ka === "number" && typeof kb === "number" && !isNaN(ka) && !isNaN(kb) && ka !== kb) return ka - kb;
+      return String(ka).localeCompare(String(kb), undefined, { numeric: true }) || a.localeCompare(b, undefined, { numeric: true });
+    })
     .map(v => ({ v, n: counts.get(v) }));
 }
-function openNRColMenu(id, th) {
+function nrMenuRowHtml(c, f, v, n) {
+  const label = NR.valueLabel(c, v);
+  const text = v === "" && label === "(blank)" ? `<span style="color:var(--dim)">${escapeHtml(label)}</span>` : escapeHtml(label);
+  return `<div class="nr-colmenu-row" data-nr-val="${escapeAttr(v)}" data-v="${escapeAttr(label.toLowerCase())}" data-state="${NR.valueState(f, v)}"><button type="button" class="nr-colmenu-pick" onclick="nrMenuToggle(this, 'in')"><span class="nr-tri" aria-hidden="true"></span><span class="nr-colmenu-v">${text}</span><span class="nr-colmenu-n">${n}</span></button><button type="button" class="nr-colmenu-hide" onclick="nrMenuToggle(this, 'out')">−</button></div>`;
+}
+// anchor: the heading, pill or + Filter picker the menu drops from. force:
+// open even if this column's menu is already up (a heading tap toggles).
+function openNRColMenu(id, anchor, force) {
   const c = NR.COL[id];
   if (!c) return;
-  if (_nrMenuCol === id && nrMenuEl()) { closeNRColMenu(); return; }
+  if (!force && _nrMenuCol === id && nrMenuEl()) { closeNRColMenu(); return; }
   closeNRColMenu();
   _nrMenuCol = id;
   const s = nrState();
-  const f = s.filters[id];
-  const keep = f && Array.isArray(f.in) ? new Set(f.in) : null;
+  const f = s.filters[id] || {};
+  const shown = NR.visibleCols(s);
+  const isShown = shown.some(x => x.id === id);
   const vals = nrMenuValues(id);
   const words = c.type === "number" ? ["Smallest to largest", "Largest to smallest"]
     : c.type === "date" ? ["Oldest to newest", "Newest to oldest"] : ["Sort A → Z", "Sort Z → A"];
   const sortBtn = (dir, label) => {
     const on = s.sort && s.sort.id === id && s.sort.dir === dir;
-    return `<button type="button" data-nr-sort="${dir}" onclick="nrMenuSort('${dir}')"${on ? ' style="color:var(--accentLift);font-weight:700"' : ""}>${dir === "asc" ? "↑" : "↓"} ${label}${on ? " ✓" : ""}</button>`;
+    return `<button type="button" class="nr-colmenu-sort${on ? " on" : ""}" data-nr-sort="${dir}" onclick="nrMenuSort('${dir}')" title="${label}" aria-label="${label}"${on ? ' aria-pressed="true"' : ""}>${dir === "asc" ? "↑" : "↓"}</button>`;
   };
-  const shown = NR.visibleCols(s);
+  const lab = escapeAttr(c.label);
+  // A column with its own range format (2.4 km in mm:ss) types it as text.
+  const rv = x => x == null || x === "" ? "" : c.range ? c.range.fmt(x) : x;
+  const numIn = (k, ph) => c.range
+    ? `<input type="text" autocomplete="off" class="nr-colmenu-q" data-nr-range="${k}" placeholder="${k === "min" ? "From" : "To"} (${escapeAttr(c.range.hint)})" aria-label="${lab} ${k === "min" ? "from" : "up to"}" value="${escapeAttr(rv(f[k]))}" oninput="nrMenuRange('${k}', this.value)">`
+    : `<input type="number" step="any" class="nr-colmenu-q" data-nr-range="${k}" placeholder="${ph}" aria-label="${lab} ${k === "min" ? "from" : "up to"}" value="${escapeAttr(rv(f[k]))}" oninput="nrMenuRange('${k}', this.value)">`;
+  const range = c.type === "number" ? `
+    <div class="nr-colmenu-range">
+      ${numIn("min", "Min")}
+      <span>to</span>
+      ${numIn("max", "Max")}
+    </div>`
+    : c.type === "date" ? `
+    <div class="nr-colmenu-range nr-colmenu-range-lbl"><span>From</span><span>To</span></div>
+    <div class="nr-colmenu-range">
+      <input type="date" min="2020-01-01" max="2099-12-31" class="nr-colmenu-q" data-nr-range="from" aria-label="${lab} from" value="${escapeAttr(f.from || "")}" onchange="nrMenuRange('from', this.value)">
+      <span>to</span>
+      <input type="date" min="2020-01-01" max="2099-12-31" class="nr-colmenu-q" data-nr-range="to" aria-label="${lab} until" value="${escapeAttr(f.to || "")}" onchange="nrMenuRange('to', this.value)">
+    </div>` : "";
   const menu = document.createElement("div");
   menu.id = "nr-colmenu";
   menu.className = "dropdown-menu nr-colmenu";
   menu.setAttribute("role", "dialog");
   menu.setAttribute("aria-label", c.label + " column");
   menu.innerHTML = `
-    <div class="nr-colmenu-title">${escapeHtml(c.label)}</div>
-    ${sortBtn("asc", words[0])}${sortBtn("desc", words[1])}
-    <div class="nr-colmenu-sep"></div>
-    <div class="nr-colmenu-sub">Filter by value</div>
-    <input id="nr-colmenu-q" type="search" class="nr-colmenu-q" placeholder="Search values" autocomplete="off" oninput="nrMenuSearch(this.value)">
+    <div class="nr-colmenu-subrow"><span class="nr-colmenu-title">${escapeHtml(c.label)}</span><button type="button" id="nr-colmenu-clear" class="nr-colmenu-clear" onclick="nrMenuClear()">Clear filter</button></div>
+    ${range}
+    <div class="nr-colmenu-hint">Tap a value to <span style="color:var(--green);font-weight:700">show only</span> it, its <span style="color:var(--red);font-weight:700">−</span> to hide it.</div>
+    ${vals.length > 8 ? `<input id="nr-colmenu-q" type="search" class="nr-colmenu-q" placeholder="Search ${vals.length} values" autocomplete="off" oninput="nrMenuSearch(this.value)">` : ""}
     <div id="nr-colmenu-list" class="nr-colmenu-list">
-      <label class="nr-colmenu-row nr-colmenu-all"><input type="checkbox" id="nr-colmenu-all" onchange="nrMenuSelectAll(this.checked)"> (Select all)</label>
-      ${vals.map(({ v, n }) => `<label class="nr-colmenu-row" data-v="${escapeAttr(v.toLowerCase())}"><input type="checkbox" data-nr-val="${escapeAttr(v)}"${!keep || keep.has(v) ? " checked" : ""} onchange="nrMenuTick()"> <span class="nr-colmenu-v">${v === "" ? '<span style="color:var(--dim)">(blank)</span>' : escapeHtml(v)}</span><span class="nr-colmenu-n">${n}</span></label>`).join("")}
+      <div id="nr-colmenu-all" class="nr-colmenu-row nr-colmenu-all" style="display:none"><button type="button" class="nr-colmenu-pick" onclick="nrMenuToggleShown('in')"><span class="nr-tri" aria-hidden="true"></span><span class="nr-colmenu-v">All matching</span><span class="nr-colmenu-n"></span></button><button type="button" class="nr-colmenu-hide" onclick="nrMenuToggleShown('out')">−</button></div>
+      ${vals.length ? vals.map(({ v, n }) => nrMenuRowHtml(c, f, v, n)).join("") : `<div class="nr-colmenu-hint">No values in this view.</div>`}
     </div>
+    ${c.multi ? `<div id="nr-colmenu-match" class="nr-colmenu-match" style="display:none">
+      <span>Has</span>
+      <div class="filter-role-group" role="group" aria-label="Match any or all of the + values">
+        <button type="button" class="role-btn" data-nr-match="any" onclick="nrMenuMatch(false)" title="A person with at least one of the + values">any</button>
+        <button type="button" class="role-btn" data-nr-match="all" onclick="nrMenuMatch(true)" title="Only a person with every + value">all</button>
+      </div>
+      <span>of the + values</span>
+    </div>` : ""}
     <div class="nr-colmenu-sep"></div>
     <div class="nr-colmenu-foot">
-      ${shown.length > 1 ? `<button type="button" onclick="nrMenuHide()">Hide column</button>` : "<span></span>"}
+      ${isShown ? `<span class="nr-colmenu-sorts">${sortBtn("asc", words[0])}${sortBtn("desc", words[1])}</span>` : ""}
+      ${isShown ? (shown.length > 1 ? `<button type="button" onclick="nrMenuHide()">Hide column</button>` : "") : `<button type="button" onclick="nrMenuShow()" title="Add this column to the table">Show column</button>`}
       <button type="button" class="nr-colmenu-done" onclick="closeNRColMenu()">Done</button>
     </div>`;
   document.body.appendChild(menu);
-  nrSyncSelectAll();
-  // Anchor under the heading, kept on screen. Fixed, so a sideways-scrolled
-  // table or a short phone screen cannot clip it.
-  const r = th.getBoundingClientRect();
-  const w = Math.min(280, window.innerWidth - 16);
+  nrMenuPaint();
+  // Anchor under the heading / pill, kept on screen. Fixed, so a
+  // sideways-scrolled table or a short phone screen cannot clip it. When it
+  // does not fit below the anchor it rises (over the anchor if need be)
+  // rather than squeezing the value list.
+  const r = (anchor && anchor.getBoundingClientRect) ? anchor.getBoundingClientRect() : { left: 8, bottom: 8 };
+  const w = Math.min(290, window.innerWidth - 16);
   menu.style.width = w + "px";
   menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
-  const top = Math.min(r.bottom + 4, window.innerHeight - 220);
-  menu.style.top = Math.max(8, top) + "px";
-  menu.style.maxHeight = (window.innerHeight - Math.max(8, top) - 8) + "px";
+  const h = menu.offsetHeight;
+  let top = r.bottom + 4;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - 8 - h);
+  menu.style.top = top + "px";
+  menu.style.maxHeight = (window.innerHeight - top - 8) + "px";
 }
-function nrMenuBoxes() { return [...document.querySelectorAll("#nr-colmenu-list input[data-nr-val]")]; }
-function nrSyncSelectAll() {
+function nrMenuBoxes() { return [...document.querySelectorAll("#nr-colmenu-list [data-nr-val]")]; }
+const nrMenuListed = () => nrMenuBoxes().filter(b => b.style.display !== "none");
+// Re-mark the open menu from the saved filter without rebuilding it, so the
+// value search keeps its text and the list keeps its scroll.
+function nrMenuPaint() {
+  const c = NR.COL[_nrMenuCol];
+  if (!c || !nrMenuEl()) return;
+  const f = nrState().filters[c.id] || {};
+  // The state is colour and a sign, so it is spelled out for screen readers.
+  const mark = (row, st) => {
+    row.dataset.state = st;
+    const v = row.querySelector(".nr-colmenu-v")?.textContent || "", n = row.querySelector(".nr-colmenu-n")?.textContent || "";
+    const pick = row.querySelector(".nr-colmenu-pick"), hide = row.querySelector(".nr-colmenu-hide");
+    if (pick) pick.setAttribute("aria-label", `${v}${n ? ", " + n : ""}${st === "in" ? ", shown only - tap to clear" : st === "out" ? ", hidden" : ", tap to show only"}`);
+    if (hide) {
+      hide.textContent = st === "out" ? "✕" : "−";
+      hide.setAttribute("aria-label", `${st === "out" ? "Stop hiding" : "Hide"} ${v}`);
+      hide.title = st === "out" ? "Stop hiding" : "Hide";
+    }
+  };
+  nrMenuBoxes().forEach(b => mark(b, NR.valueState(f, b.dataset.nrVal)));
   const all = document.getElementById("nr-colmenu-all");
-  if (!all) return;
-  const vis = nrMenuBoxes().filter(b => b.closest("label").style.display !== "none");
-  const on = vis.filter(b => b.checked).length;
-  all.checked = vis.length > 0 && on === vis.length;
-  all.indeterminate = on > 0 && on < vis.length;
+  if (all) {
+    const st = nrMenuListed().map(b => b.dataset.state);
+    mark(all, st.length && st.every(x => x === "in") ? "in" : st.length && st.every(x => x === "out") ? "out" : "");
+  }
+  const match = document.getElementById("nr-colmenu-match");
+  if (match) {
+    match.style.display = (f.in || []).length >= 2 ? "" : "none";
+    match.querySelectorAll("[data-nr-match]").forEach(b => b.classList.toggle("active", (b.dataset.nrMatch === "all") === !!f.all));
+  }
+  const clear = document.getElementById("nr-colmenu-clear");
+  if (clear) clear.style.visibility = NR.filterActive(f, c) ? "" : "hidden";
 }
+// The value search narrows the list; with text in it, "All matching" moves
+// every listed value at once (search "LF", tap twice: every LF qual excluded).
 function nrMenuSearch(q) {
   const needle = String(q || "").trim().toLowerCase();
-  document.querySelectorAll("#nr-colmenu-list label[data-v]").forEach(l => {
-    l.style.display = !needle || l.dataset.v.includes(needle) ? "" : "none";
-  });
-  nrSyncSelectAll();
+  nrMenuBoxes().forEach(b => { b.style.display = !needle || b.dataset.v.includes(needle) ? "" : "none"; });
+  const all = document.getElementById("nr-colmenu-all");
+  if (all) {
+    const n = nrMenuListed().length;
+    all.style.display = needle && n > 1 ? "" : "none";
+    all.querySelector(".nr-colmenu-v").textContent = `All ${n} matching`;
+  }
+  nrMenuPaint();
 }
-// (Select all) acts on the values the search leaves, like a sheet: search
-// "gun", untick all, and only the matches change.
-function nrMenuSelectAll(on) {
-  nrMenuBoxes().filter(b => b.closest("label").style.display !== "none").forEach(b => { b.checked = on; });
-  nrMenuTick();
-}
-function nrMenuTick() {
-  const id = _nrMenuCol;
-  if (!NR.COL[id]) return;
-  const boxes = nrMenuBoxes();
-  const s = nrState();
-  const filters = Object.assign({}, s.filters);
-  // Everything ticked is no filter at all, so new values (a man enlisted
-  // tomorrow) are not silently hidden by a filter that meant "all".
-  if (boxes.every(b => b.checked)) delete filters[id];
-  else filters[id] = { in: boxes.filter(b => b.checked).map(b => b.dataset.nrVal) };
-  NR.save(Object.assign({}, s, { filters }));
-  nrSyncSelectAll();
+// Save, then repaint the menu and redraw the table (and its pills) under it.
+function nrMenuApply(next) {
+  NR.save(next);
+  nrMenuPaint();
   nrRefreshBody();
+}
+// want: "in" (the value: show only) or "out" (its −: hide).
+function nrMenuToggle(btn, want) {
+  const id = _nrMenuCol;
+  const row = btn && btn.closest("[data-nr-val]");
+  if (!NR.COL[id] || !row) return;
+  nrMenuApply(NR.toggleValue(nrState(), id, row.dataset.nrVal, want));
+}
+function nrMenuToggleShown(want) {
+  const id = _nrMenuCol;
+  const vals = nrMenuListed().map(b => b.dataset.nrVal);
+  if (!NR.COL[id] || !vals.length) return;
+  nrMenuApply(NR.toggleValues(nrState(), id, vals, want));
+}
+function nrMenuMatch(all) {
+  if (!NR.COL[_nrMenuCol]) return;
+  nrMenuApply(NR.setMatchAll(nrState(), _nrMenuCol, all));
+}
+// A range box applies as you type; the boxes themselves are never redrawn,
+// so typing is not interrupted.
+function nrMenuRange(key, val) {
+  const c = NR.COL[_nrMenuCol];
+  if (!c) return;
+  let v = String(val ?? "").trim();
+  // Half-typed mm:ss ("11:") is no bound yet, rather than a wrong one.
+  if (c.range && v !== "") { const p = c.range.parse(v); v = p == null ? "" : p; }
+  nrMenuApply(NR.setRange(nrState(), _nrMenuCol, key, v));
+}
+function nrMenuClear() {
+  if (!NR.COL[_nrMenuCol]) return;
+  nrMenuEl()?.querySelectorAll("[data-nr-range]").forEach(i => { i.value = ""; });
+  nrMenuApply(NR.clearFilter(nrState(), _nrMenuCol));
 }
 function nrMenuSort(dir) {
   const id = _nrMenuCol;
@@ -1569,6 +1714,27 @@ function nrMenuHide() {
   if (!cols.length) return;
   nrSet(Object.assign({}, s, { cols }));
 }
+// Add a filtered-on column to the table, at the end.
+function nrMenuShow() {
+  const id = _nrMenuCol;
+  const s = nrState();
+  if (!NR.COL[id]) return;
+  const cols = NR.visibleCols(s).map(c => c.id).filter(x => x !== id).concat(id);
+  const p = NR.presetById(s.preset, s.custom) || NR.PRESETS[0];
+  closeNRColMenu();
+  nrSet(Object.assign({}, s, { cols: cols.join(",") === p.cols.join(",") ? null : cols }));
+}
+// + Filter: open the menu for the picked column, then reset the picker.
+function addNRFilter(sel) {
+  const id = sel && sel.value;
+  if (!id || !NR.COL[id]) return;
+  openNRColMenu(id, sel, true);
+  sel.value = id;
+}
+function removeNRFilter(id) {
+  if (_nrMenuCol === id) closeNRColMenu();
+  nrSet(NR.clearFilter(nrState(), id));
+}
 // Redraw only the summary + table, so the open menu and the search box keep
 // their place.
 function nrRefreshBody() {
@@ -1583,7 +1749,8 @@ function setNRSearch(v) {
 }
 function clearNRFilters() {
   _nrSearch = "";
-  nrSet(Object.assign(nrState(), { chips: [], filters: {} }));
+  closeNRColMenu();
+  nrSet(Object.assign(nrState(), { chips: [], xchips: [], filters: {} }));
 }
 function toggleNRMenu(e) {
   e?.stopPropagation();
@@ -1643,7 +1810,7 @@ function openNRColumns() {
     <div style="display:flex;flex-direction:column;gap:10px">
       <div style="font-size:11px;color:var(--muted)">Tick the columns to show. To sort or filter, tap a column heading in the table. Saved on this device only.</div>
       <div id="nr-cols" class="modal-fill" style="border:1px solid var(--border);border-radius:6px;padding:8px">${groups}</div>
-      <div class="form-group"><label>Save as a preset (optional)</label><input id="nr-preset-name" maxlength="40" placeholder="e.g. Guard list"></div>
+      <div class="form-group"><label>Save as a view (optional, keeps the filters too)</label><input id="nr-preset-name" maxlength="40" placeholder="e.g. Guard list"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-primary" style="flex:1" onclick="submitNRColumns()">Apply</button>
         ${isCustom ? `<button class="btn btn-danger" onclick="deleteNRPreset()" title="Delete the preset '${escapeAttr(NR.presetById(s.preset, s.custom).label)}' from this device">Delete preset</button>` : ""}
@@ -1665,15 +1832,36 @@ function submitNRColumns() {
   const next = Object.assign({}, s, { cols });
   const name = val("nr-preset-name").trim().slice(0, 40);
   if (name) {
-    const id = "u" + Date.now().toString(36);
-    next.custom = s.custom.concat({ id, label: name, cols });
-    next.preset = id;
-    next.cols = null;
+    // Saved as a view: these columns plus the filters in force.
+    Object.assign(next, NR.saveView(Object.assign({}, next, { cols }), name));
   } else {
     const p = NR.presetById(s.preset, s.custom) || NR.PRESETS[0];
     if (cols.join(",") === p.cols.join(",")) next.cols = null;
   }
   NR.save(next);
+  closeModal();
+  render();
+}
+// ☆ Save view: the columns, chips and filters on screen, as a named view in
+// the preset list (this device only). Picking it later brings them all back.
+function openNRSaveView() {
+  const s = nrState();
+  const parts = NR.CHIPS.filter(c => NR.chipState(s, c.id)).map(c => (NR.chipState(s, c.id) === "in" ? "+ " : "− ") + c.label)
+    .concat(NR.activeFilterIds(s).map(id => `${NR.COL[id].label}: ${NR.describeFilter(NR.COL[id], s.filters[id], true)}`));
+  openModal("☆ Save view", `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:11px;color:var(--muted)">Saves the ${NR.visibleCols(s).length} columns and the filters below as a view you can pick from the list at the top of the Roster. Saved on this device only.</div>
+      <div style="font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;line-height:1.6">${parts.length ? parts.map(escapeHtml).join("<br>") : '<span style="color:var(--muted)">No filters - columns only.</span>'}</div>
+      <div class="form-group"><label>Name</label><input id="nr-view-name" maxlength="40" placeholder="e.g. PL 2 fit for guard"></div>
+      <button class="btn btn-primary" onclick="submitNRSaveView()">Save view</button>
+    </div>`);
+  document.getElementById("nr-view-name")?.focus();
+}
+function submitNRSaveView() {
+  const el = document.getElementById("nr-view-name");
+  const name = (el ? el.value : "").trim();
+  if (!name) { alert("Give the view a name."); return; }
+  NR.save(NR.saveView(nrState(), name));
   closeModal();
   render();
 }

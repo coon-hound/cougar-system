@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 173;
+const APP_VERSION = 174;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,20 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 174,
+    date: "16 Nov 2026",
+    title: "Stronger roster filters",
+    intro: "On the Roster you can now show only or hide anything in one tap, filter on any column, and save the filters you use every day.",
+    items: [
+      { t: "± Show only or hide", d: "Tap a chip, or a value in a column's menu, to show only those people (green +). Tap its − to hide them instead (red). Tap the same again to clear. Hiding MC hides everyone on MC, even someone with another status as well." },
+      { t: "⚑ Quick chips for each platoon", d: "PL 1, PL 2 and so on, plus Mounted and Dismounted (which replace the old dropdown), sit with In camp and On leave. On a phone the chips scroll sideways." },
+      { t: "+ Filter on any column", d: "Tap + Filter next to the search box to filter on any column, even one that is not in the table, like Qualifications or Age." },
+      { t: "▤ Every filter in words", d: "Each filter shows above the table, like \"Status: LD, not MC\". Tap it to change it, or ✕ to remove it. Switching between column layouts keeps your filters." },
+      { t: "☆ Save view", d: "Keep the columns and filters on screen as a named view, then pick it from the list at the top whenever you need it." },
+      { t: "⇄ Any or all, and ranges", d: "Pick two values on Status, Role or Qualifications and choose whether someone needs any of them or all of them. Number columns take a lowest and highest value, and date columns a from and to." }
+    ]
+  },
   {
     v: 173,
     date: "2 Nov 2026",

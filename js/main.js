@@ -244,10 +244,11 @@ document.addEventListener("click", (e) => {
 });
 
 // Master NR column menu (js/render.js): an outside tap or Escape closes it.
-// A tap on a heading is left to the heading, which toggles its own menu.
+// A tap on a heading, a filter pill or the + Filter picker is left to that
+// control, which opens (or toggles) the menu itself.
 document.addEventListener("click", (e) => {
   const menu = nrMenuEl();
-  if (!menu || menu.contains(e.target) || e.target.closest?.("[data-nr-th]")) return;
+  if (!menu || menu.contains(e.target) || e.target.closest?.("[data-nr-th], [data-nr-open]")) return;
   closeNRColMenu();
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && nrMenuEl()) closeNRColMenu(); });

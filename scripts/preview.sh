@@ -31,14 +31,22 @@ const src = fs.readFileSync("./js/state.js", "utf8");
 const m = src.match(/const STORAGE_KEY\s*=\s*"([^"]+)"/);
 if (!m) { console.error("could not read STORAGE_KEY out of js/state.js"); process.exit(1); }
 const DATA_KEY = m[1];
+// A browser that previewed an older build still holds a cache under a legacy
+// key, and loadLocal() answers ANY legacy key by discarding the current cache
+// as belonging to an archived cohort, including the one this page just seeded. Clear
+// them first, or a used browser opens on "No invite redeemed".
+const lm = src.match(/const STORAGE_KEY_LEGACY\s*=\s*(\[[^\]]*\])/);
+const LEGACY = lm ? JSON.parse(lm[1]) : [];
 
 const sets = Object.entries(seed)
   .map(([k, v]) => [/^cougar-data(-v\d+)?$/.test(k) ? DATA_KEY : k, v])
   .map(([k, v]) => `  localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(JSON.stringify(v))});`)
   .join("\n");
+const clear = `  ${JSON.stringify(LEGACY)}.forEach(k => localStorage.removeItem(k));`;
 fs.writeFileSync("__preview.html",
 `<!doctype html><meta charset="utf-8"><title>seeding demo…</title>
 <script>
+${clear}
 ${sets}
   location.replace("index.html");
 </script>

@@ -101,6 +101,7 @@ const TELEMETRY = (function () {
     combined_group:  { start: "openCombinedForm",       done: "submitCombined",       keepsModalOpen: true, label: "Combined Group" },
     commander:       { start: "openCommanderForm",      done: "submitCommander",      label: "Add Commander" },
     nr_columns:      { start: "openNRColumns",          done: "submitNRColumns",      label: "Master NR Columns" },
+    nr_save_view:    { start: "openNRSaveView",         done: "submitNRSaveView",     label: "Master NR Save View" },
     roles:           { start: "openRolesForm",          done: "submitRoles",          label: "Roles & Quals" },
     qual_award:      { start: "openQualAwardForm",      done: "submitQualAward",      label: "Award Qualification" }
   };

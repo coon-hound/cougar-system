@@ -23,7 +23,8 @@ test.describe("Mounted / dismounted", () => {
         { id: "9903", name: "TEST MIXED", role: "Recruit", billet: "2 LMG / Gunner" },
       ]);
       STATE.nav = "roster";
-      const shown = f => { STATE.rosterMount = f; render(); return [...document.querySelectorAll("#content tbody tr")].map(tr => tr.children[1].textContent.trim().replace(/^3SG /, "")); };
+      // The Roster's Mounted / Dismounted chips (they replaced the picker).
+      const shown = f => { NR.save(Object.assign(NR.blank(), { chips: f ? [f] : [] })); render(); return [...document.querySelectorAll("#content tbody tr")].map(tr => tr.children[1].textContent.trim().replace(/^3SG /, "")); };
       return { mounted: shown("mounted"), dismounted: shown("dismounted"), all: shown("") };
     });
     expect(ids.mounted).toEqual(["TEST DRIVER", "TEST MIXED"]);
