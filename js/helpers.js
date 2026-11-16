@@ -903,15 +903,121 @@ function paradeBlocks() {
 // American "Hospitalization" spelling onto it at every read boundary, so a row
 // typed or imported the other way can never fall through the cracks.
 const MED_HOSP_LEAVE = "Hospitalisation Leave";
-function canonMedStatus(status) {
+function canonMedStatus(status, canonMap) {
   const s = String(status == null ? "" : status).trim();
-  return /^hospitali[sz]ation\s+leave$/i.test(s) ? MED_HOSP_LEAVE : s;
+  if (/^hospitali[sz]ation\s+leave$/i.test(s)) return MED_HOSP_LEAVE;
+  if (!s) return s;
+  const map = canonMap || medStatusCanonMapCached();
+  const memo = map.memo || (map.memo = new Map());
+  let out = memo.get(s);
+  if (out === undefined) {
+    out = map.byExact.get(s.toLowerCase()) || map.byKey.get(medStatusKey(s)) || s;
+    memo.set(s, out);
+  }
+  return out;
+}
+
+// ── Spelling-tolerant status matching ────────────────────
+// Custom statuses are typed free-hand on different phones, so one status turns
+// up as "Excuse Boots" / "Excuse boots", "excuse push-ups" / "excuse pushups",
+// "Excuse Grenade and Explosives" / "Excuse from Grenades & Explosives",
+// "Excuse Stay In" / "Stay-in" / "Stay in", "Live Firing, Firing of Blanks" /
+// "live/blank firing". medStatusKey() reduces a status to what it says:
+// lower-case words, punctuation and filler ("excuse", "from", "of", "and")
+// dropped, plurals singularised, repeats and word order ignored. Spellings
+// that share a key are the same status and fold onto one name.
+//
+// Every custom name is then written one way (medStatusTitle): "Excuse" first,
+// Title Case after it, acronyms like FLEGS left in capitals, and "and" / "of"
+// left lower-case - so "excuse headgear" shows as "Excuse Headgear".
+const MED_STATUS_FILLER = new Set(["excuse", "excused", "from", "of", "and", "the"]);
+function medStatusKey(status) {
+  const words = String(status == null ? "" : status).toLowerCase()
+    .replace(/&/g, " and ")
+    .split(/[^a-z0-9]+/)
+    .filter(w => w && !MED_STATUS_FILLER.has(w))
+    .map(w => (w.length >= 3 && /s$/.test(w) && !/ss$/.test(w)) ? w.slice(0, -1) : w);
+  return [...new Set(words)].sort().join("");
+}
+
+const MED_STATUS_SMALL_WORDS = new Set(["and", "of", "or", "the", "to", "for", "from", "with"]);
+function medStatusTitle(status) {
+  const s = String(status == null ? "" : status).trim().replace(/\s+/g, " ").replace(/^excused?\b\s*/i, "Excuse ").trim();
+  return s.split(" ").map((w, i) => {
+    if (i > 0 && MED_STATUS_SMALL_WORDS.has(w.toLowerCase())) return w.toLowerCase();
+    if (/^[A-Z0-9]{2,}$/.test(w)) return w;                       // FLEGS, RMJ, LD
+    return w.split("-").map(p => p ? p[0].toUpperCase() + p.slice(1).toLowerCase() : p).join("-");
+  }).join(" ");
+}
+
+// One status typed as two. The live and blank firing excuses were logged as one
+// combined status in five spellings; they are two separate excuses, so a record
+// written that way becomes two records (see the form's submitMedical and
+// scripts/status-tidy.mjs for the data already stored).
+const MED_STATUS_SPLITS = new Map([
+  [medStatusKey("Live Firing Blank Firing"), ["Excuse Live Firing", "Excuse Blank Firing"]]
+]);
+// The statuses one typed status really is: two for a combined one, else itself.
+function medStatusSplit(status) {
+  return MED_STATUS_SPLITS.get(medStatusKey(status)) || [status];
+}
+
+// Builds the spelling → canonical-name lookup from a list of status strings
+// (every medical record's status, plus saved custom statuses).
+//  • Built-in statuses that aren't Excuses (MC, LD, RMJ, NIL...) match only on
+//    their exact name, any case - "RMJ" must never fold into "Excuse RMJ".
+//  • Built-in Excuses own their key outright ("excuse heavy loads" → the
+//    built-in "Excuse Heavy Load").
+//  • Otherwise the most-used wording wins, so every device that reads the same
+//    data lands on the same name, written the medStatusTitle way.
+//  • `fallbacks` (this phone's saved custom statuses) only name a status the
+//    data has never used. They are per-device, so letting them vote could make
+//    two phones pick different names for the same records.
+function medStatusCanonMap(statuses, fallbacks) {
+  const byExact = new Map();
+  const byKey = new Map();
+  MED_STATUSES.concat(["RMJ"]).forEach(b => {
+    if (/^Excuse /.test(b)) byKey.set(medStatusKey(b), b);
+    else byExact.set(b.toLowerCase(), b);
+  });
+  const tally = list => {
+    const counts = new Map(); // key -> Map(spelling -> count)
+    (list || []).forEach(raw => {
+      const s = medStatusTitle(raw);
+      if (!s || byExact.has(s.toLowerCase()) || /^hospitali[sz]ation\s+leave$/i.test(s)) return;
+      const key = medStatusKey(s);
+      if (!key || byKey.has(key)) return;
+      const c = counts.get(key) || new Map();
+      c.set(s, (c.get(s) || 0) + 1);
+      counts.set(key, c);
+    });
+    counts.forEach((c, key) => {
+      const best = [...c.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0], "en", { caseFirst: "upper" }))[0][0];
+      byKey.set(key, best);
+    });
+  };
+  tally(statuses);
+  tally(fallbacks);
+  return { byExact, byKey };
+}
+
+// The lookup over the live data, rebuilt only when the medical list or the
+// saved custom statuses change.
+let _medCanonCache = null;
+function medStatusCanonMapCached() {
+  const med = (typeof STATE !== "undefined" && STATE.medical) || [];
+  const custom = (typeof STATE !== "undefined" && STATE.customStatuses) || [];
+  const c = _medCanonCache;
+  if (c && c.med === med && c.medLen === med.length && c.customLen === custom.length) return c.map;
+  const map = medStatusCanonMap(med.map(m => m.status), custom.map(x => x.name));
+  _medCanonCache = { med, medLen: med.length, customLen: custom.length, map };
+  return map;
 }
 
 const MED_STATUS_GROUPS = [
   { label: "Severe (away from camp)", options: ["MC", MED_HOSP_LEAVE, "Warded"] },
   { label: "In camp, restricted",     options: ["LD"] },
-  { label: "Excuses",                 options: ["Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb"] },
+  { label: "Excuses",                 options: ["Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb", "Excuse Live Firing", "Excuse Blank Firing"] },
   { label: "Awaiting MO",             options: ["Pending"] },
   { label: "Cleared by MO",           options: ["NIL"] }
 ];
@@ -944,22 +1050,79 @@ function medStatusShortLabel(tag) {
 }
 
 // ── Custom statuses ──────────────────────────────────────
-// User-defined statuses live in STATE.customStatuses (persisted via state.js).
-// They behave like an in-camp restricted status (e.g. an Excuse), never get
-// +1/+2 ghost tags, and carry a `participates` flag.
-function customStatusByName(name) {
-  const key = String(name || "").trim().toLowerCase();
-  if (!key) return null;
-  return (STATE.customStatuses || []).find(s => String(s.name).toLowerCase() === key) || null;
+// User-defined statuses behave like an in-camp restricted status (e.g. an
+// Excuse), never get +1/+2 ghost tags, and carry a `participates` flag.
+//
+// SHARED ACROSS PHONES. A custom status is always saved together with the
+// medical record that uses it, so the company-wide list is DERIVED from the
+// medical records every phone already syncs: every custom status on a record is
+// offered to everyone, unless it was logged as a one-off ("Save for reuse"
+// unticked -> record.oneOff). The participates flag rides on the record too
+// (record.participates; the newest record that carries one wins), so the Log
+// Conduct wizard defaults the same way on every phone. STATE.customStatuses
+// (this phone's own list, localStorage) only fills in what the records don't
+// say yet: older records from before the flag existed, or a status saved on
+// this phone before it synced.
+let _customStatusEpoch = 0;
+const touchCustomStatuses = () => { _customStatusEpoch++; };
+let _sharedCustomCache = null;
+function sharedCustomStatuses() {
+  const med = (typeof STATE !== "undefined" && STATE.medical) || [];
+  const local = (typeof STATE !== "undefined" && STATE.customStatuses) || [];
+  const c = _sharedCustomCache;
+  if (c && c.med === med && c.medLen === med.length && c.localLen === local.length && c.epoch === _customStatusEpoch) return c.list;
+  const builtIn = new Set(MED_STATUSES.concat(["RMJ", "Pending", "NIL"]));
+  const byName = new Map(); // canonical name -> { name, participates, at }
+  const isCustom = name => name && !builtIn.has(name) && medStatusSplit(name).length === 1;
+  med.forEach(m => {
+    const name = canonMedStatus(m.status);
+    if (!isCustom(name)) return;
+    const cur = byName.get(name) || { name, participates: null, at: "", shared: false };
+    if (!m.oneOff) cur.shared = true;
+    if (typeof m.participates === "boolean") {
+      const at = displayDateToISO(m.startDate || m.date || "") || "";
+      if (cur.participates === null || at >= cur.at) { cur.participates = m.participates; cur.at = at; }
+    }
+    byName.set(name, cur);
+  });
+  local.forEach(l => {
+    const name = canonMedStatus(l.name);
+    if (!isCustom(name)) return;
+    const cur = byName.get(name) || { name, participates: null, at: "", shared: false };
+    cur.shared = true; // saved for reuse on this phone
+    if (cur.participates === null) cur.participates = !!l.participates;
+    byName.set(name, cur);
+  });
+  const list = [...byName.values()].filter(x => x.shared)
+    .map(x => ({ name: x.name, participates: !!x.participates }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  // Every custom name a record carries, shared or one-off, still resolves for
+  // badges, severity and participation - only the dropdown hides one-offs.
+  const all = new Map([...byName.values()].map(x => [x.name, { name: x.name, participates: !!x.participates }]));
+  _sharedCustomCache = { med, medLen: med.length, localLen: local.length, epoch: _customStatusEpoch, list, all };
+  return list;
 }
-// Create or update a saved custom status. Idempotent on name (case-insensitive).
+// Matched spelling-tolerantly (canonMedStatus), so "excuse boots" on a record
+// finds "Excuse Boots" and its participates flag.
+function customStatusByName(name) {
+  const canon = canonMedStatus(name);
+  if (!canon) return null;
+  sharedCustomStatuses();
+  return _sharedCustomCache.all.get(canon) || null;
+}
+// Create or update a saved custom status. Idempotent on the status itself, so a
+// re-typed "excuse push-ups" updates the existing "Excuse Pushups" instead of
+// adding a near-duplicate to the dropdown.
 function addCustomStatus(name, participates) {
-  name = String(name || "").trim();
-  if (!name) return;
-  const existing = customStatusByName(name);
-  if (existing) { existing.participates = !!participates; }
-  else { (STATE.customStatuses = STATE.customStatuses || []).push({ name, participates: !!participates }); }
+  name = canonMedStatus(name);
+  if (!name || medStatusSplit(name).length > 1) return; // a combined status is built-ins
+  if (MED_STATUSES.includes(name)) return;
+  const list = (STATE.customStatuses = STATE.customStatuses || []);
+  const existing = list.find(s => canonMedStatus(s.name) === name);
+  if (existing) { existing.name = name; existing.participates = !!participates; }
+  else list.push({ name, participates: !!participates });
   saveCustomStatuses();
+  touchCustomStatuses();
 }
 // Does this status mean the recruit normally still participates in conducts?
 // Built-in: only NIL (MO cleared, back to active). Custom: per its saved flag.
@@ -1122,6 +1285,7 @@ function medStatusActive(record, todayIso) {
   const start = displayDateToISO(record.startDate || record.date || "");
   if (!start) return false;
   if (record.status === "Pending") return todayIso === start;
+  if (record.permanent) return todayIso >= start;
   const end = displayDateToISO(record.endDate || "");
   if (!end) return false;
   return todayIso >= start && todayIso <= end;
@@ -1362,6 +1526,7 @@ function medTagBadge(tag) {
 function medDurationLabel(record, run) {
   if (record.status === "Pending") return `${record.startDate || record.date || ""} · awaiting MO`;
   if (record.status === "NIL") return `${record.date || record.startDate || ""} · MO cleared, no status`;
+  if (record.permanent) return `${record.startDate || record.date || ""} – Permanent`;
   if (!record.startDate || !record.endDate) return record.startDate || "";
   const chained = !!(run && run.chained);
   const start = chained ? run.startIso : displayDateToISO(record.startDate);

@@ -9,7 +9,7 @@
 // To ship notes for a new release: bump APP_VERSION + the ?v= in index.html,
 // then prepend a new entry to PATCH_NOTES (newest first) describing what changed.
 
-const APP_VERSION = 173;
+const APP_VERSION = 174;
 
 // Its own localStorage key (NOT inside STORAGE_KEY) so a data-cache "Clear cache"
 // doesn't wipe it and re-trigger the popup — same convention as DIRTY_KEY /
@@ -20,6 +20,20 @@ const SEEN_VERSION_KEY = "cougar-seen-version";
 // only entries with v > lastSeen are shown. `items` is a list of plain strings
 // (or {t, d} for a titled line with a description).
 const PATCH_NOTES = [
+  {
+    v: 174,
+    date: "16 Nov 2026",
+    title: "Tidier statuses, and permanent ones",
+    intro: "Statuses typed slightly differently are now treated as one status, so they no longer clutter the dashboard, the status filters and the parade state.",
+    items: [
+      { t: "🩺 Spellings merged", d: "\"Excuse boots\", \"Excuse Boots\" and \"excused boot\" all show as one status. So do \"Grenades & Explosives\" and \"from Grenade and Explosives\", \"push-ups\" and \"pushups\"." },
+      { t: "Aa One way of writing", d: "Every status is written as Excuse + Title Case, e.g. \"Excuse Headgear\"." },
+      { t: "🔫 Live and blank firing split", d: "Excuse Live Firing and Excuse Blank Firing are now two separate statuses in the list. A combined one is saved as both." },
+      { t: "📲 Custom statuses on every phone", d: "A custom status saved for reuse now shows in everyone's status list after they sync, with its \"still participates\" setting. Pick it from the Custom group instead of typing a new one." },
+      { t: "♾️ Permanent statuses", d: "Log Report Sick → tick Permanent under the dates. The status has no end date and stays on until you remove it; the parade state prints it as PERM. For restrictions like LD or an Excuse, not MC." },
+      { t: "＋ New custom status", d: "If you type a status that already exists under another spelling, the entry is filed under the existing one." }
+    ]
+  },
   {
     v: 173,
     date: "2 Nov 2026",
