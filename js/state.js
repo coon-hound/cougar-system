@@ -518,7 +518,16 @@ function normalizeRoster(roster) {
 //      writeTab generates sheet headers from Object.keys(data[0]) only, so
 //      a stale first row missing the new keys would silently strip them
 //      from the entire pushed sheet.
+// true / false / "" (unknown) from a boolean or its text round-trip.
+const boolFlag = v => (v === true || v === "TRUE" || v === "true") ? true
+  : (v === false || v === "FALSE" || v === "false") ? false : "";
+
 function normalizeMedical(records) {
+  // Free-typed custom statuses drift ("Excuse Boots" / "excuse boots" /
+  // "Excuse Boot"). Fold every spelling onto one name, chosen from this whole
+  // batch so every device reading the same data agrees - see
+  // medStatusCanonMap in helpers.js.
+  const canonMap = medStatusCanonMap((records || []).map(r => r && r.status));
   return (records || []).map(r => {
     // Auto-migrate any legacy "Excused X" entries to the canonical "Excuse X"
     // spelling so badge colors / parade-state filters match consistently.
@@ -528,7 +537,7 @@ function normalizeMedical(records) {
     // Leave". A row imported or hand-typed as "Hospitalization Leave" is the
     // same status and must not read as an unknown custom one (it would land in
     // the parade STATUS catch-all and stop counting the man out of camp).
-    status = canonMedStatus(status);
+    status = canonMedStatus(status, canonMap);
     return {
       id: normId(r.id),
       d4: padD4(r.d4 || ""),
@@ -544,7 +553,16 @@ function normalizeMedical(records) {
       // counted in strength (excluded from outOfCampMap) and out of ATTC, while
       // still showing under MEDICAL STATUS as "<N>D MC (consume in camp)".
       // Sheets round-trips booleans as the text "TRUE"/"FALSE", so coerce here.
-      inCamp: r.inCamp === true || r.inCamp === "TRUE" || r.inCamp === "true"
+      inCamp: r.inCamp === true || r.inCamp === "TRUE" || r.inCamp === "true",
+      // A permanent status has no end date and stays active from its start
+      // (e.g. a PERM excuse). Rides in the row's `extra` on the backend.
+      permanent: r.permanent === true || r.permanent === "TRUE" || r.permanent === "true",
+      // Custom statuses are shared through the records that use them (see
+      // sharedCustomStatuses in helpers.js). `participates` is true / false for
+      // a custom status logged since that started, "" when unknown; `oneOff` is
+      // a custom status logged with "Save for reuse" unticked.
+      participates: boolFlag(r.participates),
+      oneOff: r.oneOff === true || r.oneOff === "TRUE" || r.oneOff === "true"
     };
   });
 }
