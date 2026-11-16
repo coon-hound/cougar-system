@@ -341,7 +341,7 @@ function toggleReportSickPatterns(d4) {
   // Status mix — reveals "always NIL" (malingering signal) vs real MC/LD pattern.
   const statusCounts = {};
   med.forEach(m => { const k = m.status || "—"; statusCounts[k] = (statusCounts[k] || 0) + 1; });
-  const statusOrder = ["MC", MED_HOSP_LEAVE, "Warded", "LD", "RMJ", "Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb", "Pending", "NIL"];
+  const statusOrder = ["MC", MED_HOSP_LEAVE, "Warded", "LD", "RMJ", "Excuse Heavy Load", "Excuse Kneeling", "Excuse Squatting", "Excuse Uniform", "Excuse RMJ", "Excuse Swimming", "Excuse Prolonged Standing", "Excuse Upper Limb", "Excuse Lower Limb", "Excuse Live Firing", "Excuse Blank Firing", "Pending", "NIL"];
   const statusRows = statusOrder.filter(s => statusCounts[s]).map(s => [s, statusCounts[s]]);
   const nilPct = med.length ? Math.round((statusCounts["NIL"] || 0) / med.length * 100) : 0;
 
@@ -380,7 +380,7 @@ function toggleReportSickPatterns(d4) {
   const statusColor = {
     "MC": TC.red, "Warded": TC.red, [MED_HOSP_LEAVE]: TC.red,
     "LD": TC.orange, "RMJ": TC.orange,
-    "Excuse Heavy Load": TC.yellow, "Excuse Kneeling": TC.yellow, "Excuse Squatting": TC.yellow, "Excuse Uniform": TC.yellow, "Excuse RMJ": TC.yellow, "Excuse Swimming": TC.yellow, "Excuse Prolonged Standing": TC.yellow, "Excuse Upper Limb": TC.yellow, "Excuse Lower Limb": TC.yellow,
+    "Excuse Heavy Load": TC.yellow, "Excuse Kneeling": TC.yellow, "Excuse Squatting": TC.yellow, "Excuse Uniform": TC.yellow, "Excuse RMJ": TC.yellow, "Excuse Swimming": TC.yellow, "Excuse Prolonged Standing": TC.yellow, "Excuse Upper Limb": TC.yellow, "Excuse Lower Limb": TC.yellow, "Excuse Live Firing": TC.yellow, "Excuse Blank Firing": TC.yellow,
     "Pending": TC.muted, "NIL": TC.green, "—": TC.dim
   };
 
@@ -494,7 +494,9 @@ function medStatusOptionsHtml(selected = "") {
   const std = MED_STATUS_GROUPS.map(g =>
     `<optgroup label="${g.label}">${g.options.map(o => `<option value="${o}" ${o === selected ? "selected" : ""}>${o}</option>`).join("")}</optgroup>`
   ).join("");
-  const customList = STATE.customStatuses || [];
+  // Custom statuses saved for reuse on ANY phone (derived from the synced
+  // medical records - see sharedCustomStatuses), one name per status.
+  const customList = sharedCustomStatuses();
   const custom = customList.length
     ? `<optgroup label="Custom">${customList.map(c => `<option value="${escapeAttr(c.name)}" ${c.name === selected ? "selected" : ""}>${escapeAttr(c.name)}${c.participates ? " (participates)" : ""}</option>`).join("")}</optgroup>`
     : "";
@@ -548,11 +550,19 @@ function addMedStatusRow(status = "", startIso = null, endIso = null) {
     <div class="form-row">
       <div class="form-group"><label>Start (inclusive)</label><input type="date" class="f-extra-start" value="${startIso}" min="2020-01-01" max="2099-12-31"></div>
       <div class="form-group"><label>End (inclusive)</label><input type="date" class="f-extra-end" value="${endIso}" min="2020-01-01" max="2099-12-31"></div>
-    </div>`;
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" class="f-extra-perm" onchange="medPermToggled(this, this.closest('.med-extra-row').querySelector('.f-extra-end'))" style="width:15px;height:15px"> Permanent <span style="color:var(--dim)">(no end date)</span></label>`;
   host.appendChild(row);
 }
 
 // Reveal a row's custom-status fields only when "＋ New custom status…" is picked.
+// "Permanent" means no end date: blank and lock the End field while ticked.
+function medPermToggled(box, endInput) {
+  if (!endInput) return;
+  endInput.disabled = box.checked;
+  if (box.checked) endInput.value = "";
+}
+
 function medExtraStatusChanged(sel) {
   const wrap = sel.closest(".med-extra-row")?.querySelector(".f-extra-custom");
   if (wrap) wrap.style.display = sel.value === "__new__" ? "flex" : "none";
@@ -592,9 +602,10 @@ function openMedicalForm(id, prefill) {
         <label id="f-incamp-wrap" style="display:${MED_IN_CAMP_STATUSES.indexOf(canonMedStatus(selectedStatus)) >= 0 ? "flex" : "none"};align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-incamp" ${e?.inCamp ? "checked" : ""} style="width:15px;height:15px"> Consume in camp <span style="color:var(--dim)">(stays in camp; counted in strength, and the parade ATT C line is marked IN)</span></label>
         <div class="form-row">
           ${formField("f-start", "Start (inclusive)", "date", "", `value="${startVal}" min="2020-01-01" max="2099-12-31"`)}
-          ${formField("f-end", "End (inclusive)", "date", "", `value="${endVal}" min="2020-01-01" max="2099-12-31"`)}
+          ${formField("f-end", "End (inclusive)", "date", "", `value="${e?.permanent ? "" : endVal}" min="2020-01-01" max="2099-12-31"${e?.permanent ? " disabled" : ""}`)}
         </div>
-        <div style="font-size:10px;color:var(--muted)">Start and end dates can be left blank for <strong>Pending</strong> (MO outcome unknown) and <strong>NIL</strong> (MO cleared, no status). Required for everything else.</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><input type="checkbox" id="f-permanent" ${e?.permanent ? "checked" : ""} onchange="medPermToggled(this, document.getElementById('f-end'))" style="width:15px;height:15px"> Permanent <span style="color:var(--dim)">(no end date; stays on until removed)</span></label>
+        <div style="font-size:10px;color:var(--muted)">Start and end dates can be left blank for <strong>Pending</strong> (MO outcome unknown) and <strong>NIL</strong> (MO cleared, no status). Required for everything else, unless the status is <strong>Permanent</strong>.</div>
         <div id="f-extra-statuses" style="display:flex;flex-direction:column;gap:8px"></div>
         <button type="button" class="btn" style="font-size:11px;align-self:flex-start" onclick="addMedStatusRow()">＋ Add another status</button>
         <div style="font-size:10px;color:var(--muted)">Use this when the MO gives more than one status for the same visit (e.g. <strong>2D LD</strong> + <strong>4D Excuse RMJ</strong>). Each status keeps its own duration.</div>
@@ -618,18 +629,25 @@ function medStatusSelChanged(v) {
 function submitMedical() {
   const editId = gv("f-entry-id").trim();
   let status = gv("f-status");
+  // Custom statuses typed fresh in this submit: their participates flag and
+  // whether they were saved for reuse, stamped onto the records below so every
+  // phone learns them through the Medical sync.
+  const newCustom = {};
   // Resolve a freshly-created custom status: use the typed name as the status,
   // and (optionally) persist it to the reusable list with its participates flag.
   if (status === "__new__") {
     const name = gv("f-custom-name").trim();
     if (!name) { alert("Enter a name for the new custom status."); return; }
     const participates = !!document.getElementById("f-custom-participates")?.checked;
-    if (document.getElementById("f-custom-save")?.checked) addCustomStatus(name, participates);
-    status = name;
+    const save = !!document.getElementById("f-custom-save")?.checked;
+    if (save) addCustomStatus(name, participates);
+    // A re-typed existing status ("excuse boot") files under the existing name.
+    status = canonMedStatus(name);
+    newCustom[status] = { participates, oneOff: !save };
   }
   // Gather the main status plus any "additional status" rows. Each carries its
   // own status + duration; they share the recruit/date/reason/location below.
-  const statuses = [{ status, startIso: gv("f-start"), endIso: gv("f-end") }];
+  const statuses = [{ status, startIso: gv("f-start"), endIso: gv("f-end"), permanent: !!document.getElementById("f-permanent")?.checked }];
   for (const row of document.querySelectorAll("#f-extra-statuses .med-extra-row")) {
     let s = row.querySelector(".f-extra-status")?.value || "";
     if (!s) continue; // ignore a blank row rather than erroring
@@ -638,19 +656,35 @@ function submitMedical() {
       const name = (row.querySelector(".f-extra-custom-name")?.value || "").trim();
       if (!name) { alert("Enter a name for the new custom status."); return; }
       const participates = !!row.querySelector(".f-extra-custom-participates")?.checked;
-      if (row.querySelector(".f-extra-custom-save")?.checked) addCustomStatus(name, participates);
-      s = name;
+      const save = !!row.querySelector(".f-extra-custom-save")?.checked;
+      if (save) addCustomStatus(name, participates);
+      s = canonMedStatus(name);
+      newCustom[s] = { participates, oneOff: !save };
     }
     statuses.push({
       status: s,
       startIso: row.querySelector(".f-extra-start")?.value || "",
-      endIso: row.querySelector(".f-extra-end")?.value || ""
+      endIso: row.querySelector(".f-extra-end")?.value || "",
+      permanent: !!row.querySelector(".f-extra-perm")?.checked
     });
   }
+
+  // A combined status ("Excuse Live Firing, Firing of Blanks") is two statuses:
+  // file it as two sibling rows with the same duration.
+  const split = statuses.flatMap(st => medStatusSplit(st.status).map(status => ({ ...st, status })));
+  statuses.splice(0, statuses.length, ...split);
 
   const noDurationStatuses = ["Pending", "NIL"];
   for (const st of statuses) {
     if (!st.status) { alert("Select a status for every row (or remove the empty one)."); return; }
+    if (st.permanent) {
+      // Permanent is for in-camp restrictions. An MC / Warded / leave is an
+      // absence with a return date, and Pending / NIL carry no duration at all.
+      if (isAwayMedStatus(st.status) || noDurationStatuses.includes(st.status)) { alert(`"${st.status}" cannot be permanent. Only restrictions such as LD or an Excuse can be.`); return; }
+      if (!st.startIso) { alert(`A start date is required for permanent "${st.status}".`); return; }
+      st.endIso = "";
+      continue;
+    }
     if (!noDurationStatuses.includes(st.status) && !st.endIso) { alert(`End date is required for "${st.status}" (only Pending and NIL may be left blank).`); return; }
     if (st.endIso && st.startIso && st.endIso < st.startIso) { alert(`End date cannot be before start date for "${st.status}".`); return; }
   }
@@ -667,13 +701,24 @@ function submitMedical() {
 
   // First status reuses the edited row's id; each extra status becomes a new
   // sibling row. Siblings group automatically per-recruit in the reports.
+  const prevRow = editId ? STATE.medical.find(m => m.id === editId) : null;
+  const customMeta = (s, i) => {
+    if (newCustom[s]) return newCustom[s];
+    const c = customStatusByName(s);
+    if (!c) return { participates: "", oneOff: false }; // a built-in
+    // Re-saving an edited one-off keeps it a one-off.
+    const keepOneOff = i === 0 && prevRow && prevRow.status === s && prevRow.oneOff;
+    return { participates: c.participates, oneOff: !!keepOneOff };
+  };
   const records = statuses.map((st, i) => ({
     id: (i === 0 && editId) ? editId : nextId(),
     d4, date, reason, location,
     status: st.status,
     startDate: isoToDisplayDate(st.startIso),
     endDate: st.endIso ? isoToDisplayDate(st.endIso) : "",
-    inCamp: i === 0 ? inCamp : false
+    inCamp: i === 0 ? inCamp : false,
+    permanent: !!st.permanent,
+    ...customMeta(st.status, i)
   }));
 
   records.forEach((rec, i) => {
@@ -692,6 +737,7 @@ function submitMedical() {
     const r = STATE.roster.find(x => x.id === main.d4);
     if (r) { r.status = main.status; rosterEdit = r; }
   }
+  touchCustomStatuses(); // an edit in place keeps the list length, so say it changed
   saveLocal(); closeModal(); render();
   if (STATE.apiUrl) {
     records.forEach(rec => autoSync("Medical", { type: "upsert", row: rec }));
@@ -2067,6 +2113,7 @@ function paradeRN(d4) {
 function paradeDuration(record, run) {
   const s = (run && run.chained ? run.startIso : "") || displayDateToISO(record.startDate || record.date || "");
   const e = (run && run.chained ? run.endIso : "") || displayDateToISO(record.endDate || "");
+  if (record.permanent) return s ? `${toDDMMYY(s)} - PERM` : "PERM";
   if (s && e) return `${toDDMMYY(s)} - ${toDDMMYY(e)}`;
   if (s) return toDDMMYY(s);
   return "";
@@ -2080,6 +2127,7 @@ function paradeStatusLabel(record, dateIso, run) {
   const s = chained ? run.startIso : displayDateToISO(record.startDate || "");
   const e = chained ? run.endIso : displayDateToISO(record.endDate || "");
   if (!record.status) return "";
+  if (record.permanent) return `PERM ${record.status}`;
   // A kept-in-camp MC/Warded reads "2D MC (consume in camp)" for a record flagged
   // inCamp, or "(kept in camp)" when a commander manually booked them in today.
   // The underlying status stays "MC".
@@ -2346,6 +2394,8 @@ function paradeSpanOf(record, run) {
   const chained = !!(run && run.chained);
   const s = (chained ? run.startIso : "") || displayDateToISO(record.startDate || record.date || "");
   const e = (chained ? run.endIso : "") || displayDateToISO(record.endDate || "");
+  // A permanent status has no end: it prints "PERM …" (SINCE its start).
+  if (record.permanent) return { startIso: s, endIso: "", text: paradeDateSpan(s, ""), days: null, permanent: true };
   return { startIso: s, endIso: e, text: paradeDateSpan(s, e), days: (s && e) ? daysBetween(s, e) + 1 : null };
 }
 
@@ -2425,7 +2475,7 @@ function paradeStatusEntries(dateIso, away) {
     const groups = new Map();
     dedupeActiveRecordsByFamily(byD4[d4]).forEach(r => {
       const span = paradeSpanOf(r, medStatusRun(r));
-      const key = span.text + "|" + (span.days || "");
+      const key = span.text + "|" + (span.days || "") + "|" + (span.permanent ? "P" : "");
       if (!groups.has(key)) groups.set(key, { span, records: [] });
       groups.get(key).records.push(r);
     });
@@ -2442,7 +2492,7 @@ function paradeStatusEntries(dateIso, away) {
       g.records.filter(r => !isExcuse(r)).forEach(r => lines.push({ label: String(r.status).toUpperCase(), records: [r] }));
       lines.forEach(l => out.push({
         d4, section: "STATUS",
-        desc: paradeDesc(g.span.days, l.label, paradeFirstReason(l.records)),
+        desc: paradeDesc(g.span.days, (g.span.permanent ? "PERM " : "") + l.label, paradeFirstReason(l.records)),
         dates: g.span.text,
         marker: paradeMarker("STATUS", away.has(d4)),
         location: (l.records.find(r => r.location) || {}).location || ""
