@@ -18,7 +18,13 @@
 //     cell(r, ctx)  inner HTML of the <td> (defaults to escaped text)
 //     td            static style for the <td>, or tdStyle(r, ctx)
 //     th            static style for the <th>
-//     sort(r, ctx)  sort key when get() is not the right one }
+//     sort(r, ctx)  sort key when get() is not the right one
+//     multi         get() returns several values per man (Status, Quals ...),
+//                   so a filter can ask for any or all of them
+//     blankLabel    how the filter menu names "" ("Active" on Status)
+//     vlabel(v)     how the filter menu names a value ("1" -> "PL 1")
+//     range         { parse, fmt, hint } when a number column's range is not
+//                   typed as a plain number (2.4 km: mm:ss, kept in seconds) }
 //
 // ctx is built once per render and memoises every index lazily, so a column
 // nobody shows costs nothing.
@@ -211,20 +217,21 @@ const NR = (() => {
     { id: "name", label: "Name", group: G.id, type: "text", th: "text-align:left", td: "text-align:left", sticky: true,
       get: r => isCmd(r) ? `${r.rank ? r.rank + " " : ""}${r.name || ""}` : (r.name || "") },
     // The Default "Role" column: Commander badge, or section role + mount tag.
-    { id: "role", label: "Role", group: G.id, type: "enum",
+    { id: "role", label: "Role", group: G.id, type: "enum", multi: true,
       get: r => isCmd(r) ? ["Commander"] : roleParts(r),
       text: r => isCmd(r) ? "Commander" : (r.billet || ""), sort: r => isCmd(r) ? "Commander" : (r.billet || ""),
       cell: r => isCmd(r) ? `<span class="badge badge-purple">Commander</span>` : `${r.billet ? escapeHtml(r.billet) : `<span style="color:var(--muted)">—</span>`}<div style="margin-top:2px">${mountBadge(r)}</div>` },
     { id: "rank", label: "Rank", group: G.id, type: "enum", get: r => rosterRank(r) },
     { id: "kind", label: "Cmdr / Rec", group: G.id, type: "enum", get: r => r.role || "" },
-    { id: "plt", label: "Platoon", group: G.id, type: "enum", get: r => getPlt(r), text: r => getPlt(r) ? "PL " + getPlt(r) : "COY HQ" },
+    { id: "plt", label: "Platoon", group: G.id, type: "enum", get: r => getPlt(r), text: r => getPlt(r) ? "PL " + getPlt(r) : "COY HQ",
+      vlabel: v => v ? "PL " + v : "COY HQ" },
     { id: "sect", label: "Section", group: G.id, type: "enum", get: r => getSect(r) },
     field("appt", "Appt", G.id, "enum"),
-    { id: "billet", label: "Section role", group: G.id, type: "enum",
+    { id: "billet", label: "Section role", group: G.id, type: "enum", multi: true,
       get: r => roleParts(r), text: r => r.billet || "", sort: r => r.billet || "" },
     { id: "mount", label: "Mounted", group: G.id, type: "enum",
       get: r => mountOf(r) ? MOUNT_LABEL[mountOf(r)] : "", cell: r => mountBadge(r) || DASH },
-    { id: "groups", label: "Groups", group: G.id, type: "enum", get: r => getGroups(r), text: r => getGroups(r).join(", ") },
+    { id: "groups", label: "Groups", group: G.id, type: "enum", multi: true, get: r => getGroups(r), text: r => getGroups(r).join(", ") },
     field("intake", "Intake", G.id, "enum"),
     field("age", "Age", G.id, "number"),
     field("phone", "Phone", G.id),
@@ -253,7 +260,7 @@ const NR = (() => {
     { id: "forced_in", label: "Manually booked in", group: G.camp, type: "bool", get: (r, ctx) => !!forcedInOf(r, ctx) },
 
     // Medical
-    { id: "status", label: "Status", group: G.med, type: "enum",
+    { id: "status", label: "Status", group: G.med, type: "enum", multi: true, blankLabel: "Active",
       get: (r, ctx) => statusesOf(r, ctx).map(s => s.tag),
       text: (r, ctx) => statusesOf(r, ctx).map(s => s.tag).join(", ") || "Active",
       sort: (r, ctx) => { const s = statusesOf(r, ctx)[0]; return s ? medSeverityRank(s.tag) : -1; },
@@ -266,7 +273,7 @@ const NR = (() => {
       get: (r, ctx) => { const s = statusesOf(r, ctx)[0]; const run = s && medStatusRun(s.record); return run ? run.endIso : ""; } },
     { id: "mc_in_camp", label: "MC in camp", group: G.med, type: "bool",
       get: (r, ctx) => statusesOf(r, ctx).some(s => s.ghostDay === 0 && isAwayMedStatus(s.record.status) && !!s.record.inCamp) },
-    { id: "recovery", label: "On recovery (+1/+2)", group: G.med, type: "enum",
+    { id: "recovery", label: "On recovery (+1/+2)", group: G.med, type: "enum", multi: true,
       get: (r, ctx) => statusesOf(r, ctx).filter(s => s.ghostDay > 0).map(s => s.tag) },
     { id: "rsis", label: "RSIs", group: G.med, type: "number",
       get: (r, ctx) => ctx.rsiCount[r.id] || 0,
@@ -276,14 +283,14 @@ const NR = (() => {
     { id: "rs_30", label: "RSIs (30 days)", group: G.med, type: "number", get: rsWithin(30) },
     { id: "rs_last", label: "Last report sick", group: G.med, type: "date",
       get: (r, ctx) => medDates(r, ctx).reduce((a, b) => (b > a ? b : a), "") },
-    { id: "msk_regions", label: "MSK regions", group: G.med, type: "enum", get: r => getMSKRegionsForRecruit(r.id), text: r => getMSKRegionsForRecruit(r.id).join(", ") },
+    { id: "msk_regions", label: "MSK regions", group: G.med, type: "enum", multi: true, get: r => getMSKRegionsForRecruit(r.id), text: r => getMSKRegionsForRecruit(r.id).join(", ") },
     { id: "msk_open", label: "MSK case open", group: G.med, type: "bool",
       get: r => { const rows = (STATE.msk || []).filter(m => m.d4 === r.id); return rows.length > 0 && !rows.every(m => m.cleared); } },
     field("msk", "MSK history (profile)", G.med, "text", { td: "text-align:left;white-space:normal;max-width:220px;font-size:11px" }),
 
     // Leave and movement
     { id: "on_leave", label: "On leave today", group: G.leave, type: "bool", get: (r, ctx) => ctx.leaveToday.has(r.id) },
-    { id: "leave_type", label: "Leave type today", group: G.leave, type: "enum",
+    { id: "leave_type", label: "Leave type today", group: G.leave, type: "enum", multi: true,
       get: (r, ctx) => (ctx.leaveToday.get(r.id) || []).map(l => l.type || "Leave") },
     { id: "next_leave", label: "Next leave", group: G.leave, type: "date",
       get: (r, ctx) => (ctx.nextLeave.get(r.id) || {}).iso || "",
@@ -311,7 +318,9 @@ const NR = (() => {
     { id: "ippt_award", label: "IPPT award", group: G.fit, type: "enum",
       get: (r, ctx) => { const e = latest(r, ctx); return !e ? "" : isYTT(e) ? "YTT" : getAward(+e.score || 0); },
       cell: (r, ctx) => { const e = latest(r, ctx); return e ? ipptAwardBadge(e) : DASH; } },
+    // Stored and compared in seconds; its range is typed and shown as mm:ss.
     { id: "ippt_run", label: "2.4 km", group: G.fit, type: "number", tdClass: "mono",
+      range: { parse: v => /^\d{1,2}:\d{2}$/.test(String(v).trim()) ? parseRunTimeToSeconds(String(v).trim()) : null, fmt: formatSeconds, hint: "mm:ss" },
       get: (r, ctx) => { const e = latest(r, ctx); const s = e ? parseRunTimeToSeconds(e.runTime) : 0; return s > 0 ? s : null; },
       text: (r, ctx) => { const e = latest(r, ctx); const s = e ? parseRunTimeToSeconds(e.runTime) : 0; return s > 0 ? formatSeconds(s) : ""; } },
     { id: "ippt_best", label: "Best IPPT", group: G.fit, type: "number",
@@ -330,7 +339,7 @@ const NR = (() => {
     { id: "ytt", label: "YTT (IPPT KH)", group: G.fit, type: "bool", get: (r, ctx) => !isCmd(r) && !ctx.khTaken.has(r.id) },
 
     // Duty and attendance
-    { id: "on_duty", label: "On duty today", group: G.duty, type: "enum", get: (r, ctx) => ctx.dutyToday.get(r.id) || [] },
+    { id: "on_duty", label: "On duty today", group: G.duty, type: "enum", multi: true, get: (r, ctx) => ctx.dutyToday.get(r.id) || [] },
     { id: "duty_count", label: "Duties done", group: G.duty, type: "number",
       get: (r, ctx) => isCmd(r) ? dutyTallyOf(ctx.dutyTally, r.id).total : null },
     { id: "missed", label: "Conducts missed", group: G.duty, type: "number", get: (r, ctx) => ctx.missed[r.id] || 0 },
@@ -339,8 +348,8 @@ const NR = (() => {
     // THT shows weapons only, primary first, like the person card.
     field("pes", "PES", G.quals, "enum"),
     field("socLevel", "Latest SOC", G.quals, "enum"),
-    { id: "tht", label: "THT weapons", group: G.quals, type: "enum", get: r => thtWeapons(r) },
-    { id: "quals", label: "Qualifications", group: G.quals, type: "enum",
+    { id: "tht", label: "THT weapons", group: G.quals, type: "enum", multi: true, get: r => thtWeapons(r) },
+    { id: "quals", label: "Qualifications", group: G.quals, type: "enum", multi: true,
       get: r => getQuals(r).map(q => q.name).sort((a, b) => a.localeCompare(b)),
       td: "text-align:left;white-space:normal;max-width:220px;font-size:11px" },
 
@@ -414,6 +423,12 @@ const NR = (() => {
   ];
 
   // ── Quick filter chips ────────────────────────────────────────────────────
+  // Each chip has two one-tap actions: its label shows only (+), its − hides
+  // (excludes); tapping the one in force again clears it. `s.chips` holds the
+  // shown-only ids and `s.xchips` the hidden ones. A chip and its `excludes`
+  // partner are complements, so setting either one clears the other.
+  // Mounted / Dismounted replaced the Roster's own mount picker, so every
+  // filter on this screen lives in one place; a mixed role counts as both.
   const CHIPS = [
     { id: "incamp", label: "In camp", test: (r, ctx) => !ctx.outMap.has(r.id), excludes: "out" },
     { id: "out", label: "Out of camp", test: (r, ctx) => ctx.outMap.has(r.id), excludes: "incamp" },
@@ -423,6 +438,8 @@ const NR = (() => {
     { id: "mcld", label: "On MC/LD", test: (r, ctx) => statusesOf(r, ctx).some(s => s.ghostDay === 0 && medSeverityRank(s.tag) >= 80) },
     { id: "leave", label: "On leave", test: (r, ctx) => ctx.leaveToday.has(r.id) },
     { id: "appt", label: "Appointment today", test: (r, ctx) => ctx.apptToday.has(r.id) },
+    { id: "mounted", label: "Mounted", test: r => ["mounted", "both"].includes(mountOf(r)) },
+    { id: "dismounted", label: "Dismounted", test: r => ["dismounted", "both"].includes(mountOf(r)) },
   ];
   const CHIP = Object.fromEntries(CHIPS.map(c => [c.id, c]));
 
@@ -430,7 +447,7 @@ const NR = (() => {
   // Own key, not inside STORAGE_KEY, so clearing the data cache keeps a man's
   // views. Every access is guarded: a private window or a full quota must cost
   // the preference, never the roster.
-  const blank = () => ({ v: 1, preset: "default", cols: null, chips: [], filters: {}, sort: null, custom: [] });
+  const blank = () => ({ v: 1, preset: "default", cols: null, chips: [], xchips: [], filters: {}, sort: null, custom: [] });
   function load() {
     let raw = null;
     try { raw = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { raw = null; }
@@ -442,18 +459,32 @@ const NR = (() => {
     const okCols = a => Array.isArray(a) ? [...new Set(a.filter(id => COL[id]))] : null;
     s.custom = Array.isArray(raw.custom) ? raw.custom
       .filter(p => p && typeof p.id === "string" && /^u[\w-]+$/.test(p.id))
-      .map(p => ({ id: p.id, label: String(p.label || "My view").slice(0, 40), cols: okCols(p.cols) || [] }))
+      .map(p => {
+        const v = { id: p.id, label: String(p.label || "My view").slice(0, 40), cols: okCols(p.cols) || [] };
+        // A saved view also keeps its filters; an older preset is columns only.
+        if (p.filters && typeof p.filters === "object") Object.assign(v, cleanView(p));
+        return v;
+      })
       .filter(p => p.cols.length) : [];
     s.preset = presetById(raw.preset, s.custom) ? raw.preset : "default";
     const cols = okCols(raw.cols);
     s.cols = cols && cols.length ? cols : null;
-    s.chips = Array.isArray(raw.chips) ? raw.chips.filter(id => CHIP[id]) : [];
-    s.filters = {};
-    if (raw.filters && typeof raw.filters === "object") {
-      Object.keys(raw.filters).forEach(id => { if (COL[id] && raw.filters[id] && typeof raw.filters[id] === "object") s.filters[id] = raw.filters[id]; });
-    }
-    s.sort = raw.sort && COL[raw.sort.id] ? { id: raw.sort.id, dir: raw.sort.dir === "desc" ? "desc" : "asc" } : null;
+    Object.assign(s, cleanView(raw));
     return s;
+  }
+  // The row-narrowing half of a view: chips, column filters and the sort.
+  function cleanView(raw) {
+    const chips = Array.isArray(raw.chips) ? [...new Set(raw.chips.filter(id => CHIP[id]))] : [];
+    const xchips = Array.isArray(raw.xchips) ? [...new Set(raw.xchips.filter(id => CHIP[id] && !chips.includes(id)))] : [];
+    const filters = {};
+    if (raw.filters && typeof raw.filters === "object") {
+      Object.keys(raw.filters).forEach(id => {
+        const f = COL[id] ? cleanFilter(raw.filters[id], COL[id]) : null;
+        if (f) filters[id] = f;
+      });
+    }
+    const sort = raw.sort && COL[raw.sort.id] ? { id: raw.sort.id, dir: raw.sort.dir === "desc" ? "desc" : "asc" } : null;
+    return { chips, xchips, filters, sort };
   }
   function save(s) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(s)); return true; } catch (e) { return false; }
@@ -471,17 +502,40 @@ const NR = (() => {
     const p = presetById(s.preset, s.custom) || PRESETS[0];
     return s.cols.join(",") !== p.cols.join(",");
   }
+  // A saved view (a custom preset with filters) brings its filters with it.
+  // Any other preset is a column layout: the filters in force stay, so
+  // switching from Default to IPPT keeps "PL 2, not on MC". A preset's own
+  // chips (Out of camp) come on with it and go off when you leave it.
   function applyPreset(s, id) {
     const p = presetById(id, s.custom);
     if (!p) return s;
-    return Object.assign({}, s, { preset: p.id, cols: null, chips: (p.chips || []).slice(), filters: {}, sort: null });
+    if (p.filters) return Object.assign({}, s, { preset: p.id, cols: null }, cleanView(p));
+    const prev = (presetById(s.preset, s.custom) || {}).chips || [];
+    const own = p.chips || [];
+    const chips = [...new Set((s.chips || []).filter(c => !prev.includes(c)).concat(own))];
+    const xchips = (s.xchips || []).filter(c => !own.includes(c));
+    const keepSort = s.sort && p.cols.includes(s.sort.id) ? s.sort : null;
+    return Object.assign({}, s, { preset: p.id, cols: null, chips, xchips, sort: keepSort });
   }
-  function toggleChip(s, id) {
-    if (!CHIP[id]) return s;
-    let chips = s.chips.includes(id) ? s.chips.filter(c => c !== id) : s.chips.concat(id);
-    const ex = CHIP[id].excludes;
-    if (ex && chips.includes(id)) chips = chips.filter(c => c !== ex);
-    return Object.assign({}, s, { chips });
+  // Save what is on screen - columns, chips, filters, sort - as a named view.
+  function saveView(s, label) {
+    const id = "u" + Date.now().toString(36);
+    const view = Object.assign({ id, label: String(label || "My view").trim().slice(0, 40) || "My view",
+      cols: visibleCols(s).map(c => c.id) }, cleanView(s));
+    return Object.assign({}, s, { custom: (s.custom || []).concat(view), preset: id, cols: null });
+  }
+  // "in" (show only), "out" (excluded) or "" (off).
+  const chipState = (s, id) => (s.chips || []).includes(id) ? "in" : (s.xchips || []).includes(id) ? "out" : "";
+  // want: "in" (the label) or "out" (the −). Tapping the state in force clears it.
+  function toggleChip(s, id, want) {
+    if (!CHIP[id] || !["in", "out"].includes(want)) return s;
+    const next = chipState(s, id) === want ? "" : want;
+    const drop = [id, CHIP[id].excludes].filter(Boolean);
+    const chips = (s.chips || []).filter(c => !(next && drop.includes(c)) && c !== id);
+    const xchips = (s.xchips || []).filter(c => !(next && drop.includes(c)) && c !== id);
+    if (next === "in") chips.push(id);
+    if (next === "out") xchips.push(id);
+    return Object.assign({}, s, { chips, xchips });
   }
   function setSort(s, id, dir) {
     const same = s.sort && s.sort.id === id && s.sort.dir === dir;
@@ -495,51 +549,175 @@ const NR = (() => {
   }
 
   // ── Row filtering + sorting ───────────────────────────────────────────────
-  // A header filter is the spreadsheet kind: the list of values left ticked.
-  // An empty list is a real filter (everything unticked shows nobody); "no
-  // filter" is the key being absent.
-  function filterActive(f) {
-    if (!f) return false;
-    if (Array.isArray(f.in)) return true;
-    return ["contains", "is", "min", "max", "op"].some(k => f[k] !== undefined && f[k] !== "" && f[k] !== null);
+  // A column filter is a set of conditions, and a row must meet all of them:
+  //   in        values to SHOW ONLY: the row has one of them, or every one of
+  //             them when `all` is set (only meaningful on a multi column)
+  //   out       values to EXCLUDE: the row has none of them
+  //   min, max  inclusive range on a number column
+  //   from, to  inclusive ISO range on a date column
+  // Exclusion is its own list rather than "every other value ticked". On a
+  // ticked list, a man on MC and LD stays visible with MC unticked because LD
+  // is still ticked, and a value that first appears tomorrow (a new status, a
+  // new qualification) is hidden because nobody ticked it. Different columns
+  // are AND. "No filter" is the key being absent. contains / is / op + v are
+  // older shapes, still honoured so a saved view keeps working.
+  const hasNum = x => x !== undefined && x !== null && x !== "" && typeof x !== "boolean" && !isNaN(+x);
+  const isISO = x => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
+  const LEGACY_OPS = ["today", "before", "after", "on"];
+
+  // The canonical shape of a filter, or null when it filters nothing. With a
+  // column, keys that mean nothing for its type are dropped.
+  function cleanFilter(f, c) {
+    if (!f || typeof f !== "object") return null;
+    const strs = a => Array.isArray(a) ? [...new Set(a.filter(v => v != null && typeof v !== "object").map(String))] : [];
+    const type = c && c.type;
+    const o = {};
+    // A date column's values are its display dates. Older saved views held
+    // the cell text ("1 Dec 2026 (AL)"); that reduces to its date.
+    const asDate = a => type === "date" ? [...new Set(a.map(v => v === "" ? "" : isoToDisplayDate(displayDateToISO(v)) || v))] : a;
+    const inc = asDate(strs(f.in));
+    const exc = asDate(strs(f.out)).filter(v => !inc.includes(v));
+    if (inc.length) o.in = inc;
+    if (exc.length) o.out = exc;
+    if (o.in && f.all === true && (!c || c.multi)) o.all = true;
+    if (!type || type === "number") {
+      if (hasNum(f.min)) o.min = +f.min;
+      if (hasNum(f.max)) o.max = +f.max;
+    }
+    if (!type || type === "date") {
+      if (isISO(f.from)) o.from = f.from;
+      if (isISO(f.to)) o.to = f.to;
+      if (f.op === "today") o.op = "today";
+      else if (LEGACY_OPS.includes(f.op) && isISO(f.v)) { o.op = f.op; o.v = f.v; }
+    }
+    if ((!type || type === "bool") && (f.is === "yes" || f.is === "no")) o.is = f.is;
+    if (typeof f.contains === "string" && f.contains.trim()) o.contains = f.contains.trim();
+    return Object.keys(o).length ? o : null;
   }
-  // The values a row offers to a header filter: each part of an enum (a man
-  // who is "2 LMG / Gunner" is under both), otherwise the cell text as shown.
-  const filterVals = (c, r, ctx) => c.type === "enum" ? enumVals(c, r, ctx) : [textOf(c, r, ctx)];
-  function passes(c, f, r, ctx) {
-    if (!filterActive(f)) return true;
-    if (Array.isArray(f.in)) {
+  const filterActive = (f, c) => !!cleanFilter(f, c);
+
+  // The values a row offers a filter: each part of a multi column (a man who
+  // is "2 LMG / Gunner" is under both), with "" when he has none, so a man
+  // with no status or no qualification can still be picked or excluded; a
+  // date column's display date; otherwise the cell text as shown.
+  function filterVals(c, r, ctx) {
+    if (c.type === "enum") { const v = enumVals(c, r, ctx); return v.length ? v : [""]; }
+    if (c.type === "date") { const v = getVal(c, r, ctx); return [v ? isoToDisplayDate(v) : ""]; }
+    return [textOf(c, r, ctx)];
+  }
+  // f must already be clean.
+  function meets(c, f, r, ctx) {
+    if (f.in || f.out) {
       const vals = filterVals(c, r, ctx);
-      return f.in.some(v => vals.includes(v));
+      if (f.in && !(f.all ? f.in.every(v => vals.includes(v)) : f.in.some(v => vals.includes(v)))) return false;
+      if (f.out && f.out.some(v => vals.includes(v))) return false;
     }
-    if (c.type === "bool") {
-      if (f.is === "yes") return !!getVal(c, r, ctx);
-      if (f.is === "no") return !getVal(c, r, ctx);
-      return true;
-    }
-    if (c.type === "number") {
+    if (hasNum(f.min) || hasNum(f.max)) {
       const v = getVal(c, r, ctx);
-      const has = x => x !== undefined && x !== null && x !== "" && !isNaN(+x);
-      if (!has(f.min) && !has(f.max)) return true;
-      if (v == null || isNaN(+v)) return false;
-      if (has(f.min) && +v < +f.min) return false;
-      if (has(f.max) && +v > +f.max) return false;
-      return true;
+      if (!hasNum(v)) return false;
+      if (hasNum(f.min) && +v < f.min) return false;
+      if (hasNum(f.max) && +v > f.max) return false;
     }
-    if (c.type === "date") {
+    if (f.from || f.to || f.op) {
       const v = getVal(c, r, ctx);
-      if (!f.op) return true;
-      if (f.op === "today") return v === ctx.today;
-      if (!f.v) return true;
       if (!v) return false;
-      if (f.op === "before") return v < f.v;
-      if (f.op === "after") return v > f.v;
-      if (f.op === "on") return v === f.v;
-      return true;
+      if (f.from && v < f.from) return false;
+      if (f.to && v > f.to) return false;
+      if (f.op === "today" && v !== ctx.today) return false;
+      if (f.op === "before" && !(v < f.v)) return false;
+      if (f.op === "after" && !(v > f.v)) return false;
+      if (f.op === "on" && v !== f.v) return false;
     }
-    const needle = String(f.contains || "").trim().toLowerCase();
-    return !needle || textOf(c, r, ctx).toLowerCase().includes(needle);
+    if (f.is && (f.is === "yes") !== !!getVal(c, r, ctx)) return false;
+    if (f.contains && !textOf(c, r, ctx).toLowerCase().includes(f.contains.toLowerCase())) return false;
+    return true;
   }
+  function passes(c, f, r, ctx) {
+    const clean = cleanFilter(f, c);
+    return !clean || meets(c, clean, r, ctx);
+  }
+
+  // ── Editing a filter (pure: each returns the next state) ──────────────────
+  // A value's state on a column: "in" (shown only), "out" (excluded) or "".
+  const valueState = (f, v) => f && (f.in || []).includes(v) ? "in" : f && (f.out || []).includes(v) ? "out" : "";
+  function withFilter(s, id, f) {
+    const filters = Object.assign({}, s.filters);
+    const clean = COL[id] ? cleanFilter(f, COL[id]) : null;
+    if (clean) filters[id] = clean; else delete filters[id];
+    return Object.assign({}, s, { filters });
+  }
+  // Put values in one state: "in", "out" or "" (cleared).
+  function setValues(s, id, vals, state) {
+    if (!COL[id]) return s;
+    const f = Object.assign({}, s.filters[id] || {});
+    const set = new Set(vals.map(String));
+    f.in = (f.in || []).filter(x => !set.has(x)).concat(state === "in" ? [...set] : []);
+    f.out = (f.out || []).filter(x => !set.has(x)).concat(state === "out" ? [...set] : []);
+    return withFilter(s, id, f);
+  }
+  // One tap, as on the chips: want "in" (the value itself: show only) or
+  // "out" (its −: hide). Tapping the state a value already has clears it.
+  // With several values ("All matching"), they all take `want` unless every
+  // one already has it, in which case they all clear.
+  function toggleValues(s, id, vals, want) {
+    if (!["in", "out"].includes(want)) return s;
+    const f = s.filters[id];
+    const all = vals.length > 0 && vals.every(v => valueState(f, String(v)) === want);
+    return setValues(s, id, vals, all ? "" : want);
+  }
+  const toggleValue = (s, id, v, want) => toggleValues(s, id, [v], want);
+  function setMatchAll(s, id, all) {
+    const f = Object.assign({}, s.filters[id] || {});
+    if (all) f.all = true; else delete f.all;
+    return withFilter(s, id, f);
+  }
+  // key: min / max (number columns) or from / to (date columns); "" clears it.
+  function setRange(s, id, key, val) {
+    if (!["min", "max", "from", "to"].includes(key)) return s;
+    const f = Object.assign({}, s.filters[id] || {});
+    if (val === "" || val == null) delete f[key]; else f[key] = val;
+    return withFilter(s, id, f);
+  }
+  const clearFilter = (s, id) => withFilter(s, id, null);
+
+  // ── A filter in words, for its pill above the table ───────────────────────
+  // "MC or LD, not RSO" / "61 to 85" / "from 1 Dec". A long list names the
+  // first two and counts the rest; the pill's title carries every value.
+  function valueLabel(c, v) {
+    if (v === "" && c && c.blankLabel) return c.blankLabel;
+    if (c && c.vlabel) {
+      try { const l = c.vlabel(v); if (l != null && l !== "") return String(l); } catch (e) { /* fall through */ }
+    }
+    return v === "" ? "(blank)" : String(v);
+  }
+  function listWords(c, vals, word, full) {
+    const l = vals.map(v => valueLabel(c, v));
+    if (l.length <= 1) return l.join("");
+    if (!full && l.length > 3) return `${l[0]}, ${l[1]} ${word} ${l.length - 2} more`;
+    return `${l.slice(0, -1).join(", ")} ${word} ${l[l.length - 1]}`;
+  }
+  function describeFilter(c, f, full) {
+    f = cleanFilter(f, c);
+    if (!c || !f) return "";
+    const parts = [];
+    if (f.in) parts.push(listWords(c, f.in, f.all ? "and" : "or", full));
+    if (f.out) parts.push("not " + listWords(c, f.out, "or", full));
+    if (hasNum(f.min) || hasNum(f.max)) {
+      const n = x => c.range ? c.range.fmt(x) : `${x}`;
+      parts.push(hasNum(f.min) && hasNum(f.max) ? (f.min === f.max ? n(f.min) : `${n(f.min)} to ${n(f.max)}`)
+        : hasNum(f.min) ? `${n(f.min)} or more` : `${n(f.max)} or less`);
+    }
+    if (f.from || f.to) {
+      const d = iso => isoToShortDate(iso);
+      parts.push(f.from && f.to ? (f.from === f.to ? `on ${d(f.from)}` : `${d(f.from)} to ${d(f.to)}`)
+        : f.from ? `from ${d(f.from)}` : `until ${d(f.to)}`);
+    }
+    if (f.op) parts.push(f.op === "today" ? "today" : `${f.op} ${isoToShortDate(f.v)}`);
+    if (f.is) parts.push(f.is === "yes" ? "Yes" : "No");
+    if (f.contains) parts.push(`contains "${f.contains}"`);
+    return parts.join(", ");
+  }
+
   function matchesSearch(r, cols, ctx, q) {
     const needle = String(q || "").trim().toLowerCase();
     if (!needle) return true;
@@ -548,11 +726,18 @@ const NR = (() => {
     return cols.some(c => textOf(c, r, ctx).toLowerCase().includes(needle));
   }
   // rows arrive in sortByRank order (the Default); a header tap re-sorts.
+  // A filter on a column that is not shown still applies (its pill says so).
   function apply(rows, s, ctx, q) {
     const cols = visibleCols(s);
+    const fs = Object.keys(s.filters || {})
+      .map(id => [COL[id], COL[id] ? cleanFilter(s.filters[id], COL[id]) : null])
+      .filter(([c, f]) => c && f);
+    const inChips = (s.chips || []).filter(id => CHIP[id]);
+    const outChips = (s.xchips || []).filter(id => CHIP[id]);
     let out = rows.filter(r =>
-      s.chips.every(id => CHIP[id].test(r, ctx)) &&
-      Object.keys(s.filters).every(id => passes(COL[id], s.filters[id], r, ctx)) &&
+      inChips.every(id => CHIP[id].test(r, ctx)) &&
+      outChips.every(id => !CHIP[id].test(r, ctx)) &&
+      fs.every(([c, f]) => meets(c, f, r, ctx)) &&
       matchesSearch(r, cols, ctx, q));
     if (s.sort && COL[s.sort.id]) {
       const c = COL[s.sort.id];
@@ -572,7 +757,11 @@ const NR = (() => {
     }
     return out;
   }
-  const activeFilterCount = s => Object.keys(s.filters).filter(id => filterActive(s.filters[id])).length;
+  // Column filters that narrow anything, in column-catalogue order.
+  const activeFilterIds = s => COLUMNS.map(c => c.id).filter(id => s.filters && filterActive(s.filters[id], COL[id]));
+  const activeFilterCount = s => activeFilterIds(s).length;
+  // Anything at all narrowing the rows besides the page search.
+  const narrowed = s => (s.chips || []).length + (s.xchips || []).length + activeFilterCount(s) > 0;
 
   // ── Export / copy ─────────────────────────────────────────────────────────
   // One object per row keyed by column label, in column order: what exportCSV
@@ -593,7 +782,10 @@ const NR = (() => {
     LS_KEY, COLUMNS, COL, GROUPS, PRESETS, CHIPS, CHIP, SENSITIVE,
     makeCtx, getVal, textOf, cellOf, tdStyleOf, sortVal, enumVals,
     blank, load, save, sanitize, presetById, visibleCols, isModified,
-    applyPreset, toggleChip, cycleSort, setSort, filterActive, filterVals, passes, apply, activeFilterCount,
+    applyPreset, saveView, chipState, toggleChip, cycleSort, setSort,
+    cleanFilter, filterActive, filterVals, passes, apply, activeFilterIds, activeFilterCount, narrowed,
+    valueState, setValues, toggleValue, toggleValues, setMatchAll, setRange, clearFilter,
+    valueLabel, describeFilter,
     csvRows, copyText,
   };
 })();

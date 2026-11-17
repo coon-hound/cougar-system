@@ -339,18 +339,59 @@ tbody tr:last-child td{border-bottom:none}
 .dropdown-menu button:focus-visible{box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
 /* Master NR column menu: a .dropdown-menu pinned under a table heading */
 .nr-colmenu{position:fixed;top:0;right:auto;margin-top:0;z-index:150;overflow-y:auto;transform-origin:top left}
-.nr-colmenu-title{padding:6px 12px 4px;font-size:12px;font-weight:700;color:var(--text)}
+.nr-colmenu-title{padding:6px 12px 4px;font-size:12.5px;font-weight:700;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nr-colmenu-sub{padding:2px 12px;font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
 .nr-colmenu-sep{height:1px;background:var(--border);margin:4px 2px}
 .nr-colmenu-q{margin:4px 6px;padding:8px 10px;border-radius:var(--r1);border:1px solid var(--border);background:var(--field);color:var(--text);font:inherit;font-size:12px;min-width:0}
+.nr-colmenu-q:focus{outline:none;border-color:rgba(var(--accentRGB),.7);box-shadow:0 0 0 3px rgba(var(--accentRGB),.16)}
 .nr-colmenu-list{display:flex;flex-direction:column;max-height:240px;overflow-y:auto;padding:0 2px}
-.nr-colmenu-row{display:flex;align-items:center;gap:8px;min-height:36px;padding:4px 10px;border-radius:var(--r1);font-size:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.nr-colmenu-row input{width:16px;height:16px;flex-shrink:0;cursor:pointer}
+/* A scroll box in a flex column may shrink to nothing, which stacked the rows
+   under the search box. Nothing in the menu shrinks; a menu taller than the
+   screen scrolls as a whole. */
+.nr-colmenu>*{flex-shrink:0}
+/* A value row: the value (show only) and its − (hide), two tap targets. */
+.nr-colmenu .nr-colmenu-row{display:flex;align-items:stretch;border-radius:var(--r1);font-size:12px;-webkit-tap-highlight-color:transparent}
+.nr-colmenu .nr-colmenu-pick{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:8px;min-height:40px;padding:4px 6px 4px 10px;color:inherit;background:transparent}
+.nr-colmenu .nr-colmenu-hide{flex:0 0 44px;min-height:40px;padding:0;text-align:center;font-size:16px;font-weight:700;color:var(--muted);background:transparent}
+.nr-colmenu .nr-colmenu-row[data-state="out"] .nr-colmenu-hide{color:var(--red);font-size:13px}
 .nr-colmenu-v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nr-colmenu-n{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
-.nr-colmenu-all{font-weight:600}
-.nr-colmenu-foot{display:flex;justify-content:space-between;gap:6px}
+.nr-colmenu .nr-colmenu-all{font-weight:600}
+.nr-colmenu-foot{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.nr-colmenu-sorts{display:flex;gap:2px}
+.nr-colmenu .nr-colmenu-sort{min-width:40px;padding:9px 0;text-align:center;font-size:14px;color:var(--muted)}
+.nr-colmenu .nr-colmenu-sort.on{color:var(--accentLift);background:rgba(var(--accentRGB),.14)}
 .nr-colmenu-foot .nr-colmenu-done{color:var(--accentLift);font-weight:700}
+/* Tristate value rows, coloured like the combined-group builder's chips:
+   + shown only (green), − excluded (red), blank box = no filter. */
+.nr-tri{width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;border-radius:5px;border:1.5px solid var(--borderHi);color:var(--bg);font-size:14px;font-weight:800;line-height:1}
+.nr-colmenu .nr-colmenu-row[data-state="in"]{background:rgba(var(--greenRGB),.12);color:var(--green)}
+.nr-colmenu .nr-colmenu-row[data-state="out"]{background:rgba(var(--redRGB),.12);color:var(--red)}
+.nr-colmenu-row[data-state="in"] .nr-tri{background:var(--green);border-color:var(--green)}
+.nr-colmenu-row[data-state="out"] .nr-tri{background:var(--red);border-color:var(--red)}
+.nr-colmenu-row[data-state="in"] .nr-tri::before{content:"+"}
+.nr-colmenu-row[data-state="out"] .nr-tri::before{content:"−"}
+.nr-colmenu-subrow{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.nr-colmenu .nr-colmenu-clear{min-height:30px;padding:4px 10px;font-size:11px;font-weight:700;color:var(--accentLift)}
+.nr-colmenu-hint{padding:2px 12px 4px;font-size:11px;line-height:1.45;color:var(--muted)}
+.nr-colmenu-range{display:flex;align-items:center;gap:6px;padding:0 6px}
+.nr-colmenu-range .nr-colmenu-q{flex:1 1 0;width:0;margin:4px 0}
+.nr-colmenu-range span{font-size:11px;color:var(--muted)}
+.nr-colmenu-range-lbl{justify-content:space-between;padding:2px 8px 0}
+.nr-colmenu-range-lbl span{flex:1 1 0;font-size:10.5px;font-weight:600}
+.nr-colmenu-range-lbl span+span{padding-left:22px}
+.nr-colmenu-match{display:flex;align-items:center;gap:6px;padding:6px 10px 2px;font-size:11px;color:var(--muted)}
+.nr-colmenu-match .filter-role-group{width:auto;flex:0 0 auto}
+.nr-colmenu-match .filter-role-group .role-btn{flex:0 0 auto;min-height:30px;padding:5px 12px;font-size:11.5px}
+/* Filter pills above the table: one per column filter in force, the active
+   chip's colours. The label opens that filter's menu; ✕ drops it. */
+.nr-pills{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.nr-pill{display:inline-flex;align-items:stretch;max-width:100%;min-height:36px;border-radius:var(--rp);border:1px solid rgba(var(--accentRGB),.45);background:rgba(var(--accentRGB),.12);color:var(--accentLift);overflow:hidden}
+.nr-pill button{font:inherit;font-size:11px;font-weight:600;line-height:1.2;color:inherit;background:transparent;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.nr-pill button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+.nr-pill-main{min-width:0;padding:8px 4px 8px 13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.nr-pill-k{color:var(--text)}
+.nr-pill-x{flex-shrink:0;min-width:34px;padding:0 12px 0 8px;font-size:12px}
 .nr-th-ico{color:var(--dim);font-size:10px}
 .nr-th-ico.on{color:var(--accentLift)}
 .nr-th-funnel{width:9px;height:9px;margin-right:2px;vertical-align:-1px}
@@ -396,6 +437,23 @@ tbody tr:last-child td{border-bottom:none}
 .lc-wiz-filter-chip:active{transform:scale(.96)}
 .lc-wiz-filter-chip:focus-visible{outline:none;box-shadow:var(--ring)}
 .lc-wiz-filter-chip.active{background:rgba(var(--accentRGB),.16);border-color:rgba(var(--accentRGB),.45);color:var(--accentLift)}
+/* Master NR quick chips: the filter chip's look, split in two - the label
+   shows only (green +), the − hides (red). One row; on a phone it scrolls
+   sideways instead of stacking three rows above the table. */
+.nr-chiprow{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.nr-qchip{display:inline-flex;align-items:stretch;flex-shrink:0;min-height:36px;border-radius:var(--rp);border:1px solid var(--border);background:var(--surface2);color:var(--muted);overflow:hidden;transition:background-color var(--d2) var(--ez),border-color var(--d2) var(--ez),color var(--d2) var(--ez)}
+.nr-qchip button{font:inherit;font-size:11px;font-weight:600;line-height:1.2;color:inherit;background:transparent;border:0;cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.nr-qchip button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px rgba(var(--accentRGB),.8)}
+.nr-qchip button:active{transform:scale(.96)}
+.nr-qchip-main{padding:8px 6px 8px 13px}
+.nr-qchip-hide{min-width:32px;padding:0 11px 0 7px;font-size:13px;border-left:1px solid var(--border) !important}
+.nr-qchip.inc{background:rgba(var(--greenRGB),.15);border-color:rgba(var(--greenRGB),.45);color:var(--green)}
+.nr-qchip.exc{background:rgba(var(--redRGB),.15);border-color:rgba(var(--redRGB),.45);color:var(--red)}
+.nr-qchip.inc .nr-qchip-hide,.nr-qchip.exc .nr-qchip-hide{border-left-color:currentColor !important}
+@media(max-width:768px){
+  .nr-chiprow{flex-wrap:nowrap;overflow-x:auto;margin:0 -13px 10px;padding:0 13px 2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .nr-chiprow::-webkit-scrollbar{display:none}
+}
 
 /* ── Compare Parade States ─────────────────────────────────
    Deliberately single-column at every viewport: the diff is a reading flow
@@ -460,7 +518,11 @@ tbody tr:last-child td{border-bottom:none}
   .role-btn:hover{color:var(--text)}
   .filter-role-group .role-btn:hover:not(.active){background:var(--surface2)}
   .dropdown-menu button:hover{background:var(--surface3);color:var(--accentLift)}
-  .nr-colmenu-row:hover{background:var(--surface3)}
+  .nr-colmenu .nr-colmenu-row:not([data-state="in"]):not([data-state="out"]):hover{background:var(--surface3)}
+  .nr-colmenu .nr-colmenu-hide:hover{color:var(--red);background:rgba(var(--redRGB),.1)}
+  .nr-qchip button:hover{color:var(--text)}
+  .nr-qchip.inc button:hover,.nr-qchip.exc button:hover{color:inherit;background:rgba(255,255,255,.05)}
+  .nr-pill button:hover{background:rgba(var(--accentRGB),.14)}
   .modal-close:hover{color:var(--text);background:var(--surface2)}
   .lc-wiz-status-row:hover{border-color:var(--borderHi)}
   .lc-wiz-filter-chip:hover:not(.active){background:var(--surface3);border-color:var(--borderHi);color:var(--text)}
